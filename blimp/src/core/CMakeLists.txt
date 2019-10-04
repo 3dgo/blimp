@@ -1,0 +1,11 @@
+target_sources(blimpLib
+    PRIVATE
+        core.h
+        entry_point.h
+        application.cpp
+        application.h
+        singleton.h
+        vector2d.h
+        vector3d.h
+        matrix3d.h
+)

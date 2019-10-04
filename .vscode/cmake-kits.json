@@ -1,0 +1,6 @@
+[
+  {
+    "name": "vckpg Toolchain",
+    "toolchainFile": "/home/lucien/GameDev/Library/vcpkg/scripts/buildsystems/vcpkg.cmake"
+  }
+]
