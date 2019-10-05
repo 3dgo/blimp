@@ -1,4 +1,4 @@
-target_sources(blimpLib
+target_sources(blimplib
     PRIVATE
         core.h
         entry_point.h

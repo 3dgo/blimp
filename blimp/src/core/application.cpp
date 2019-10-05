@@ -1,6 +1,6 @@
 #include "core.h"
 #include "application.h"
-#include "../systems/log.h"
+#include "systems/log.h"
 
 namespace blimp
 {
