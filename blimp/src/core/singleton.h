@@ -3,14 +3,13 @@
 template <typename T>
 class Singleton
 {
-
 public:
-    virtual ~Singleton() = default;
     Singleton(const Singleton &) = delete;
     Singleton &operator=(const Singleton &) = delete;
 
 protected:
     Singleton() = default;
+    virtual ~Singleton() = default;
 
 public:
     inline static T *instance()

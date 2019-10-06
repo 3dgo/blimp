@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/singleton.h"
+#include "core/singleton.h"
 
 namespace blimp
 {
