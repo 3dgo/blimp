@@ -7,4 +7,4 @@
 
 #include "core/entry_point.h"
 
-#include "systems/log.h"
+#include "system/log.h"

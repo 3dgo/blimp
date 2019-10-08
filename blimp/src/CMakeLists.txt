@@ -4,4 +4,4 @@ target_sources(blimplib
 )
 
 add_subdirectory(core)
-add_subdirectory(systems)
+add_subdirectory(system)
