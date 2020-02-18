@@ -31,7 +31,7 @@ inline Vector3D operator*(float left, const Vector3D &right);
 inline Vector3D operator/(const Vector3D &left, float right);
 inline float dot(const Vector3D &left, const Vector3D &right);
 
-Vector3D::Vector3D(float x, float y, float z)
+inline Vector3D::Vector3D(float x, float y, float z)
 	: x(x), y(y), z(z) {}
 
 inline float Vector3D::length() const

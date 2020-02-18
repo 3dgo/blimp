@@ -1,7 +1,7 @@
 # CMakeList.txt : CMake project for OGL_SDL, include source and define
 # project specific logic here.
 #
-add_library(blimplib STATIC "")
+add_library(blimplib STATIC "" src/system/engine.cpp src/system/engine.h src/gameplay/gameobject/gameobject.cpp src/gameplay/gameobject/gameobject.h src/gameplay/components/component.cpp src/gameplay/components/component.h src/system/gameobject_manager.cpp src/system/gameobject_manager.h src/core/slotmap/slotmap.h)
 
 target_include_directories(blimplib PUBLIC src)
 
@@ -20,6 +20,7 @@ target_link_libraries(blimplib PRIVATE SDL2::SDL2_image)
 target_link_libraries(blimplib PRIVATE GLEW::GLEW)
 target_link_libraries(blimplib PUBLIC spdlog::spdlog)
 target_link_libraries(blimplib PRIVATE glm)
+target_link_libraries(blimplib PRIVATE uuid)
 # TODO: Add tests and install targets if needed.
 
 add_subdirectory(src)

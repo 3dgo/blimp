@@ -1,11 +1,19 @@
 target_sources(blimplib
-    PRIVATE
+        PRIVATE
         core.h
         entry_point.h
         application.cpp
         application.h
         singleton.h
-        vector2d.h
-        vector3d.h
-        matrix3d.h
-)
+        standard_types.h
+        math/vector2d.h
+        math/vector3d.h
+        math/matrix3d.h
+        math/randomc.h
+        math/randomc.cpp
+        object/rtti.h
+        object/rtti.cpp
+        object/object.h
+        object/object.cpp
+        slotmap/slotmap.h
+        )
