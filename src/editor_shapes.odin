@@ -50,6 +50,10 @@ editor_entity_shapes :: proc(e: ^Entity, selected_color: Maybe(vec4)) {
         // The direction it shines, with a small ring around its tail.
         debug_arrow(p, p + forward * 1.5, col, 0.3)
         debug_circle(p, right, up, 0.25, col)
+        if selected_color != nil && e.shadow {   // and (selected) the box its shadow map covers (light_shadow_cameras)
+            h := e.size * 0.5
+            debug_frustum(p, e.rotation, -h.z, h.z, h.xy, h.xy, editor_dim(col))
+        }
     case .Point:
         debug_sphere(p, e.range.y, col, e.rotation)   // its reach (falloff radius)
         if has_start do debug_sphere(p, start, editor_dim(col), e.rotation)

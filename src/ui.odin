@@ -14,9 +14,11 @@ UI :: struct {
     show_stats: bool,   // F3: the stats overlay (ui_draw_stats)
     show_schema_editor: bool,
     show_worlds: bool,
-    show_asset_buffers: bool,
+    show_resources: bool,
 
     build_default_layout: bool,   // true on first launch (no imgui.ini yet)
+    main_dockspace: im.ID,        // the dockspace over the main window (DockSpaceOverViewport)
+    first_view_placed: bool,      // this session's first world/view window docked into the main window
     schema_status: Edit_Buf,      // last schema editor save/validate/build message
 
     scene_paths: [dynamic]string,     // scene files listed in the Worlds window (rescanned on Refresh)
@@ -48,6 +50,9 @@ ui_init :: proc() {
     ui_saved_state_init()   // before the first NewFrame reads imgui.ini
     ui.io.ConfigFlags = {.NavEnableKeyboard, .NavEnableGamepad, .DockingEnable, .ViewportsEnable}
     ui.io.ConfigWindowsMoveFromTitleBarOnly = true   // body drags belong to the content (orbit, pan, gizmo)
+    // A window dragged outside the main window becomes its own OS window: parent it to the main window
+    // so clicking the main window can't bury it, while other apps can still cover it.
+    ui.io.ConfigViewportsNoDefaultParent = false
     ui.snap = GIZMO_SNAP_DEFAULT
 
     // First launch (no saved layout on disk) → build the default dock layout in code.
@@ -129,6 +134,7 @@ ui_update :: proc() {
     }
 
     dockspace_id := im.DockSpaceOverViewport(0, im.GetMainViewport())
+    ui.main_dockspace = dockspace_id
     if ui.build_default_layout {
         ui.build_default_layout = false
         ui_build_default_layout(dockspace_id)
@@ -146,7 +152,7 @@ ui_update :: proc() {
             im.MenuItemBoolPtr(tr(.Menu_Schema_Editor), nil, &ui.show_schema_editor)
             im.MenuItemBoolPtr(tr(.Menu_Game_Settings), nil, &ui.show_game_settings)
             menu_section(tr(.Menu_Section_Profile))
-            im.MenuItemBoolPtr(tr(.Menu_Asset_Buffers), nil, &ui.show_asset_buffers)
+            im.MenuItemBoolPtr(tr(.Menu_Resources), nil, &ui.show_resources)
             menu_end()
         }
         if menu_begin(tr(.Menu_Language)) {
@@ -168,6 +174,7 @@ ui_update :: proc() {
 
     ui_draw_entity_panels()
     ui_draw_world_settings()
+    ui_draw_bake()
     ui_draw_game_settings()
     ui_draw_templates()
     ui_draw_unsaved_prompt()   // the modal, if a close or quit is waiting on Save / Don't Save / Cancel
@@ -176,8 +183,8 @@ ui_update :: proc() {
         ui_draw_schema_editor()
     }
 
-    if ui.show_asset_buffers {
-        ui_draw_asset_buffers()
+    if ui.show_resources {
+        ui_draw_resources()
     }
 
     if ui.show_stats {

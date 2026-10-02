@@ -35,6 +35,7 @@ Asset_System :: struct {
     vertex_attributes: [dynamic]Vertex_Attributes,
 
     mesh_bvhs: []Mesh_BVH,
+    material_albedo: []vec3,   // per material: linear colour × its texture's average, clamped below 1 (the baker's bounce colour)
 
     arena: vmem.Arena,
 }
@@ -134,6 +135,7 @@ asset_system_init :: proc() {
         len(asset_system.meshes), len(asset_system.images), len(asset_system.image_ids))
 
     asset_build_bvhs()
+    asset_build_albedos()
 }
 
 asset_system_update :: proc() {
@@ -142,6 +144,30 @@ asset_system_update :: proc() {
 asset_system_shutdown :: proc() {
     vmem.arena_destroy(&asset_system.arena)
     asset_system = {}
+}
+
+// The light baker's surface colour per material (docs/rendering.md → Lighting): its colour times the average
+// of its colour texture, averaged in linear, clamped to MAX_BAKE_ALBEDO so bounces converge.
+MAX_BAKE_ALBEDO :: 0.9
+
+asset_build_albedos :: proc() {
+    lut: [256]f32   // sRGB byte → linear
+    for i in 0..<256 do lut[i] = srgb_to_linear(f32(i) / 255)
+
+    arena := vmem.arena_allocator(&asset_system.arena)
+    asset_system.material_albedo = make([]vec3, len(asset_system.materials), arena)
+    for mat, i in asset_system.materials {
+        img := asset_system.images[mat.color_tex]
+        sum: [3]f64
+        n := len(img.pixels) / 4
+        for p in 0..<n {
+            px := img.pixels[4*p:][:3]
+            for c in 0..<3 do sum[c] += f64(img.format == .RGBA8_SRGB ? lut[px[c]] : f32(px[c]) / 255)
+        }
+        avg := n > 0 ? vec3{f32(sum[0]), f32(sum[1]), f32(sum[2])} / f32(n) : vec3{1, 1, 1}
+        a := avg * mat.color.rgb
+        asset_system.material_albedo[i] = {min(a.x, MAX_BAKE_ALBEDO), min(a.y, MAX_BAKE_ALBEDO), min(a.z, MAX_BAKE_ALBEDO)}
+    }
 }
 
 asset_build_bvhs :: proc() {

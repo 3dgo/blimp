@@ -11,7 +11,8 @@ complicates teardown.
 | Arena | Holds | Reset |
 |---|---|---|
 | permanent | loaded meshes, textures, mesh/material tables | never |
-| level | entities, mesh instances, material overrides, probes, collision | level unload |
+| level | entities, mesh instances, material overrides, collision | level unload |
+| probe grid | a world's baked probes (`Probe_Grid.arena`) | rebake, level unload |
 | frame | poses, visible lists, command staging | frame start (double-buffered if GPU reads) |
 | scratch | short-scope working memory | scope exit (`context.temp_allocator`) |
 

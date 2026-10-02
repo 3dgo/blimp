@@ -33,6 +33,7 @@ Texture2D_Options :: struct {
     heap_type: d3d12.HEAP_TYPE,
     flags: d3d12.RESOURCE_FLAGS,
     clear_value: ^d3d12.CLEAR_VALUE,
+    array_size: u32,   // slices; 0 or 1 = a plain 2D texture, more = a 2D array (SRV and DSVs become array views)
 }
 
 Resource_View :: struct {
@@ -93,7 +94,7 @@ texture2d_create :: proc(render_context: Render_Context, options: Texture2D_Opti
             Dimension = .TEXTURE2D,
             Width = u64(options.width),
             Height = options.height,
-            DepthOrArraySize = 1,
+            DepthOrArraySize = u16(max(options.array_size, 1)),
             MipLevels = u16(options.mip_levels),
             Format = options.format,
             SampleDesc = { Count = 1 },

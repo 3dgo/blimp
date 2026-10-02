@@ -55,6 +55,16 @@ ui_view_toolbar :: proc(view: ^Render_View) {
     if toggle_button(fmt.ctprintf("%s##gameview", ICON_GAME_VIEW), game_view) do ui_game_view_toggle(view)
     im.SetItemTooltip("%s  (G)", tr(.Tool_Game_View))
     im.SameLine()
+    // Render mode: the target rebuilds at its new scene scale next frame (render_view_needs_rebuild).
+    if toggle_button(fmt.ctprintf("%s##ps1", ICON_PS1), view.mode == .PS1) do view.mode = view.mode == .PS1 ? .Clean : .PS1
+    im.SetItemTooltip("%s", tr(.Tool_PS1_Look))
+    im.SameLine()
+    ui_view_lighting_menu(view)
+    im.SameLine()
+    // The probe bake of the level (ui_bake.odin), its own window like World Settings.
+    if toggle_button(fmt.ctprintf("%s##bake", ICON_BAKE), ui_bake_open_for(level)) do ui_bake_toggle(level)
+    im.SetItemTooltip("%s", tr(.Win_Bake))
+    im.SameLine()
     maximized := ui.maximized == view
     if toggle_button(fmt.ctprintf("%s##maximize", maximized ? ICON_FULLSCREEN_EXIT : ICON_FULLSCREEN), maximized) do ui_maximize_toggle(view)
     im.SetItemTooltip("%s  (F11)", tr(.Tool_Maximize))
@@ -154,4 +164,60 @@ toggle_button :: proc(label: cstring, on: bool, size: [2]f32 = {}) -> (clicked: 
     clicked = im.Button(label, size)
     if on do im.PopStyleColor(2)
     return
+}
+
+@(rodata, private="file")
+LIGHT_GROUP_LABEL := [MAX_LIGHT_GROUPS]Loc_ID{.Light_Group_1, .Light_Group_2, .Light_Group_3, .Light_Group_4}
+
+@(rodata, private="file")
+LIGHTING_VIEW_LABEL := [Lighting_View]Loc_ID{
+    .Lit           = .Lighting_Lit,
+    .Probes_Only   = .Lighting_Probes_Only,
+    .Indirect_Only = .Lighting_Indirect_Only,
+    .Direct_Only   = .Lighting_Direct_Only,
+    .Lighting_Only = .Lighting_Lighting_Only,
+}
+
+// Lighting debug for this view: which terms show (Lighting_View), baked probes or the flat ambient, a
+// multiplier on indirect light, and the probe overlay. Per view, not saved, not undoable, like the PS1
+// toggle. The button is lit while anything differs from the plain view.
+@(private="file")
+ui_view_lighting_menu :: proc(view: ^Render_View) {
+    ev := editor_view(view)
+    w := view.world
+    overridden := false
+    for o in w.light_group_override do if _, ok := o.?; ok do overridden = true
+    debugging := view.lighting != .Lit || view.probes_off || view.indirect_scale != 1 || ev.show_probes || overridden
+    if toggle_button(fmt.ctprintf("%s##lighting", ICON_LIGHTING), debugging) do im.OpenPopup("lighting")
+    im.SetItemTooltip("%s", tr(.Tool_Lighting))
+    if !im.BeginPopup("lighting") do return
+    defer im.EndPopup()
+
+    for mode in Lighting_View {
+        if im.RadioButton(tr(LIGHTING_VIEW_LABEL[mode]), view.lighting == mode) do view.lighting = mode
+    }
+    im.Separator()
+    use_probes := !view.probes_off
+    if im.Checkbox(tr(.Lighting_Use_Probes), &use_probes) do view.probes_off = !use_probes
+    im.SetNextItemWidth(160 * app.dispaly_scale)
+    im.SliderFloat(tr(.Lighting_Indirect_Scale), &view.indirect_scale, 0, 4, "%.2f")
+    if view.indirect_scale != 1 {
+        im.SameLine()
+        if im.SmallButton(tr(.Lighting_Reset)) do view.indirect_scale = 1
+    }
+    im.Separator()
+    im.Checkbox(tr(.Tool_Show_Probes), &ev.show_probes)
+
+    // Light groups: this world's runtime scales (World.light_group_override), as Lua's set_light_group sets
+    // them. Shared by every view of the world, never saved; the saved starting values are in World Settings.
+    im.Separator()
+    im.TextDisabled("%s", tr(.Lighting_Groups))
+    for g in 1..=MAX_LIGHT_GROUPS {
+        name := sbuf_str(&light_group_settings(w, g).name)
+        label := name != "" ? fmt.ctprintf("%s##group%d", name, g) : fmt.ctprintf("%s##group%d", tr(LIGHT_GROUP_LABEL[g - 1]), g)
+        v := light_group_base_scale(w, g)
+        im.SetNextItemWidth(160 * app.dispaly_scale)
+        if im.SliderFloat(label, &v, 0, 2, "%.2f") do w.light_group_override[g] = v
+    }
+    if overridden && im.SmallButton(tr(.Lighting_Groups_Reset)) do w.light_group_override = {}
 }

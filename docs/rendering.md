@@ -15,8 +15,21 @@ PBR version later is additive.
 - **Reversed-Z**: float depth, swapped near/far, `GREATER` compare, clear to 0.
 - **Render to a float HDR target**, quantize only at the end of the post chain. Each view has
   an `R16G16B16A16_FLOAT` scene target (`hdr_tex`) and an `RGBA8_UNORM` display target
-  (`tex`) that ImGui samples and screenshots read. `render_post.odin` resolves one into the
-  other; debug lines draw after it, onto the display target, so their colours stay exact.
+  (`tex`) that ImGui samples and screenshots read. `render_post.odin` (`post.slang`, one
+  fullscreen pass) resolves one into the other; debug lines draw after it, onto the display
+  target, so their colours stay exact.
+- **The scene target and depth are the display size ÷ `scene_scale`, rounded up**
+  (`dx.Viewport_Options.scene_scale`). The scene VS squeezes NDC by `sceneCover` so the image
+  lines up with the display pixel for pixel while the projection stays the display's (CPU
+  picking is unaffected). Depth is `R32_TYPELESS` with a DSV and an `R32_FLOAT` SRV: passes at
+  the display size can't bind it as a DSV, so debug lines depth-test against it in the shader.
+- **Render mode** is per view (`Render_View.mode`, viewport toolbar). `.PS1` (default, and
+  always in release): scale = the whole number bringing the height closest to 216, vertices
+  snapped to whole scene pixels (`vertexSnap`), affine UVs (`affine` = `PS1_AFFINE`), point
+  sampler, dither on. `.Clean`: scale 1, none of the rest. Same shaders and passes; only frame
+  constants and the scale differ, so the two can't drift. Affine UVs are a second
+  `noperspective` varying blended by `affine`, since interpolation can't switch at runtime.
+  Debug lines don't snap, so an outline can sit up to a scene pixel off its jittering mesh.
 - **Shading is linear.** Colour textures are `_SRGB` views (decoded on sample); glTF material
   and vertex colours and light `color` are linear (the picker shows light colour as sRGB,
   `widget:linear_color`). The world `background` is display-space (sRGB): the scene target
@@ -176,21 +189,65 @@ Baked probes for indirect, realtime direct with hard shadows.
   from a disc at the entity (`L = -forward`, like a directional light, nothing behind the
   disc). The falloff runs along the beam over `range`; across it the edge fades like the
   spot's cone, full inside `inner_radius`, squared to zero at `radius`.
-- Only two or three genuinely-moving realtime lights. A baked fire's intensity can be
-  modulated at runtime and reads as flickering.
+- Only two or three genuinely-moving realtime lights.
+- **Light groups** (`world_light_groups.odin`, Quake lightstyles): every light has `light_group`. Group 0
+  is static; groups 1–4 are named in World Settings (`light_groups`: name, starting scale, flicker pattern —
+  a letter per 1/10 s, a = 0, m = 1, z ≈ 2, stepped). A group's scale multiplies **everything its lights
+  give**: their realtime intensity in the light buffer, and their own probe layer (the baker bakes each
+  group that has lights into a separate SH layer, bounces included — light adds up, so a layer scales
+  exactly). The power goes out = `World.set_light_group("electric", 0)`; candles in another group keep
+  flickering. Runtime overrides (`World.light_group_override`, from Lua or the Lighting menu) are never
+  saved. Cost: one grid of memory and one shader lookup per lit group. Emissives don't follow groups yet.
 
 ### Baker
 
 CPU tracer. Not DXR, not GPU hemicube — baking is offline, so a breakpoint on a bad texel
 is worth more than a 100× speedup.
 
-- Median-split BVH plus ray-triangle intersection. The BVH is reusable for physics queries,
-  editor picking, and occlusion.
-- Per sample point: N cosine-weighted rays over the hemisphere → BVH query → sky color on
-  miss, surface radiance on hit → average. Direct light separately: one shadow ray per
-  light, scaled by `max(0, dot(N, L))`.
+- **Two-level BVH** (`asset_bvh.odin`), both median-split by one builder over primitive bounds.
+  `Mesh_BVH`: one per mesh, object space, built at asset load (also editor picking).
+  `Scene_BVH`: top level over a world's mesh instances (entity × mesh, world bounds); a leaf
+  sends the ray into its mesh's BVH through the inverse entity transform. Built on demand as a
+  snapshot — the baker builds one per bake over `entity_bakes` (drawn, `Static`, `Cast_Indirect`).
+  Closest-hit and any-hit (shadow rays) queries, iterative with a fixed stack.
+- **Indirect only.** Every light stays realtime direct; a light reaches a probe only off a
+  surface it lit. The sky (World Settings `sky_color × sky_intensity`, linear) is in the probes.
+- **Grid**: the static geometry's bounds plus one `probe_spacing` all round, at most
+  `MAX_PROBES`. Per pass, every probe casts 256 rays on a **Fibonacci sphere** (the same set
+  everywhere, so a bake repeats exactly). Miss → sky. Front-face hit → `albedo × (direct + previous
+  pass's grid sampled there)`; direct is the scene shader's diffuse with one shadow ray per light
+  that reaches the point, shadowed whatever the light's `shadow` says. Back-face hit → black, and
+  counted (a probe with > 25% is "buried"). Three passes = three bounces.
+- **Projection**: Monte Carlo `c_i += L·Y_i·4π/N`, convolved with the cosine lobe and **divided by
+  π**, so the shader's indirect is `albedo × max(0, sh_eval(N))` — the same no-1/π convention as
+  direct, so what's lit on screen is exactly what bounces.
+- Front faces: `cross(v1 − v0, v2 − v0)` points out (clockwise front, left-handed).
+- **Threads**: each pass is a `parallel_for` (`basics.odin`) over probes on every core: `core:thread`
+  workers claim chunks off one atomic counter; each probe writes only its own slot, and the body
+  never allocates or logs.
+- **Albedo**: `asset_system.material_albedo`, computed at load, kept beside `Material` (whose
+  layout is the GPU's).
+- **Storage**: the level's binary sidecar `foo.level` → `foo.probes` (version 2: header with the layer → light-group map, then each layer's `Probe_SH`),
+  written by the bake and read by `scene_load`. A bake is **not an edit**: no undo step, nothing
+  unsaved. The grid has its own arena (`Probe_Grid.arena`), freed whole on rebake. A play world
+  lights with its level's grid. The GPU copy is one buffer per world, replaced after
+  `renderer_dx_wait_idle`, so bakes run outside the frame (UI or remote).
+- **Shader**: `Probe { float c[27]; float _pad; }` (112 B, a float array so structured-buffer
+  layout can't differ from Odin), manual 8-tap trilinear (`probe_irradiance`) — manual so the
+  Chebyshev weight can fold into each corner. No grid → flat `AMBIENT`.
+- Settings are `World_Settings.bake` (saved as `bake.*` keys in `[world]`), edited in the **Probe Bake
+  window** (`ui_bake.odin`, its own toolbar button): settings, Bake, last-bake stats, and the **probe
+  atlas** — a picture of the grid, not lighting data: each probe an 8×8 octahedral tile of `sh_eval`
+  (centre up), one block per layer seen from above, at the exposure it was baked with; hover names
+  the probe, outlines its tile and draws a yellow square on it in the world's views; double-click frames it. Built on the CPU with the grid (`probe_grid_atlas`), shown through an ImGui-heap SRV.
+- Debug views, per view from the toolbar's **Lighting** menu (`Render_View.lighting`, `probes_off`,
+  `indirect_scale`, all frame constants): Lit, Probes Only (probe light on white), Indirect Only,
+  Direct Only, Lighting Only (white albedo); baked probes vs the flat ambient; an indirect multiplier;
+  Show Probes (six spokes per probe coloured by `sh_eval` along ±X/±Y/±Z). blimpctl `bake` / `probe`.
 - Build order: BVH and tracer → uniform grid with naive interpolation → **observe the
-  leaking** → add the visibility test. Don't add the fix before seeing the problem.
+  leaking** → add the visibility test. Don't add the fix before seeing the problem. **Done up to
+  naive interpolation.** Next, in order: buried probes get weight 0; octahedral depth + Chebyshev;
+  per-mesh AO.
 
 ### Shadows
 
@@ -199,7 +256,20 @@ is worth more than a 100× speedup.
 - Point lights use cube maps (6 faces). Cascades are a directional-light technique; 2–3
   cascades for exteriors if needed.
 - **Cache static shadow maps**, re-render only when something dynamic enters range. Biggest
-  available win in this design.
+  available win in this design. **Not done yet**: every slice redraws every frame.
+- **Implementation** (`render_shadows.odin`, `shadow.slang`): one `R32` texture array per world,
+  `MAX_SHADOW_SLICES` (32) × 512², shared by its views. Every shadow is a slice with its own
+  reversed-Z camera: directional = an ortho box centred on the entity (`size` x, y across, z deep;
+  drawn when selected), cylinder = ortho over its beam, spot = a square frustum of its `fov`, point =
+  six 90° slices along the world axes (the "cube map": the scene shader picks the face by the major
+  axis, so one sampling path covers every type). Lights with `shadow` (and nonzero intensity) claim
+  slices in entity order; when they run out the rest light unshadowed, with one warning.
+- The shadow pass draws **all drawn geometry** from the same indirect commands as the scene, depth-only
+  (no PS), cull none (single-sided walls must still block light). One `Shadow_View` per slice (256 B)
+  in a mapped UPLOAD buffer: the root CBV for that slice's draws, and a structured buffer for the
+  scene pass. The scene pass `Load`s one texel per light: no sampler, no filtering.
+- Acne: slope-scaled + constant depth bias on the casters, and the receiver moved 1.5 shadow texels
+  along its normal (`GPU_Light.shadow_texel`; scaled by distance for spot and point).
 - A dynamic object lit by probes over baked environment looks detached unless it casts a
   shadow onto static geometry. Grounding matters more than lighting sophistication on the
   character.

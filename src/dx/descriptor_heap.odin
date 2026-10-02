@@ -3,6 +3,7 @@ package dx
 import "base:runtime"
 import "core:log"
 import "vendor:directx/d3d12"
+import "vendor:directx/dxgi"
 
 Descriptor_Heap :: struct {
     handle: ^d3d12.IDescriptorHeap,
@@ -50,7 +51,8 @@ descriptor_heap_destroy :: proc(descriptor_heap: Descriptor_Heap) {
     descriptor_heap.handle->Release()
 }
 
-descriptor_heap_register_srv :: proc(render_context: Render_Context, descriptor_heap: ^Descriptor_Heap, resource: Resource) -> Resource_View {
+// `format` overrides a texture's view format: needed when the resource is typeless (depth read as R32_FLOAT).
+descriptor_heap_register_srv :: proc(render_context: Render_Context, descriptor_heap: ^Descriptor_Heap, resource: Resource, format := dxgi.FORMAT.UNKNOWN) -> Resource_View {
     view: Resource_View
 
     srv_desc := d3d12.SHADER_RESOURCE_VIEW_DESC {
@@ -69,11 +71,16 @@ descriptor_heap_register_srv :: proc(render_context: Render_Context, descriptor_
             }
         }
         case Texture2D_Options: {
-            srv_desc.Format = options.format
-            srv_desc.ViewDimension = .TEXTURE2D
-            srv_desc.Texture2D = {
-                MostDetailedMip = 0,
-                MipLevels = options.mip_levels,
+            srv_desc.Format = format != .UNKNOWN ? format : options.format
+            if options.array_size > 1 {
+                srv_desc.ViewDimension = .TEXTURE2DARRAY
+                srv_desc.Texture2DArray = {MipLevels = options.mip_levels, ArraySize = options.array_size}
+            } else {
+                srv_desc.ViewDimension = .TEXTURE2D
+                srv_desc.Texture2D = {
+                    MostDetailedMip = 0,
+                    MipLevels = options.mip_levels,
+                }
             }
         }
     }
@@ -116,16 +123,23 @@ descriptor_heap_register_rtv :: proc(render_context: Render_Context, descriptor_
     return view
 }
 
-descriptor_heap_register_dsv :: proc(render_context: Render_Context, descriptor_heap: ^Descriptor_Heap, resource: Resource) -> Resource_View {
+// `format` overrides the texture's format, as for descriptor_heap_register_srv. On a texture array the
+// view is the one slice `array_slice`.
+descriptor_heap_register_dsv :: proc(render_context: Render_Context, descriptor_heap: ^Descriptor_Heap, resource: Resource, format := dxgi.FORMAT.UNKNOWN, array_slice: u32 = 0) -> Resource_View {
     view: Resource_View
 
     dsv_desc := d3d12.DEPTH_STENCIL_VIEW_DESC{}
 
     switch options in resource.options {
         case Texture2D_Options: {
-            dsv_desc.Format = options.format
-            dsv_desc.ViewDimension = .TEXTURE2D
-            dsv_desc.Texture2D = {MipSlice = 0}
+            dsv_desc.Format = format != .UNKNOWN ? format : options.format
+            if options.array_size > 1 {
+                dsv_desc.ViewDimension = .TEXTURE2DARRAY
+                dsv_desc.Texture2DArray = {MipSlice = 0, FirstArraySlice = array_slice, ArraySize = 1}
+            } else {
+                dsv_desc.ViewDimension = .TEXTURE2D
+                dsv_desc.Texture2D = {MipSlice = 0}
+            }
         }
         case Buffer_Options: {
             log.errorf("Can't create DSV from a buffer")

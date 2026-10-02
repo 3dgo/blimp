@@ -71,6 +71,7 @@ scene_load :: proc(world: ^World, path: string) -> bool {
 
     scene_load_world_settings(world, string(data))
     count := scene_load_from_text(world, string(data))
+    probe_grid_load(world, probes_path(path))
     log.infof("Loaded scene '%v' (%v entities)", path, count)
     return true
 }

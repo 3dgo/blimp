@@ -27,8 +27,8 @@ Renderer_DX :: struct {
     indirect_sig: dx.Command_Signature,
 
     slang_compiler: dx.Slang_Compiler,
-    compiled_shader: dx.Compiled_Shader,
-    pso: dx.Pipeline_State,
+    scene_shader: dx.Compiled_Shader,
+    scene_pso: dx.Pipeline_State,
 
     frame_fence_copy: dx.Fence,
     frame_fence_gfx: dx.Fence,
@@ -63,18 +63,47 @@ Frame_Constants :: struct {
     sampler_slot: u32,
     
     debug_line_buffer_slot: u32,
-    hdr_texture_slot: u32,   // the view's scene target, read by the tonemap pass
+    hdr_texture_slot: u32,   // the view's scene target, read by the post pass
     exposure: f32,           // 2^world.settings.exposure
+    depth_texture_slot: u32, // the view's scene depth (R32_FLOAT), read by passes at the display size
+    scene_scale: u32,        // display pixels per scene pixel, each way (render_view_scene_scale)
+    dither: u32,             // nonzero: the post pass quantizes + dithers (render mode .PS1)
+    scene_cover: vec2,       // the part of the scene target the display covers: display / (scene_scale * scene size)
+    vertex_snap: vec2,       // the scene VS rounds NDC xy to steps of 1 / vertex_snap (half the scene size); 0 = off
+    affine: f32,             // 0 = perspective-correct UVs, 1 = affine; in between blends
 
-    _padding: [256 - 4*16*2 - 4 - 4*2 - 4*3 - 4 - 4*11 - 4]byte,
+    // Baked probes (render_probes.odin) of the world's level; probe_dims 0 = not baked (the shader falls back to a flat ambient).
+    probe_buffer_slot: u32,
+    probe_origin:  vec3,
+    probe_spacing: f32,
+    probe_dims:    uvec3,
+    lighting_view:  u32,   // Lighting_View
+    indirect_scale: f32,   // × indirect light (Render_View.indirect_scale)
+    probe_layers:   u32,   // layers in the probe buffer (render_probes.odin): static, then one per lit light group
+    _pad_layers:    [2]u32,
+    probe_layer_scale: [2]vec4,   // each layer's light-group scale this frame, layer k at [k / 4][k % 4]
+
+    // The world's shadow maps (render_shadows.odin): the slice array and its Shadow_View per slice.
+    shadow_map_slot:         u32,
+    shadow_view_buffer_slot: u32,
+    _pad_shadow:             [2]u32,
+
+    _padding: [512 - 336]byte,   // CBVs come in 256-byte steps
 }
-#assert(size_of(Frame_Constants) == 256)
+#assert(offset_of(Frame_Constants, _padding) == 336)
+#assert(offset_of(Frame_Constants, probe_layer_scale) % 16 == 0)
+#assert(MAX_PROBE_LAYERS <= 8)
+#assert(size_of(Frame_Constants) == 512)
 // HLSL cbuffer packing: a vector may not straddle a 16-byte row (the shader would push it to the
 // next row and every later field would read shifted); matrices start on a row. Odin has no layout
 // attribute for this, so check each non-scalar field.
 #assert(offset_of(Frame_Constants, proj_mat) % 16 == 0)
 #assert(offset_of(Frame_Constants, camera_pos) % 16 + size_of(vec3)  <= 16)
 #assert(offset_of(Frame_Constants, resolution) % 16 + size_of(uvec2) <= 16)
+#assert(offset_of(Frame_Constants, scene_cover) % 16 + size_of(vec2)  <= 16)
+#assert(offset_of(Frame_Constants, vertex_snap) % 16 + size_of(vec2)  <= 16)
+#assert(offset_of(Frame_Constants, probe_origin) % 16 + size_of(vec3)  <= 16)
+#assert(offset_of(Frame_Constants, probe_dims) % 16 + size_of(uvec3) <= 16)
 
 renderer_dx_init :: proc() {
     renderer_dx.render_context = dx.render_context_create()
@@ -123,12 +152,13 @@ renderer_dx_init :: proc() {
 
     // Scene pipeline (opaque)
     renderer_dx.slang_compiler  = dx.slang_compiler_create("./assets_engine/shaders/", app.allocators.perm)
-    renderer_dx.compiled_shader = dx.slang_compiler_compile_shader(renderer_dx.slang_compiler, "triangle", "vert_main", "frag_main")
+    renderer_dx.scene_shader = dx.slang_compiler_compile_shader(renderer_dx.slang_compiler, "scene", "vert_main", "frag_main")
     
     scene_opts := dx.PIPELINE_OPTIONS_DEFAULT
     scene_opts.rtv_format = VIEW_HDR_FORMAT
-    renderer_dx.pso             = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, renderer_dx.compiled_shader, scene_opts)
-    render_post_init()   // tonemap: HDR scene target → display target (render_post.odin)
+    renderer_dx.scene_pso    = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, renderer_dx.scene_shader, scene_opts)
+    render_post_init()   // post chain: HDR scene target → display target (render_post.odin)
+    render_shadows_init()   // depth-only shadow map pass (render_shadows.odin)
     
     // Debug line renderer — its own shader, PSO, and per-flight buffers
     debug_draw_init()
@@ -191,13 +221,18 @@ renderer_dx_update :: proc() {
     dx.command_queue_signal(renderer_dx.cmd_queue_copy, renderer_dx.frame_fence_copy, renderer_dx.frame_val)
     
     dx.command_queue_wait(renderer_dx.cmd_queue_gfx, renderer_dx.frame_fence_copy, renderer_dx.frame_val)
-    
+
+    //=== Shadow maps (one set per world, shared by its views) ===
+    t_shadows := gpu_timer_begin(renderer_dx.cmd_gfx, "shadows")
+    for w in worlds do render_shadows_draw(w, frame_slot)
+    gpu_timer_end(renderer_dx.cmd_gfx, t_shadows)
+
     //=== Scene passes (one per view → its target) ===
     for v in views {
         t_view := gpu_timer_begin(renderer_dx.cmd_gfx, fmt.tprintf("view %d (%s)", v.id, v.world.title))
         render_view_draw(v, frame_slot)
         render_post_draw(v)
-        debug_draw_lines(renderer_dx.cmd_gfx, v.debug_first, v.debug_count)   // display target, depth + constants still bound: after the tonemap, so line colours stay exact
+        debug_draw_lines(renderer_dx.cmd_gfx, v.debug_first, v.debug_count)   // display target + constants still bound: after the post chain, so line colours stay exact
         gpu_timer_end(renderer_dx.cmd_gfx, t_view)
     }
     debug_draw_clear()
@@ -244,10 +279,11 @@ renderer_dx_shutdown :: proc() {
 
     debug_draw_shutdown()
     render_post_shutdown()
+    render_shadows_shutdown()
     gpu_timer_shutdown()
 
-    dx.pipeline_destroy_pso(renderer_dx.pso)
-    dx.slang_compiler_destroy_shader(renderer_dx.compiled_shader)
+    dx.pipeline_destroy_pso(renderer_dx.scene_pso)
+    dx.slang_compiler_destroy_shader(renderer_dx.scene_shader)
     dx.slang_compiler_destroy(renderer_dx.slang_compiler)
 
     dx.swapchain_destroy(&renderer_dx.swapchain)

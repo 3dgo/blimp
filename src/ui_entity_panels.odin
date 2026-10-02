@@ -58,6 +58,7 @@ ui_retarget_world :: proc(from, to: ^World) {
 // A world is closing: panels pinned to it go back to following.
 ui_forget_world :: proc(w: ^World) {
     ui_world_settings_forget(w)
+    ui_bake_forget(w)
     ui_context_menu_forget(w, nil)
     for &p in ui.panels do if p.pinned == w do p.pinned = nil
     if rename.world == w do rename = {}
@@ -143,6 +144,10 @@ ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
         }
         icon, _ := entity_icon(e)
         clicked := ui_icon_selectable(fmt.ctprintf("##e%v", h.idx), icon, sbuf_str(&e.name), e.selected)
+        // Double-click frames it in the world's view (the first click already selected it), like F.
+        if im.IsItemHovered() && im.IsMouseDoubleClicked(.Left) && !ui.io.KeyCtrl && !ui.io.KeyShift {
+            if ev := editor_view_for_world(w); ev != nil do editor_frame_selection(ev)
+        }
         if im.IsItemHovered() && im.IsMouseReleased(.Right) {
             if !e.selected do selection_only(w, h)
             open_menu = true

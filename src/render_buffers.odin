@@ -40,7 +40,8 @@ Asset_Buffers :: struct {
     material_buffer_data: [dynamic]Material,
 
     texture_buffers: [dynamic]Resource_With_Upload,
-    sampler: dx.Resource_View,
+    sampler:       dx.Resource_View,   // linear: render mode .Clean
+    sampler_point: dx.Resource_View,   // point: render mode .PS1
 }
 asset_buffers: Asset_Buffers
 
@@ -58,9 +59,28 @@ World_Render :: struct {
     lights: [FRAMES_IN_FLIGHT]Resource_With_Upload,
     lights_data: [dynamic]GPU_Light,
 
+    // The world's baked probe grid (World.probes), one copy: it only changes on a bake or load, which wait
+    // for the GPU first (world_render_probes_recreate). No handle when not baked.
+    probes:        Resource_With_Upload,
+    probe_atlas:    Resource_With_Upload,   // World.probes.atlas as a texture, for ImGui (Bake and Resources windows)
+    probe_atlas_ui: dx.Resource_View,       // its SRV in the ImGui heap
+    probes_upload: bool,   // stage both on the copy queue next frame
+
     draw_cmd:     [FRAMES_IN_FLIGHT]dx.Resource,
     draw_cmd_ptr: [FRAMES_IN_FLIGHT]rawptr,
     draw_cmd_data: [dynamic]d3d12.DRAW_INDEXED_ARGUMENTS,
+
+    // Shadow maps (render_shadows.odin). One map: it's drawn and read within a frame on the gfx queue, so
+    // flights never overlap on it. The slice cameras are per flight, written in place like draw_cmd.
+    shadow_map:       dx.Resource,   // MAX_SHADOW_SLICES × SHADOW_MAP_SIZE² R32_TYPELESS array
+    shadow_map_srv:   dx.Resource_View,
+    shadow_dsv_heap:  dx.Descriptor_Heap,
+    shadow_dsv:       [MAX_SHADOW_SLICES]dx.Resource_View,
+    shadow_views:     [FRAMES_IN_FLIGHT]dx.Resource,   // Shadow_View per slice (UPLOAD)
+    shadow_views_ptr: [FRAMES_IN_FLIGHT]rawptr,
+    shadow_views_srv: [FRAMES_IN_FLIGHT]dx.Resource_View,
+    shadow_cameras:   [dynamic]mat4,   // this frame's slices in use, rebuilt by buffers_build_scene
+    shadow_missed, shadow_missed_logged: int,   // shadowed lights that got no slices this frame / when last logged
 }
 
 // One entity-mesh pair. The shader indexes it (via SV_StartInstanceLocation) to reach the
@@ -79,7 +99,8 @@ GPU_Light :: struct {
     intensity: f32, cos_inner: f32,    // cos(inner_fov / 2) (spot)
     inner_radius: f32, falloff: u32,   // range.x; u32(EntityLightFalloff)
     beam_radius: f32, beam_inner: f32, // radius, inner_radius (cylinder)
-    _pad: [2]f32,
+    shadow_slice: u32,                 // first shadow map slice (render_shadows.odin), SHADOW_NONE = unshadowed
+    shadow_texel: f32,                 // world size of a shadow texel (at 1 unit for spot / point): the receiver's normal offset
 }
 #assert(size_of(GPU_Light) == 80)
 
@@ -119,6 +140,11 @@ asset_buffers_create :: proc() {
         AddressU = .WRAP, AddressV = .WRAP, AddressW = .WRAP,
         ComparisonFunc = .NEVER, MaxLOD = max(f32),
     })
+    asset_buffers.sampler_point = dx.descriptor_heap_register_sampler(renderer_dx.render_context, &renderer_dx.sampler_heap, {
+        Filter = .MIN_MAG_MIP_POINT,
+        AddressU = .WRAP, AddressV = .WRAP, AddressW = .WRAP,
+        ComparisonFunc = .NEVER, MaxLOD = max(f32),
+    })
 }
 
 asset_buffers_destroy :: proc() {
@@ -126,7 +152,8 @@ asset_buffers_destroy :: proc() {
         dx.descriptor_heap_free(&renderer_dx.resource_heap, tex.resource_view.heap_slot)
         buffers_resource_destroy(tex)
     }
-    dx.descriptor_heap_free(&renderer_dx.resource_heap, asset_buffers.sampler.heap_slot)
+    dx.descriptor_heap_free(&renderer_dx.sampler_heap, asset_buffers.sampler.heap_slot)
+    dx.descriptor_heap_free(&renderer_dx.sampler_heap, asset_buffers.sampler_point.heap_slot)
     delete(asset_buffers.texture_buffers)
 
     buffers_resource_destroy(asset_buffers.material_buffer)
@@ -155,6 +182,8 @@ world_render_create :: proc(world: ^World) {
         r.mesh_instance[i] = buffers_resource_create(size_of(Mesh_Instance_Data), MAX_MESH_INSTANCES, &renderer_dx.resource_heap)
         r.lights[i]        = buffers_resource_create(size_of(GPU_Light), MAX_LIGHTS, &renderer_dx.resource_heap)
     }
+    world_render_probes_create(world)
+    world_shadows_create(world)
 }
 
 world_render_destroy :: proc(world: ^World) {
@@ -173,7 +202,42 @@ world_render_destroy :: proc(world: ^World) {
     delete(r.draw_cmd_data)
     delete(r.transform_data)
     delete(r.mesh_instance_data)
+    world_render_probes_destroy(world)
+    world_shadows_destroy(world)
     delete(r.lights_data)
+}
+
+// The probe buffer (and the atlas texture, when there is one) for w.probes, staged next frame. Nothing when not baked.
+@(private="file")
+world_render_probes_create :: proc(w: ^World) {
+    if len(w.probes.probes) == 0 do return
+    w.render.probes = buffers_resource_create(size_of(Probe_SH), u32(len(w.probes.probes)), &renderer_dx.resource_heap)
+    if a := w.probes.atlas; len(a.pixels) > 0 {
+        w.render.probe_atlas    = buffers_texture_create(a.width, a.height, dx_format(a.format))
+        w.render.probe_atlas_ui = dx.descriptor_heap_register_srv(renderer_dx.render_context, &renderer_dx.ui_heap, w.render.probe_atlas.resource)
+    }
+    w.render.probes_upload = true
+}
+
+@(private="file")
+world_render_probes_destroy :: proc(w: ^World) {
+    if w.render.probes.resource.handle == nil do return
+    dx.descriptor_heap_free(&renderer_dx.resource_heap, w.render.probes.resource_view.heap_slot)
+    buffers_resource_destroy(w.render.probes)
+    if w.render.probe_atlas.resource.handle != nil {
+        dx.descriptor_heap_free(&renderer_dx.resource_heap, w.render.probe_atlas.resource_view.heap_slot)
+        dx.descriptor_heap_free(&renderer_dx.ui_heap, w.render.probe_atlas_ui.heap_slot)
+        buffers_resource_destroy(w.render.probe_atlas)
+    }
+    w.render.probes, w.render.probe_atlas, w.render.probe_atlas_ui = {}, {}, {}
+}
+
+// After w.probes is replaced on a world already on screen (a bake). Waits for the GPU, so call it
+// outside the frame (UI or remote command), never from renderer_dx_update.
+world_render_probes_recreate :: proc(w: ^World) {
+    renderer_dx_wait_idle()
+    world_render_probes_destroy(w)
+    world_render_probes_create(w)
 }
 
 // ============================ Scene build ============================
@@ -187,38 +251,18 @@ buffers_build_scene :: proc(world: ^World) {
     clear(&r.transform_data)
     clear(&r.mesh_instance_data)
     clear(&r.lights_data)
+    clear(&r.shadow_cameras)
+    r.shadow_missed = 0
+    defer light_shadow_report(r)
+    group_scales := light_group_scales(world, timer_sec_since_start())   // world_light_groups.odin: power cuts, flicker
 
     it := hm.iterator_make(&world.entities)
     for entity, _ in hm.iterate(&it) {
         if entity_drawn(entity) && entity.light_type != .None {
-            light := GPU_Light {
-                position = entity.position,
-                type = u32(entity.light_type),
-                direction = entity_forward(entity),
-                color = entity.color,
-                intensity = entity.intensity,
-            }
-            if entity.light_type != .Directional {
-                // Inner clamped to outer; the shader keeps the fade width above zero, so inner == outer is
-                // a hard edge, not a divide by zero.
-                light.radius       = max(entity.range.y, 0.001)
-                light.inner_radius = clamp(entity.range.x, 0, light.radius)
-                light.falloff      = u32(entity.falloff)
-            }
-            #partial switch entity.light_type {
-                case .Cylinder: {
-                    light.beam_radius = max(entity.radius, 0)
-                    light.beam_inner  = clamp(entity.inner_radius, 0, light.beam_radius)
-                }
-                case .Spot: {
-                    // fov and inner_fov are full cone angles. Inner is clamped to outer; the shader keeps the
-                    // fade width above zero, so inner == outer is a hard edge, not a divide by zero.
-                    light.cos_outer = math.cos(math.to_radians(entity.fov) * 0.5)
-                    light.cos_inner = math.cos(math.to_radians(min(entity.inner_fov, entity.fov)) * 0.5)
-                }
-            }
-
+            light := entity_gpu_light(entity)
+            light.intensity *= group_scales[entity_light_group(entity)]
             if len(r.lights_data) < MAX_LIGHTS {
+                if entity.shadow && light.intensity != 0 do light_shadow_assign(r, entity, &light)   // a switched-off light draws no map
                 append(&r.lights_data, light)
             } else {
                 log.warnf("Too many lights, exceed MAX_LIGHTS count")
@@ -259,6 +303,38 @@ buffers_build_scene :: proc(world: ^World) {
             })
         }
     }
+}
+
+// A light entity as the shader sees it. The baker (editor_bake.odin) lights with the same values.
+entity_gpu_light :: proc(entity: ^Entity) -> GPU_Light {
+    light := GPU_Light {
+        position = entity.position,
+        type = u32(entity.light_type),
+        direction = entity_forward(entity),
+        color = entity.color,
+        intensity = entity.intensity,
+        shadow_slice = SHADOW_NONE,   // buffers_build_scene hands out slices
+    }
+    if entity.light_type != .Directional {
+        // Inner clamped to outer; the shader keeps the fade width above zero, so inner == outer is
+        // a hard edge, not a divide by zero.
+        light.radius       = max(entity.range.y, 0.001)
+        light.inner_radius = clamp(entity.range.x, 0, light.radius)
+        light.falloff      = u32(entity.falloff)
+    }
+    #partial switch entity.light_type {
+        case .Cylinder: {
+            light.beam_radius = max(entity.radius, 0)
+            light.beam_inner  = clamp(entity.inner_radius, 0, light.beam_radius)
+        }
+        case .Spot: {
+            // fov and inner_fov are full cone angles. Inner is clamped to outer; the shader keeps the
+            // fade width above zero, so inner == outer is a hard edge, not a divide by zero.
+            light.cos_outer = math.cos(math.to_radians(entity.fov) * 0.5)
+            light.cos_inner = math.cos(math.to_radians(min(entity.inner_fov, entity.fov)) * 0.5)
+        }
+    }
+    return light
 }
 
 // ============================ Uploads ============================
@@ -303,6 +379,12 @@ world_render_upload :: proc(world: ^World, frame_slot: u64) {
     buffers_resource_copy(renderer_dx.cmd_copy, &r.mesh_instance[frame_slot], r.mesh_instance_data[:])
     buffers_resource_copy(renderer_dx.cmd_copy, &r.lights[frame_slot],        r.lights_data[:])
     mem.copy(r.draw_cmd_ptr[frame_slot], raw_data(r.draw_cmd_data), size_of(d3d12.DRAW_INDEXED_ARGUMENTS) * len(r.draw_cmd_data))
+    world_shadows_upload(world, frame_slot)
+    if r.probes_upload {
+        buffers_resource_copy(renderer_dx.cmd_copy, &r.probes, world.probes.probes)
+        if r.probe_atlas.resource.handle != nil do buffers_texture_copy(renderer_dx.cmd_copy, &r.probe_atlas, world.probes.atlas)
+        r.probes_upload = false
+    }
 }
 
 // gfx: the world's freshly staged buffers → shader-readable for this frame's scene passes.
@@ -310,6 +392,9 @@ world_render_begin :: proc(world: ^World, frame_slot: u64) {
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.mesh_instance[frame_slot].resource, {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.transform[frame_slot].resource,     {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.lights[frame_slot].resource,        {.ALL_SHADING}, {.SHADER_RESOURCE})
+    if world.render.probes.resource.handle != nil do dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probes.resource, {.ALL_SHADING}, {.SHADER_RESOURCE})
+    // Copied once per bake, so (like asset textures) it stays readable rather than going back to NO_ACCESS.
+    if world.render.probe_atlas.resource.handle != nil do dx.texture_transition(renderer_dx.cmd_gfx, &world.render.probe_atlas.resource, {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)
 }
 
 // gfx: back to NO_ACCESS. These buffers are re-uploaded on the copy queue next time this flight
@@ -318,6 +403,7 @@ world_render_end :: proc(world: ^World, frame_slot: u64) {
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.transform[frame_slot].resource,     {}, {.NO_ACCESS})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.mesh_instance[frame_slot].resource, {}, {.NO_ACCESS})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.lights[frame_slot].resource,        {}, {.NO_ACCESS})
+    if world.render.probes.resource.handle != nil do dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probes.resource, {}, {.NO_ACCESS})
 }
 
 // gfx: shared asset buffers + textures → readable. Once per frame, regardless of world/view count.

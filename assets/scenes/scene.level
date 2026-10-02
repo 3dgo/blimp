@@ -4,7 +4,7 @@ script =
 
 [entity]
 name = car
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = 1.9643607, 0, 3.3299088
 rotation = 0, 0, 0, 1
@@ -21,7 +21,7 @@ shadow = false
 
 [entity]
 name = police
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = -2.1381528, 0, 0
 rotation = 0, 0, 0, 1
@@ -38,7 +38,7 @@ shadow = false
 
 [entity]
 name = floor
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = 0, 0, 0
 rotation = 0, 0, 0, 1
@@ -55,7 +55,7 @@ shadow = false
 
 [entity]
 name = main_camera
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = 5, 3, -5
 rotation = 0.1676, -0.3763, 0.0694, 0.9086
@@ -72,7 +72,7 @@ shadow = false
 
 [entity]
 name = moon
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = -3, 5, -3
 rotation = 0.3536, 0.3536, -0.1464, 0.8536
@@ -89,7 +89,7 @@ shadow = true
 
 [entity]
 name = street_lamp_1
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = -3.2, 2.2, 3.2
 rotation = 0, 0, 0, 1
@@ -106,7 +106,7 @@ shadow = true
 
 [entity]
 name = street_lamp_2
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = 3.2, 2.2, -3.2
 rotation = 0, 0, 0, 1
@@ -123,7 +123,7 @@ shadow = true
 
 [entity]
 name = police_light_red
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = -2.26, 0.65, 0
 rotation = 0, 0, 0, 1
@@ -140,7 +140,7 @@ shadow = false
 
 [entity]
 name = police_light_blue
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = -2.02, 0.65, 0
 rotation = 0, 0, 0, 1
@@ -157,7 +157,7 @@ shadow = false
 
 [entity]
 name = searchlight
-basic_static_flags = Static, Renderable
+basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
 position = 1.96, 4, -0.37
 rotation = 0.70710677, 0, 0, 0.70710677

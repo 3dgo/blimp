@@ -24,11 +24,12 @@ Editor_View :: struct {
     context_click: bool,    // this frame: RMB released without flying = a right-click (opens the context menu)
     remote_context: Maybe(vec2),   // a right-click at this view pixel requested by blimpctl `menu`
     gizmo:   Gizmo_State,   // transform gizmo hover/drag (editor_gizmo.odin)
-    marquee: struct { pressing, dragging: bool, start: vec2 },   // left-press selection in progress (ui_view_selection)
+    marquee: struct { pressing, dragging, double: bool, start: vec2 },   // left-press selection in progress (ui_view_selection); double: the press was a double-click
     placed:  bool,          // its window got its first-frame floating placement (ui_next_view_window_placement)
     icon_hidden: [MAX_ENTITIES]bool,   // camera/light icon blocked by geometry, by handle index (editor_icons_update_occlusion)
     icon_cursor: int,                  // where the next frame's icon occlusion rays start
     game_view: bool,                   // G: hide everything editor-only here (icons, outlines, selection boxes, gizmo), like Unreal
+    show_probes: bool,                 // draw the world's baked probes as debug spokes (probe_grid_debug_lines)
     collapsed: bool,        // its window was collapsed last frame
     full_size: vec2,        // its window's size while expanded, restored after a collapse (ui_view_window_keep_size)
     restore_frames: int,    // frames left to keep reapplying full_size after an expand
@@ -188,4 +189,13 @@ editor_frame_selection :: proc(ev: ^Editor_View) {
     it := hm.iterator_make(&w.entities)
     for e, _ in hm.iterate(&it) do if e.selected || !any_selected do found |= entity_grow_bounds(e, &lo, &hi)
     if found do camera_fit_bounds(&ev.view.camera, lo, hi)
+}
+
+// The view to act in for world `w` (a level or its play copy) from outside any viewport — the entity
+// list, the Bake window: the active view when it shows that level, else the first that does. nil if none.
+editor_view_for_world :: proc(w: ^World) -> ^Editor_View {
+    level := world_level(w)
+    if active_view != nil && world_level(active_view.world) == level do return editor_view(active_view)
+    for v in views do if world_level(v.world) == level do return editor_view(v)
+    return nil
 }

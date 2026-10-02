@@ -3,6 +3,7 @@ package blimp
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:reflect"
 import "core:strings"
 import im "lib:odin-imgui"
 
@@ -10,14 +11,18 @@ import im "lib:odin-imgui"
 // anything worth starting from. Clicking one adds it to the active world at the paste point, like a
 // one-block Ctrl+V that keeps the template's rotation and scale. The file is in the level/clipboard
 // format but not a .level, so the Worlds window doesn't list it; Edit Templates opens it as a world.
+// The list shows loc key Template_<name> when loc.odin has one (add a row per new template), else
+// the raw name.
 
 TEMPLATES_PATH :: "assets_engine/entity_templates.ini"
 TEMPLATES_WINDOW_SIZE :: [2]f32{260, 320}   // first-open size (× display scale)
 
 Entity_Template :: struct {
-    name: string,   // the block's name field
-    icon: string,   // entity_icon, "" for none
-    text: string,   // the [entity] block, slicing templates_ui.text
+    name:    string, // the block's name field
+    loc:     Loc_ID, // Template_<name>, shown instead of name if has_loc
+    has_loc: bool,
+    icon:    string, // entity_icon, "" for none
+    text:    string, // the [entity] block, slicing templates_ui.text
 }
 
 @(private="file")
@@ -52,7 +57,7 @@ ui_draw_templates :: proc() {
     im.BeginDisabled(w == nil)
     for t, i in templates_ui.list {
         im.PushIDInt(i32(i))
-        if ui_icon_selectable("##t", t.icon, t.name, false) do templates_add(w, t, paste_target_point(editor_view(active_view)))
+        if ui_icon_selectable("##t", t.icon, t.has_loc ? trs(t.loc) : t.name, false) do templates_add(w, t, paste_target_point(editor_view(active_view)))
         im.PopID()
     }
     im.EndDisabled()
@@ -122,8 +127,12 @@ templates_append :: proc(block: string) {
     entity_apply_defaults(&e)
     entity_apply_text(&e, block, context.temp_allocator)
     icon, _ := entity_icon(&e)
+    name := sbuf_str(&e.name)
+    loc, has_loc := reflect.enum_from_name(Loc_ID, fmt.tprintf("Template_%s", name))
     append(&templates_ui.list, Entity_Template{
-        name = strings.clone(sbuf_str(&e.name), app.allocators.perm),
+        name = strings.clone(name, app.allocators.perm),
+        loc = loc,
+        has_loc = has_loc,
         icon = strings.clone(icon, app.allocators.perm),
         text = block,
     })

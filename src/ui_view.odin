@@ -92,13 +92,18 @@ HOST_PANEL_RATIO     :: 0.3                 // share of a world window's width g
 
 VIEW_WINDOW_CASCADE  :: 30                  // per-window offset so several new windows don't stack exactly
 
-// A newly opened world window (or extra viewport) appears floating, centred on the main window and
-// cascaded, at the default size — on its first frame only, overriding whatever imgui.ini remembers
-// for a reused window id (ids restart every session). After that it's the user's to dock/move/resize.
-// Also parents it to the main window whenever it floats outside it as its own OS window.
+// A newly opened world window (or extra viewport) is placed on its first frame only, overriding
+// whatever imgui.ini remembers for a reused window id (ids restart every session). The session's first
+// one docks into the main window's central node; later ones float, centred on the main window and
+// cascaded, at the default size. After that it's the user's to dock/move/resize.
 ui_next_view_window_placement :: proc(v: ^Render_View) {
     s := app.dispaly_scale
-    if ev := editor_view(v); !ev.placed {
+    central := im.DockBuilderGetCentralNode(ui.main_dockspace)
+    if ev := editor_view(v); !ev.placed && !ui.first_view_placed && central != nil {
+        ev.placed = true
+        ui.first_view_placed = true
+        im.SetNextWindowDockID(central.ID_, .Always)
+    } else if !ev.placed {
         ev.placed = true
         mv     := im.GetMainViewport()
         offset := f32((v.id - 1) % 8) * VIEW_WINDOW_CASCADE * s
@@ -108,12 +113,6 @@ ui_next_view_window_placement :: proc(v: ^Render_View) {
         im.SetNextWindowSize({VIEW_WINDOW_SIZE.x * s, VIEW_WINDOW_SIZE.y * s}, .Always)
     }
     im.SetNextWindowSizeConstraints({VIEW_WINDOW_MIN_SIZE.x * s, VIEW_WINDOW_MIN_SIZE.y * s}, {max(f32), max(f32)})
-
-    // Dragged outside the main window, it becomes its own OS window: parent that to the main window so
-    // clicking the main window can't bury it, while other apps can still cover it. Unclassed, so docking
-    // is unaffected.
-    class := im.WindowClass{ParentViewportId = im.GetMainViewport().ID_, DockingAllowUnclassed = true}
-    im.SetNextWindowClass(&class)
 }
 
 // Call right after the view window's Begin. Puts its size back when it's expanded after a collapse
@@ -192,6 +191,7 @@ ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_fl
         ev.screen_size = {f32(view.target.width), f32(view.target.height)}
         ev.hovered     = im.IsItemHovered()
         if !ev.game_view do editor_draw_icons(ev)   // camera / light icons, under the gizmo (editor_shapes.odin)
+        if !ev.game_view do editor_draw_probe_highlight(ev)   // the probe hovered in the Bake window's atlas (ui_bake.odin)
 
         if im.IsWindowFocused() do active_view = view   // focusing a viewport makes its world active
         editor_navigate(ev)
@@ -271,6 +271,7 @@ ui_view_selection :: proc(ev: ^Editor_View, gizmo_owns_mouse: bool) {
     mouse := vec2{mp.x, mp.y}
     if ev.hovered && im.IsMouseClicked(.Left) && !ui.io.KeyAlt && !gizmo_owns_mouse && ev.nav == .None {
         m.pressing, m.dragging, m.start = true, false, mouse
+        m.double = im.IsMouseDoubleClicked(.Left)
     }
     if !m.pressing do return
 
@@ -295,4 +296,6 @@ ui_view_selection :: proc(ev: ^Editor_View, gizmo_owns_mouse: bool) {
     op := selection_op_from_modifiers(ui.io.KeyCtrl, ui.io.KeyShift)
     if m.dragging do selection_marquee(ev, lo, hi, op)
     else          do selection_click(ev, m.start, op)
+    // A plain double-click on an entity frames it (the first click already selected it), like F.
+    if !m.dragging && m.double && op == .Replace && selection_count(w) > 0 do editor_frame_selection(ev)
 }

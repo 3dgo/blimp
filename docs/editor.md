@@ -48,6 +48,8 @@
   - `World.active` is the selected entity the inspector shows and the gizmo pivots on.
   - Viewport: click or a crossing marquee replaces the selection; Shift adds, Ctrl+Shift removes,
     Ctrl toggles (`Selection_Op`). Alt stays orbit.
+    A plain double-click on an entity, in a viewport or the entity list, frames it like F (from the list: in
+    the active view if it shows that world, else its first view — `editor_view_for_world`).
     Ctrl+D duplicates the selection in place and selects the copies (Unity). Ctrl+A selects all.
   - **Right-click menu** (`ui_context_menu.odin`): in a viewport, an RMB release without flying (under
     `NAV_CLICK_PX` of travel, no WASD) is a click. It and the entity list open one menu: copy, paste at
@@ -64,6 +66,9 @@
 - **World window.** Opening a world creates a `World_Host`: one floating window (centred, cascaded,
   960×540, 320×180 minimum) titled "`<file>` 视口". It holds its own DockSpace laid out as
   [ viewport | entity list / inspector ], with the tab bar auto-hidden.
+  - The session's first world window docks into the main window's central node instead of floating.
+  - Every window dragged outside the main window becomes an OS window parented to it
+    (`ConfigViewportsNoDefaultParent = false`), so the main window never covers it.
   - Its panels start pinned to that world. They keep the Follow/pin combo, so they can be retargeted.
   - `Entity_Panel.owner` means only that the panel is docked in that window and closes with it.
   - "New Viewport" adds a plain extra view window onto an open world.
@@ -112,11 +117,20 @@
   relaunches the engine through the unsaved prompt. F12 is left to RenderDoc's capture key.
     While playing, the viewport has a border (amber when paused) and the title shows ▶.
 - **World settings** (`World_Settings`) are the scene file's `[world]` section, written before the
-  entities: background colour, script path, and later sky/atmosphere/bake fields.
+  entities: background colour, exposure, script path, the light groups' starting values (docs/rendering.md → Light groups),
+  and the probe bake's settings (`bake.*`, hidden here: they're
+  edited in the Probe Bake window, docs/rendering.md → Baker; baking isn't an edit — no undo, not unsaved).
   - Only fields something reads; adding one is one line (reflection inspector + serializer).
   - Edited in the World Settings window (gear button on the viewport toolbar). Undo and unsaved
     tracking cover them.
+- **PS1 toggle** (grain icon on the viewport toolbar) flips that view's `Render_Mode` between the
+  PS1 look and a clean full-res render (`docs/rendering.md`). Per view, not saved, not undoable.
   - Pasted text never touches them: only `scene_load` reads `[world]`.
+- **Lighting menu** (lightbulb on the viewport toolbar): that view's lighting debug view, probes on/off,
+  indirect multiplier and the probe overlay, plus the world's light-group scales (runtime overrides like
+  Lua's, shared by its views, never saved; "Back to saved" clears them) (docs/rendering.md → Baker). Per view, not saved, not undoable;
+  the button lights while anything differs from plain Lit. **GPU Resources** (Show menu, `ui_resources.odin`):
+  treemap of every GPU resource by owner — assets, each world, each view, engine.
 - **The clipboard is the scene `[entity]` text format** (`entity_to_text` / `entity_apply_text` over
   the generic codec in `serialize.odin`).
   - One format backs save, duplicate, instantiate-from-kit and apply-settings. There is no drag
@@ -180,8 +194,8 @@
 A debug build listens on `127.0.0.1:47800` (`src/editor_remote.odin`). `bin/blimpctl.exe` (`tools/blimpctl`,
 built by `build.odin`) sends one text command and prints the reply. `blimpctl help` lists the commands:
 worlds, open/save/close, entities/get/set/paste/delete/select, play/stop/pause, game, undo/redo, views/camera/frame/pick/menu, tool,
-timings (GPU time per pass, `render_gpu_timer.odin`), assets (asset GPU payload per asset, the data behind the
-Asset Buffers treemap window, `ui_asset_buffers.odin`),
+timings (GPU time per pass, `render_gpu_timer.odin`), resources (every GPU resource by owner — assets, worlds,
+views, engine — the data behind the GPU Resources treemap window, `ui_resources.odin`), bake / probe (docs/rendering.md → Baker),
 screenshot (writes a PNG, replies with its path), and lua.
 
 - `screenshot <view>` is the view's render target: the 3D scene only. Icons, the gizmo and panels are ImGui,

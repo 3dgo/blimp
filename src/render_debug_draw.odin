@@ -5,7 +5,7 @@ import "core:mem"
 import "core:math"
 import "core:math/linalg"
  
-MAX_DEBUG_LINE_VERTS :: 8192
+MAX_DEBUG_LINE_VERTS :: 65536   // the probe view takes 12 per probe
 
 Debug_Line_Vertex :: struct { pos: vec4, color: vec4 }
 #assert(size_of(Debug_Line_Vertex) == 32)
@@ -33,7 +33,9 @@ debug_draw_init :: proc() {
     line_opts := dx.PIPELINE_OPTIONS_DEFAULT
     line_opts.topology    = .LINE
     line_opts.cull_mode   = .NONE
-    line_opts.depth_write = false   // test against the scene, but don't write depth
+    line_opts.depth_test  = false   // tested against the scene's depth in the shader: it's at the scene size, the lines at the display size
+    line_opts.depth_write = false
+    line_opts.dsv_format  = .UNKNOWN
     debug_draw.pso = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, debug_draw.shader, line_opts)
 }
 

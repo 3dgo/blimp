@@ -4,6 +4,9 @@ import "common"
 import "base:runtime"
 import "core:fmt"
 import "core:math"
+import "core:os"
+import "core:sync"
+import "core:thread"
 import vmem "core:mem/virtual"
 
 @(lua_ffi="Vec2")  vec2 :: common.vec2
@@ -147,4 +150,40 @@ srgb_to_linear :: proc(c: f32) -> f32 {
 
 linear_to_srgb :: proc(c: f32) -> f32 {
     return c <= 0.0031308 ? c * 12.92 : 1.055 * math.pow(c, 1.0 / 2.4) - 0.055
+}
+
+/* ------------------------------- Threads ------------------------------- */
+PARALLEL_CHUNK :: 16   // indices a worker claims at a time
+
+@(private="file")
+Parallel_Job :: struct {
+    next:  int,   // the first index nobody has claimed yet (atomic)
+    count: int,
+    data:  rawptr,
+    body:  proc(data: rawptr, i: int),
+}
+
+// Runs body(data, i) for every i in [0, count) on every core and returns once all are done: one thread
+// per core, this one included, each claiming PARALLEL_CHUNK indices at a time off a shared counter, so
+// uneven work (a probe near many lights) doesn't leave cores idle. Threads start and stop per call.
+// Workers run with a fresh context — their own temp allocator, no logger — so body shouldn't log or
+// touch the caller's allocators. Returns the thread count.
+parallel_for :: proc(count: int, data: rawptr, body: proc(data: rawptr, i: int)) -> (threads: int) {
+    job := Parallel_Job{count = count, data = data, body = body}
+    threads = max(os.get_processor_core_count(), 1)
+    workers := make([]^thread.Thread, threads - 1, context.temp_allocator)
+    for &t in workers do t = thread.create_and_start_with_poly_data(&job, parallel_worker)
+    parallel_worker(&job)
+    thread.join_multiple(..workers)
+    for t in workers do thread.destroy(t)
+    return
+}
+
+@(private="file")
+parallel_worker :: proc(job: ^Parallel_Job) {
+    for {
+        start := sync.atomic_add(&job.next, PARALLEL_CHUNK)   // returns the value before the add
+        if start >= job.count do return
+        for i in start ..< min(start + PARALLEL_CHUNK, job.count) do job.body(job.data, i)
+    }
 }

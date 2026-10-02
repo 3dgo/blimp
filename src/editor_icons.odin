@@ -49,6 +49,10 @@ ICON_LIGHT_BEAM   :: "\uE436"   // wb_iridescent
 ICON_LIGHT_SUN    :: "\uE430"   // wb_sunny
 ICON_CAMERA       :: "\uE04B"   // videocam
 ICON_GAME_VIEW    :: "\uE338"   // videogame_asset
+ICON_PS1          :: "\uE3EA"   // grain
+ICON_PROBES       :: "\uE3A5"   // blur_on
+ICON_LIGHTING     :: "\uE0F0"   // lightbulb
+ICON_BAKE         :: "\uE80E"   // whatshot
 
 ICON_FONT_PATH :: "assets_engine/fonts/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf"
 

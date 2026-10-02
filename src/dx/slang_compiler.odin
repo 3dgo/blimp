@@ -76,13 +76,18 @@ slang_compiler_compile_shader :: proc(sc: Slang_Compiler, module_name: string, v
     if r := module->findEntryPointByName(vs_entry_c, &vs_entrypoint); r < 0 || vs_entrypoint == nil {
         log.panicf("Slang: failed to find VS entry point '%s' (result=0x%x)", vs_entry, u32(r))
     }
-    if r := module->findEntryPointByName(ps_entry_c, &ps_entrypoint); r < 0 || ps_entrypoint == nil {
-        log.panicf("Slang: failed to find PS entry point '%s' (result=0x%x)", ps_entry, u32(r))
+    // ps_entry "" = depth only: no pixel shader, and the PSO gets none.
+    has_ps := ps_entry != ""
+    if has_ps {
+        if r := module->findEntryPointByName(ps_entry_c, &ps_entrypoint); r < 0 || ps_entrypoint == nil {
+            log.panicf("Slang: failed to find PS entry point '%s' (result=0x%x)", ps_entry, u32(r))
+        }
     }
     defer vs_entrypoint->release()
-    defer ps_entrypoint->release()
+    defer if has_ps do ps_entrypoint->release()
 
     component_types := []^slang.IComponentType{module, vs_entrypoint, ps_entrypoint}
+    if !has_ps do component_types = component_types[:2]
     composite: ^slang.IComponentType
     composite_diag: ^slang.IBlob
     if r := sc.session->createCompositeComponentType(raw_data(component_types), len(component_types), &composite, &composite_diag); r < 0 || composite == nil {
@@ -107,16 +112,18 @@ slang_compiler_compile_shader :: proc(sc: Slang_Compiler, module_name: string, v
         check_slang_diagnostics(vs_diag, true)
         log.panicf("Slang: failed to compile VS entry point '%s' (result=0x%x)", vs_entry, u32(r))
     }
-    if r := linked->getEntryPointCode(1, 0, &ps_code, &ps_diag); r < 0 || ps_code == nil {
-        check_slang_diagnostics(ps_diag, true)
-        log.panicf("Slang: failed to compile PS entry point '%s' (result=0x%x)", ps_entry, u32(r))
+    if has_ps {
+        if r := linked->getEntryPointCode(1, 0, &ps_code, &ps_diag); r < 0 || ps_code == nil {
+            check_slang_diagnostics(ps_diag, true)
+            log.panicf("Slang: failed to compile PS entry point '%s' (result=0x%x)", ps_entry, u32(r))
+        }
     }
 
     compiled: Compiled_Shader
     compiled.vs_blob = vs_code
     compiled.ps_blob = ps_code
     compiled.vs_bytecode = slice.from_ptr((^byte)(vs_code->getBufferPointer()), int(vs_code->getBufferSize()))
-    compiled.ps_bytecode = slice.from_ptr((^byte)(ps_code->getBufferPointer()), int(ps_code->getBufferSize()))
+    if has_ps do compiled.ps_bytecode = slice.from_ptr((^byte)(ps_code->getBufferPointer()), int(ps_code->getBufferSize()))
 
     return compiled
 }

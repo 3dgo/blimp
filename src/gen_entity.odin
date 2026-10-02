@@ -25,6 +25,7 @@ Entity :: struct {
     size: vec3,
     range: vec2,
     shadow: bool,
+    light_group: i32,
 }
 
 EntityCameraType :: enum u64 {
@@ -50,6 +51,7 @@ EntityLightFalloff :: enum u64 {
 EntityBasicStaticFlag :: enum u64 {
     Static,
     Renderable,
+    Cast_Indirect,
 }
 EntityBasicStaticFlags :: bit_set[EntityBasicStaticFlag; u64]
 
@@ -61,7 +63,7 @@ EntityBasicFlags :: bit_set[EntityBasicFlag; u64]
 
 // Applies each schema `default` to a fresh entity (fields with no default keep zero).
 entity_apply_defaults :: proc(e: ^Entity) {
-    e.basic_static_flags = {.Static, .Renderable}
+    e.basic_static_flags = {.Static, .Renderable, .Cast_Indirect}
     e.basic_flags = {.Enabled}
     e.position = {0, 0, 0}
     e.rotation = transmute(quat)[4]f32{0, 0, 0, 1}
@@ -78,6 +80,7 @@ entity_apply_defaults :: proc(e: ^Entity) {
     e.size = {10, 10, 50}
     e.range = {0.1, 20}
     e.shadow = false
+    e.light_group = 0
 }
 
 // Localized field label for the current language; ok=false if none.
@@ -104,6 +107,7 @@ entity_field_label :: proc(name: string) -> (string, bool) {
     case "size": l = {.EN = "Size", .ZH = "尺寸"}
     case "range": l = {.EN = "Range", .ZH = "范围"}
     case "shadow": l = {.EN = "Cast Shadow", .ZH = "投射阴影"}
+    case "light_group": l = {.EN = "Light Group", .ZH = "光源组"}
     }
     s := l[loc_lang]
     return s, s != ""
@@ -137,6 +141,7 @@ entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bo
         switch member {
         case "Static": l = {.EN = "Static", .ZH = "静态"}
         case "Renderable": l = {.EN = "Renderable", .ZH = "可渲染"}
+        case "Cast_Indirect": l = {.EN = "Cast Indirect", .ZH = "投射间接光"}
         }
     case "EntityBasicFlag":
         switch member {

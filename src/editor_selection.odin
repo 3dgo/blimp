@@ -1,6 +1,7 @@
 package blimp
 
 import hm "core:container/handle_map"
+import "core:math"
 import "core:math/linalg"
 
 // Editor selection. Membership is a flag on each entity (`selected`, hidden + noserialize): undo
@@ -206,6 +207,10 @@ pick_view_debug_lines :: proc(v: ^Render_View) {
     v.debug_first = u32(len(debug_draw.verts))
     defer v.debug_count = u32(len(debug_draw.verts)) - v.debug_first
     if editor_view(v).game_view || v == ui.game do return   // G or game mode: none of the editor's lines in this view
+    if editor_view(v).show_probes {
+        g := &world_level(v.world).probes   // a play world shows its level's, lit by its own group scales
+        probe_grid_debug_lines(g, probe_layer_scales(g, light_group_scales(v.world, timer_sec_since_start())), math.pow(2, v.world.settings.exposure))
+    }
 
     it := hm.iterator_make(&v.world.entities)
     for e, h in hm.iterate(&it) {

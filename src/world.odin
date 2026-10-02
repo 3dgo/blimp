@@ -26,6 +26,8 @@ World :: struct {
 
     settings: World_Settings,     // the scene file's [world] section
     script:   Lua_World_Script,   // its Lua script's loaded state (lua_world_script.odin) — runtime, never saved
+    probes:   Probe_Grid,         // baked indirect light (render_probes.odin); loaded from and baked to the level's .probes sidecar, not undoable
+    light_group_override: [MAX_LIGHT_GROUPS + 1]Maybe(f32),   // runtime scales set by Lua or the Lighting menu, over the saved ones; never saved
 
     // Play mode (world_play.odin): a level points at its running copy, the copy back at its level.
     play_world:  ^World,
@@ -36,15 +38,29 @@ World :: struct {
 }
 
 // Per-world settings, saved as the [world] section at the top of the scene file (before the
-// entities). Only fields something reads today; sky / atmosphere / bake settings join as those
+// entities). Only fields something reads today; sky / atmosphere settings join as those
 // systems land — one line each, edited and saved for free (reflection inspector + serializer).
 World_Settings :: struct {
     background: [3]f32 `loc:World_Background, widget:color`,   // the viewport clear colour: display-space (sRGB), shown as picked, not tonemapped
     exposure:   f32 `loc:World_Exposure`,   // stops (EV): the HDR scene is scaled by 2^exposure before the tonemap
     script:     sbuf256 `loc:World_Script`,   // the world's Lua script (init + update), e.g. assets/scripts/level.lua
+    light_groups: Light_Groups `loc:World_Light_Groups`,   // where the switchable light groups start (world_light_groups.odin)
+    bake:       Bake_Settings `hidden`,   // saved as bake.* keys; edited in the Bake window (ui_bake.odin), not this one
 }
 
-WORLD_SETTINGS_DEFAULT :: World_Settings{background = {19.0 / 255, 19.0 / 255, 19.0 / 255}}   // #131313
+// The probe bake's inputs (editor_bake.odin, docs/rendering.md → Baker). Read by the baker only: a change
+// shows after the next bake.
+Bake_Settings :: struct {
+    sky_color:     [3]f32 `loc:World_Sky_Color, widget:linear_color`,   // radiance of a bake ray that escapes the level (linear), × sky_intensity
+    sky_intensity: f32 `loc:World_Sky_Intensity`,
+    probe_spacing: f32 `loc:World_Probe_Spacing`,   // metres between probes, each axis
+}
+
+WORLD_SETTINGS_DEFAULT :: World_Settings{
+    background   = {19.0 / 255, 19.0 / 255, 19.0 / 255},   // #131313
+    bake         = {sky_intensity = 1, probe_spacing = 1},
+    light_groups = {group_1 = {scale = 1}, group_2 = {scale = 1}, group_3 = {scale = 1}, group_4 = {scale = 1}},
+}
 // Lua's target until world scripts exist (the @(lua) world/entity procs pin to it). Not shown by the
 // editor — worlds the user works on are opened from the Worlds window (world_registry.odin).
 game_world: World
@@ -54,10 +70,14 @@ world_init :: proc(world: ^World) {
     if err := vmem.arena_init_growing(&world.arena); err != nil {
         log.panicf("Failed to init world arena: %v", err)
     }
+    if err := vmem.arena_init_growing(&world.probes.arena); err != nil {
+        log.panicf("Failed to init probe arena: %v", err)
+    }
 }
 
 world_shutdown :: proc(world: ^World) {
     vmem.arena_destroy(&world.arena)
+    vmem.arena_destroy(&world.probes.arena)
 }
 
 world_clear :: proc(world: ^World) {

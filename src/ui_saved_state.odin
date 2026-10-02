@@ -24,7 +24,7 @@ saved_windows :: proc() -> [6]Saved_Window {
         {"templates",     &ui.show_templates},
         {"schema_editor", &ui.show_schema_editor},
         {"game_settings", &ui.show_game_settings},
-        {"asset_buffers", &ui.show_asset_buffers},
+        {"resources", &ui.show_resources},
         {"stats",         &ui.show_stats},
     }
 }

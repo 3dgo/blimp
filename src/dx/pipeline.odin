@@ -41,8 +41,10 @@ Pipeline_Options :: struct {
     depth_test:  bool,          // DepthEnable
     depth_write: bool,          // DepthWriteMask: .ALL when true, .ZERO when false
     depth_func:  d3d12.COMPARISON_FUNC,
+    depth_bias:  i32,           // DepthBias (shadow maps); negative pushes away from the eye under reversed-Z
+    slope_bias:  f32,           // SlopeScaledDepthBias, same sign rule
     blend:       Blend_Mode,
-    rtv_format:  dxgi.FORMAT,
+    rtv_format:  dxgi.FORMAT,   // .UNKNOWN = no render target (depth only)
     dsv_format:  dxgi.FORMAT,
 }
 
@@ -83,7 +85,8 @@ pipeline_create_graphics_pso :: proc(render_context: Render_Context, root_sig: R
             FillMode = options.fill_mode,
             CullMode = options.cull_mode,
             FrontCounterClockwise = d3d12.BOOL(options.front_ccw),
-            DepthBias = 0,
+            DepthBias = options.depth_bias,
+            SlopeScaledDepthBias = options.slope_bias,
             DepthClipEnable = true,
         }},
         depth_stencil = {.DEPTH_STENCIL, {
@@ -96,7 +99,7 @@ pipeline_create_graphics_pso :: proc(render_context: Render_Context, root_sig: R
         }},
         rtv_formats = {.RENDER_TARGET_FORMATS, {
             RTFormats = {0 = options.rtv_format},
-            NumRenderTargets = 1,
+            NumRenderTargets = options.rtv_format == .UNKNOWN ? 0 : 1,
         },},
         dsv_format = {.DEPTH_STENCIL_FORMAT, options.dsv_format},
     }

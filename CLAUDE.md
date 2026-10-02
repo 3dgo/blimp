@@ -77,7 +77,7 @@ When a decision changes, update the doc that owns it. Only rules that apply ever
   RenderDoc workflow are in `docs/editor.md`.
 - **Verify with the cheapest check that proves the change**, in this order:
   1. type-check / build clean;
-  2. blimpctl text replies (`get`, `pick`, `entities`, `views`, `timings`, `assets`);
+  2. blimpctl text replies (`get`, `pick`, `entities`, `views`, `timings`, `resources`);
   3. one screenshot or capture plus at most one crop, only for what only a picture can show.
 
   For purely visual UI tweaks (layout, colours, hover), build and let the user look.

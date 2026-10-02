@@ -209,6 +209,8 @@ REMOTE_HELP :: `Worlds and entities  (<world> = index, title, or scene path; <na
   duplicate <world>                       copy the selection in place and select the copies (Ctrl+D)
   settings <world> [field value...]       show or set the world's [world] settings (undoable)
   play <world> [stop|pause|step]          play the world's level in a copy; stop, toggle pause, or step a frame
+  bake <world>                            bake the level's probes (blocks), save its .probes; replies with the stats
+  probe <world> <x> <y> <z>               baked indirect irradiance/pi at a point, facing +-X +-Y +-Z (linear)
   rename <world>                          start renaming the active entity in its entity list (F2)
   undo | redo
 Views  (<view> = view id, see 'views')
@@ -227,8 +229,8 @@ Views  (<view> = view id, see 'views')
                                           floating panel (not panels dragged out into their own OS window)
   timings                                 CPU frame time + GPU time per pass (latest frame)
   tool [select|move|...] [global|local] [center|pivots]   get or set the viewport tool, gizmo space and pivot
-  assets [show|hide]                      asset GPU payload, one line per asset (largest first); shows/hides
-                                          the Asset Buffers window
+  resources [show|hide]                   GPU resources by owner (assets, worlds, views, engine), largest first;
+                                          shows/hides the GPU Resources window
 RenderDoc  (engine started with --renderdoc, or launched from RenderDoc)
   capture                                 capture the next frame; replies with the .rdc path
   captures                                list this session's captures
@@ -366,6 +368,31 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
             undo_push_settings_edited(w, before)
         }
         serialize_struct(out, w.settings)
+
+    case "bake":
+        w := world_level(remote_world(args) or_return)
+        s, ok := bake_probes(w)
+        if !ok do return "bake failed (see log)"
+        fmt.sbprintf(out, "%v x %v x %v probes  layers=%v  instances=%v  lights=%v  threads=%v  %.2f s  %.2f Mrays/s  backface=%.1f%%  buried=%v\n",
+            s.dims.x, s.dims.y, s.dims.z, s.layers, s.instances, s.lights, s.threads, s.seconds, f64(s.rays) / s.seconds / 1e6, 100 * s.backface, s.buried)
+
+    case "probe":
+        src := remote_world(args) or_return   // lit by its group scales; a play world reads its level's grid
+        w := world_level(src)
+        if len(args) < 4 do return "usage: probe <world> <x> <y> <z>"
+        p: vec3
+        for i in 0..<3 {
+            v, ok := strconv.parse_f32(args[1 + i])
+            if !ok do return fmt.tprintf("bad coordinate '%s'", args[1 + i])
+            p[i] = v
+        }
+        if len(w.probes.probes) == 0 do return "not baked"
+        dirs  := [6]vec3{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
+        names := [6]string{"+X", "-X", "+Y", "-Y", "+Z", "-Z"}
+        for d, i in dirs {
+            e := probe_grid_sample(&w.probes, p, d, probe_layer_scales(&w.probes, light_group_scales(src, timer_sec_since_start())))
+            fmt.sbprintf(out, "%s  %.4f %.4f %.4f\n", names[i], e.x, e.y, e.z)
+        }
 
     case "play":
         // Play mode (world_play.odin) on a world's level: play, stop, or toggle pause.
@@ -518,11 +545,11 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         }
         fmt.sbprintf(out, "%v %v %v\n", ui.tool, ui.space, ui.pivot)
 
-    case "assets":
-        // The Asset Buffers window's data as text (ui_asset_buffers.odin).
-        if len(args) > 0 do ui.show_asset_buffers = args[0] == "show"
-        for it in asset_mem_items() {
-            fmt.sbprintf(out, "%-8v %10s  %s  (%s)\n", it.kind, bytes_text(it.bytes), it.name, it.detail)
+    case "resources":
+        // The GPU Resources window's data as text (ui_resources.odin).
+        if len(args) > 0 do ui.show_resources = args[0] == "show"
+        for it in resource_items() {
+            fmt.sbprintf(out, "%-10v %10s  %s / %s  (%s)\n", it.kind, bytes_text(it.bytes), it.owner, it.name, it.detail)
         }
 
     case "timings":
