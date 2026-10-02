@@ -6,6 +6,8 @@ import "core:log"
 import "core:mem"
 import vmem "core:mem/virtual"
 import "core:os"
+import "core:path/filepath"
+import "core:strings"
 import "core:sys/windows"
 import sdl "vendor:sdl3"
 
@@ -70,6 +72,8 @@ app_init :: proc() {
     init_app_allocators()
     setup_context()
     context = app.g_context
+
+    app_enter_project_dir()
 
     sdl.SetLogPriorities(.VERBOSE)
     sdl.SetLogOutputFunction(log_sdl, nil)
@@ -184,6 +188,25 @@ app_run :: proc() {
 EXE_PATH     :: "bin/blimp.exe"
 EXE_OLD_PATH :: "bin/blimp_old.exe"
 
+// Every path is relative to the working directory, which is only right when launched from the project
+// root (VS Code, a terminal). Walk up from the exe's folder to the first one holding assets/ and make it
+// the working directory: bin/blimp.exe finds the project root, out/game/game.exe its own folder.
+app_enter_project_dir :: proc() {
+    dir, err := os.get_executable_directory(context.temp_allocator)
+    if err != nil do return
+    for {
+        assets, _ := filepath.join({dir, "assets"}, context.temp_allocator)
+        if os.is_dir(assets) {
+            os.set_working_directory(dir)
+            return
+        }
+        parent := filepath.dir(dir)
+        if parent == dir do break
+        dir = parent
+    }
+    log.warn("No assets/ folder above the exe; keeping the working directory")
+}
+
 // Relaunches the engine with `flags` (launch options such as --renderdoc; pass os.args[1:] to keep this
 // run's), passing the std handles through so the new process keeps the console. Without this the child
 // (and any build.exe it later spawns) gets dead std handles — output vanishes and the next Apply's build
@@ -198,6 +221,19 @@ app_spawn_self :: proc(flags: []string) {
         stdout  = os.stdout,
         stderr  = os.stderr,
     })
+}
+
+// Opens a File Explorer window on the folder holding `path` (project-relative or absolute), with the
+// file selected: find a level or kit to edit and resave it outside the engine.
+app_show_in_explorer :: proc(path: string) {
+    abs, _ := filepath.abs(path, context.temp_allocator)
+    if !os.exists(abs) {
+        log.warnf("Show in Explorer: no file at %s", abs)
+        return
+    }
+    abs, _ = strings.replace_all(abs, "/", "\\", context.temp_allocator)
+    params := windows.utf8_to_wstring(fmt.tprintf("/select,\"%s\"", abs), context.temp_allocator)
+    windows.ShellExecuteW(nil, windows.L("open"), windows.L("explorer.exe"), params, nil, windows.SW_SHOWNORMAL)
 }
 
 app_rebuild_and_restart :: proc() -> bool {

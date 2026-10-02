@@ -55,6 +55,8 @@ ICON_PROBES       :: "\uE3A5"   // blur_on
 ICON_LIGHTING     :: "\uE0F0"   // lightbulb
 ICON_BAKE         :: "\uE80E"   // whatshot
 ICON_SCRIPT       :: "\uE86F"   // code
+ICON_FOLDER_OPEN  :: "\uE2C8"   // folder_open
+ICON_BACK         :: "\uE5C4"   // arrow_back
 
 ICON_FONT_PATH :: "assets_engine/fonts/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf"
 

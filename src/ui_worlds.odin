@@ -11,7 +11,8 @@ import im "lib:odin-imgui"
 // strip, not a third list — with compact rows and per-world + / × buttons; hidden when nothing is open.
 //
 // Clicking a scene or kit opens it — or, if it's already open, brings its window forward instead of
-// opening a second copy (two copies of a scene would both save to the same file).
+// opening a second copy (two copies of a scene would both save to the same file). Right-clicking any
+// row offers Show in Explorer.
 @(private="file")
 worlds_ui: struct {
     filter: [128]u8,   // search box text (NUL-terminated); filters scenes and kits by path
@@ -68,6 +69,7 @@ worlds_browse :: proc(filter: string) {
                 if open != nil do ui_world_focus(open)
                 else do world_open_scene(path)
             }
+            worlds_row_menu(path)
             im.PopID()
         }
         if shown == 0 do im.TextDisabled("%s", tr(.Worlds_None))
@@ -87,6 +89,7 @@ worlds_browse :: proc(filter: string) {
                 if open != nil do ui_world_focus(open)
                 else do world_open_kit(&kit)
             }
+            worlds_row_menu(kit.path)
             im.PopID()
         }
         if shown == 0 do im.TextDisabled("%s", tr(.Worlds_None))
@@ -129,6 +132,7 @@ worlds_open_row :: proc(w: ^World) {
     im.SetNextItemAllowOverlap()   // the + / × buttons sit on top of it
     if im.Selectable("##row", active_view != nil && world_level(active_view.world) == w, {}, {0, h}) do ui_world_focus(w)
     mn, mx := im.GetItemRectMin(), im.GetItemRectMax()
+    worlds_row_menu(w.source)
 
     dl := im.GetWindowDrawList()
     line := im.GetTextLineHeight()
@@ -235,6 +239,16 @@ worlds_row :: proc(icon, name, detail: string, tag: cstring) -> (clicked: bool) 
     im.DrawList_AddText(dl, {x, mn.y + style.FramePadding.y + line}, dim, fmt.ctprintf("%s", detail))
     if tag != nil do worlds_tag(dl, {x + im.CalcTextSize(name_c).x + style.ItemSpacing.x, mn.y + style.FramePadding.y}, tag)
     return
+}
+
+// The right-click menu of the row just drawn (a scene or kit): show its file in Explorer, to edit and
+// resave it outside the engine.
+@(private="file")
+worlds_row_menu :: proc(path: string) {
+    if im.BeginPopupContextItem("##row_menu") {
+        if im.MenuItem(fmt.ctprintf("%s  %s", ICON_FOLDER_OPEN, tr(.Btn_Show_In_Explorer))) do app_show_in_explorer(path)
+        im.EndPopup()
+    }
 }
 
 // A small accent-tinted pill with a word in it ("open", "kit").

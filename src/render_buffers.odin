@@ -40,6 +40,7 @@ Asset_Buffers :: struct {
     material_buffer_data: [dynamic]Material,
 
     texture_buffers: [dynamic]Resource_With_Upload,
+    texture_ui:      [dynamic]dx.Resource_View,   // each texture's SRV in the ImGui heap (Resources window tooltip)
     sampler:       dx.Resource_View,   // linear: render mode .Clean
     sampler_point: dx.Resource_View,   // point: the retro look's point sampling
 }
@@ -141,7 +142,9 @@ asset_buffers_create :: proc() {
     asset_buffers.attribute_buffer = buffers_resource_create(size_of(Vertex_Attributes), u32(len(asset_system.vertex_attributes)), &renderer_dx.resource_heap)
 
     for img in asset_system.images {
-        append(&asset_buffers.texture_buffers, buffers_texture_create(img.width, img.height, dx_format(img.format)))
+        tex := buffers_texture_create(img.width, img.height, dx_format(img.format))
+        append(&asset_buffers.texture_buffers, tex)
+        append(&asset_buffers.texture_ui, dx.descriptor_heap_register_srv(renderer_dx.render_context, &renderer_dx.ui_heap, tex.resource))
     }
 
     // Material table: asset material image indices are resolved to bindless heap slots here.
@@ -182,6 +185,9 @@ asset_buffers_destroy :: proc() {
     }
     delete(asset_buffers.texture_buffers)
     asset_buffers.texture_buffers = nil
+    for view in asset_buffers.texture_ui do dx.descriptor_heap_free(&renderer_dx.ui_heap, view.heap_slot)
+    delete(asset_buffers.texture_ui)
+    asset_buffers.texture_ui = nil
 
     for b in ([?]Resource_With_Upload{asset_buffers.material_buffer, asset_buffers.attribute_buffer, asset_buffers.position_buffer, asset_buffers.index_buffer, asset_buffers.mesh_buffer}) {
         dx.descriptor_heap_free(&renderer_dx.resource_heap, b.resource_view.heap_slot)

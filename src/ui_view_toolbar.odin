@@ -4,7 +4,7 @@ import "core:fmt"
 import im "lib:odin-imgui"
 
 // A row of view actions above the image. The window has zero padding (the image runs edge to edge),
-// so the row indents itself. Save, play controls, then world settings and the view toggles. The
+// so the row indents itself. Save and Show in Explorer, play controls, then world settings and the view toggles. The
 // transform tools are a column down the left instead (ui_view_tools), so this row stays short.
 ui_view_toolbar :: proc(view: ^Render_View) {
     style := im.GetStyle()
@@ -26,6 +26,10 @@ ui_view_toolbar :: proc(view: ^Render_View) {
         case:                       im.SetTooltip("%s  %s  (Ctrl+S)", tr(.Btn_Save_Level), fmt.ctprintf("%s", level.save_path))
         }
     }
+    // The level's or kit's file in Explorer, to edit and resave it outside the engine.
+    im.SameLine()
+    if im.Button(fmt.ctprintf("%s##explorer", ICON_FOLDER_OPEN)) do app_show_in_explorer(level.source)
+    im.SetItemTooltip("%s  %s", tr(.Btn_Show_In_Explorer), fmt.ctprintf("%s", level.source))
     im.SameLine(0, style.ItemSpacing.x * 3)
 
     // Play / Pause / Step (world_play.odin). Play turns into Stop while playing; Stop is also the reset, since

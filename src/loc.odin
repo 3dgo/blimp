@@ -51,6 +51,7 @@ Loc_ID :: enum {
     Worlds_Kit_Tag,
     Btn_New_Viewport,
     Btn_Close,
+    Btn_Show_In_Explorer,
     Btn_Refresh,
     View_Suffix,
     // Schema editor
@@ -244,6 +245,11 @@ Loc_ID :: enum {
     Res_Swapchain,
     Res_Debug_Lines,
     Res_Count,
+    Res_All,
+    Res_Back,
+    Res_Focus,
+    Res_Hint_Focus,
+    Res_Hint_Explorer,
     Asset_Shared,
     Asset_Mesh_Detail,
     Asset_Mesh_Table,
@@ -298,6 +304,7 @@ loc_text := [Loc_ID][Lang]cstring {
     .Worlds_Kit_Tag    = { .EN = "kit", .ZH = "套件" },   // open-worlds panel: this world is a kit (not saved)
     .Btn_New_Viewport = { .EN = "New Viewport",  .ZH = "新视口" },
     .Btn_Close        = { .EN = "Close",         .ZH = "关闭" },
+    .Btn_Show_In_Explorer = { .EN = "Show in Explorer", .ZH = "在资源管理器中显示" },
     .Btn_Refresh      = { .EN = "Refresh",       .ZH = "刷新" },
     .View_Suffix      = { .EN = "Viewport",      .ZH = "视口" },   // "<world title> 视口" on every view window
 
@@ -496,6 +503,11 @@ loc_text := [Loc_ID][Lang]cstring {
     .Res_Swapchain        = { .EN = "Swapchain",      .ZH = "交换链" },
     .Res_Debug_Lines      = { .EN = "Debug lines",    .ZH = "调试线" },
     .Res_Count          = { .EN = "%d resources",   .ZH = "%d 个资源" },
+    .Res_All            = { .EN = "All",            .ZH = "全部" },
+    .Res_Back           = { .EN = "Back (Backspace)", .ZH = "返回（Backspace）" },
+    .Res_Focus          = { .EN = "Show only %s",   .ZH = "只显示 %s" },
+    .Res_Hint_Focus     = { .EN = "Click: show only this group", .ZH = "单击：只显示此组" },
+    .Res_Hint_Explorer  = { .EN = "Right-click: show the file in Explorer", .ZH = "右键：在资源管理器中显示文件" },
     .Asset_Shared         = { .EN = "shared by %d keys", .ZH = "被 %d 个键共享" },
     .Asset_Mesh_Detail    = { .EN = "%d vertices, %d triangles", .ZH = "%d 个顶点，%d 个三角形" },
     .Asset_Mesh_Table     = { .EN = "Mesh table",     .ZH = "网格表" },

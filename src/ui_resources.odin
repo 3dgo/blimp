@@ -5,12 +5,16 @@ import "core:slice"
 import "core:strings"
 import im "lib:odin-imgui"
 import "vendor:directx/d3d12"
+import "dx"
 
 // Resources window: what the GPU holds and who owns it, one block per resource in a treemap whose area
 // is its byte size (like Unreal's Size Map), grouped by owner — the shared assets (Asset_Buffers), each
 // open world (its draw mirror, baked probes and probe atlas), each view (its render targets) and the
 // engine — and coloured by kind, with a per-kind bar above it. Bytes are the GPU-side resource; the
 // upload-heap staging copy most of them keep is not counted. Rebuilt each frame in scratch.
+//
+// Clicking a group shows only it, filling the window (Back or Backspace returns to all). Hovering a
+// texture shows the picture; right-clicking a block offers Show in Explorer on the file it came from.
 
 Resource_Kind :: enum { Texture, Geometry, Table, Probes, Frame_Data, Target }
 
@@ -21,6 +25,15 @@ Resource_Item :: struct {
     bytes:  int,
     detail: string,   // tooltip line: dimensions, counts, capacity
     atlas:  ^World,   // a probe atlas: its world, so the tooltip can show the picture
+    image:  int,      // an asset texture: its asset_system.images index, for the tooltip picture; -1 otherwise
+    file:   string,   // the file it came from (glTF, image, .level), for Show in Explorer; "" if none
+}
+
+@(private="file")
+resources_ui: struct {
+    focus:      sbuf128,   // the one owner shown, filling the treemap; "" shows them all
+    menu_owner: sbuf128,   // the right-clicked block's owner and file, for its menu
+    menu_file:  sbuf256,
 }
 
 @(rodata, private="file")
@@ -44,14 +57,14 @@ KIND_COLOR := [Resource_Kind][3]f32{
 }
 
 RESOURCES_WINDOW_SIZE :: [2]f32{760, 500}   // first-open size (× display scale)
-RESOURCE_ATLAS_PREVIEW :: 256               // a probe atlas's tooltip picture, width in points
+RESOURCE_PREVIEW :: 256                     // a texture's or probe atlas's tooltip picture, longest side in points
 
 // Every GPU resource, largest first. Texture bytes are the RGBA8 pixels (one mip); geometry is a mesh's
 // index, position and attribute ranges; per-frame buffers count every frame in flight at full capacity.
 resource_items :: proc(allocator := context.temp_allocator) -> []Resource_Item {
     items := make([dynamic]Resource_Item, 0, len(asset_system.images) + len(asset_system.meshes) + 16 * (len(worlds) + len(views) + 1), allocator)
-    add :: proc(items: ^[dynamic]Resource_Item, owner, name: string, kind: Resource_Kind, bytes: int, detail: string, atlas: ^World = nil) {
-        append(items, Resource_Item{owner, name, kind, bytes, detail, atlas})
+    add :: proc(items: ^[dynamic]Resource_Item, owner, name: string, kind: Resource_Kind, bytes: int, detail: string, atlas: ^World = nil, image := -1, file := "") {
+        append(items, Resource_Item{owner, name, kind, bytes, detail, atlas, image, file})
     }
     // A fixed-capacity buffer: count × element size, times the frames in flight when it's per frame.
     capacity :: proc(count, size, flights: int, allocator := context.temp_allocator) -> string {
@@ -71,13 +84,13 @@ resource_items :: proc(allocator := context.temp_allocator) -> []Resource_Item {
     for img, i in asset_system.images {
         detail := fmt.aprintf("%d × %d RGBA8", img.width, img.height, allocator = allocator)
         if image_keys[i] > 1 do detail = fmt.aprintf("%s · %s", detail, fmt.tprintf(trs(.Asset_Shared), image_keys[i]), allocator = allocator)
-        add(&items, assets, image_name[i], .Texture, len(img.pixels), detail)
+        add(&items, assets, image_name[i], .Texture, len(img.pixels), detail, image = i, file = asset_key_file(image_name[i]))
     }
     mesh_name := make([]string, len(asset_system.meshes), context.temp_allocator)
     for key, idx in asset_system.mesh_ids do mesh_name[idx] = key
     for m, i in asset_system.meshes {
         bytes := int(m.index_count) * size_of(u32) + int(m.vertex_count) * (size_of(vec3) + size_of(Vertex_Attributes))
-        add(&items, assets, mesh_name[i], .Geometry, bytes, fmt.aprintf(trs(.Asset_Mesh_Detail), m.vertex_count, m.index_count / 3, allocator = allocator))
+        add(&items, assets, mesh_name[i], .Geometry, bytes, fmt.aprintf(trs(.Asset_Mesh_Detail), m.vertex_count, m.index_count / 3, allocator = allocator), file = asset_key_file(mesh_name[i]))
     }
     add(&items, assets, trs(.Asset_Mesh_Table), .Table, len(asset_system.meshes) * size_of(Mesh), capacity(len(asset_system.meshes), size_of(Mesh), 1, allocator))
     add(&items, assets, trs(.Asset_Material_Table), .Table, len(asset_system.materials) * size_of(Material), capacity(len(asset_system.materials), size_of(Material), 1, allocator))
@@ -85,6 +98,8 @@ resource_items :: proc(allocator := context.temp_allocator) -> []Resource_Item {
     // Each world: its per-frame draw mirror (fixed capacity, render_buffers.odin) and its baked probes.
     F :: FRAMES_IN_FLIGHT
     for w in worlds {
+        first := len(items)
+        defer for &it in items[first:] do it.file = w.source   // its .level or glTF
         add(&items, w.title, trs(.Res_Transforms),     .Frame_Data, MAX_MESH_INSTANCES * size_of(mat4) * F, capacity(MAX_MESH_INSTANCES, size_of(mat4), F, allocator))
         add(&items, w.title, trs(.Res_Mesh_Instances), .Frame_Data, MAX_MESH_INSTANCES * size_of(Mesh_Instance_Data) * F, capacity(MAX_MESH_INSTANCES, size_of(Mesh_Instance_Data), F, allocator))
         add(&items, w.title, trs(.Res_Lights),         .Frame_Data, MAX_LIGHTS * size_of(GPU_Light) * F, capacity(MAX_LIGHTS, size_of(GPU_Light), F, allocator))
@@ -138,6 +153,13 @@ ui_draw_resources :: proc() {
     im.SetNextWindowSize({RESOURCES_WINDOW_SIZE.x * s, RESOURCES_WINDOW_SIZE.y * s}, .FirstUseEver)
     if im.Begin(tr(.Win_Resources), &ui.show_resources) {
         items := resource_items()
+        if focus := sbuf_str(&resources_ui.focus); focus != "" {
+            kept := make([dynamic]Resource_Item, 0, len(items), context.temp_allocator)
+            for it in items do if it.owner == focus do append(&kept, it)
+            if len(kept) > 0 do items = kept[:]
+            else do sbuf_set(&resources_ui.focus, "")   // its world or view was closed
+        }
+        focused := sbuf_str(&resources_ui.focus) != ""
         totals: [Resource_Kind]int
         total := 0
         for it in items {
@@ -145,9 +167,21 @@ ui_draw_resources :: proc() {
             total += it.bytes
         }
 
-        im.Text("%s", fmt.ctprintf("%s · %s", bytes_text(total), fmt.tprintf(trs(.Res_Count), len(items))))
+        summary := fmt.tprintf("%s · %s", bytes_text(total), fmt.tprintf(trs(.Res_Count), len(items)))
+        if focused {
+            back := im.Button(fmt.ctprintf("%s##back", ICON_BACK))
+            im.SetItemTooltip("%s", tr(.Res_Back))
+            back ||= im.IsWindowFocused(im.FocusedFlags_RootAndChildWindows) && im.IsKeyPressed(.Backspace)
+            im.SameLine()
+            im.AlignTextToFramePadding()
+            im.Text("%s", fmt.ctprintf("%s › %s · %s", trs(.Res_All), sbuf_str(&resources_ui.focus), summary))
+            if back do sbuf_set(&resources_ui.focus, "")
+        } else {
+            im.Text("%s", fmt.ctprintf("%s", summary))
+        }
         resource_kind_bar(totals, total)
-        resource_treemap(items)
+        resource_treemap(items, focused)
+        resource_menu(focused)
     }
     im.End()
 }
@@ -186,12 +220,13 @@ resource_kind_bar :: proc(totals: [Resource_Kind]int, total: int) {
 // The treemap fills the rest of the window: owners first, then each owner's resources inside its block,
 // coloured by kind.
 @(private="file")
-resource_treemap :: proc(items: []Resource_Item) {
+resource_treemap :: proc(items: []Resource_Item, focused: bool) {
     avail := im.GetContentRegionAvail()
     if avail.x < 8 || avail.y < 8 do return
     origin := im.GetCursorScreenPos()
-    im.InvisibleButton("##treemap", avail)   // owns the area so hovering is the canvas's, and drags don't fall through
+    clicked := im.InvisibleButton("##treemap", avail)   // owns the area so hovering is the canvas's, and drags don't fall through
     hovered_canvas := im.IsItemHovered()
+    right_clicked := hovered_canvas && im.IsMouseClicked(.Right)
     mouse := im.GetMousePos()
     dl := im.GetWindowDrawList()
     line := im.GetTextLineHeight()
@@ -211,10 +246,11 @@ resource_treemap :: proc(items: []Resource_Item) {
     for grp, i in groups do group_sizes[i] = grp.size
     group_rects := treemap_layout(group_sizes, {origin, origin + avail})
 
-    hovered := -1
+    hovered, hovered_group := -1, -1
     for grp, g in groups {
         r := group_rects[g]
         im.DrawList_AddRectFilled(dl, r.min, r.max, group_col)
+        if hovered_canvas && mouse.x >= r.min.x && mouse.x < r.max.x && mouse.y >= r.min.y && mouse.y < r.max.y do hovered_group = g
 
         // A header strip names the owner when the block has room for it.
         inner := Treemap_Rect{r.min + 1, r.max - 1}
@@ -251,15 +287,56 @@ resource_treemap :: proc(items: []Resource_Item) {
         }
     }
 
+    // Click a group (its header or any block in it) to show only it; right-click a block for its menu.
+    if clicked && !focused && hovered_group >= 0 do sbuf_set(&resources_ui.focus, groups[hovered_group].owner)
+    if right_clicked && hovered >= 0 {
+        sbuf_set(&resources_ui.menu_owner, items[hovered].owner)
+        sbuf_set(&resources_ui.menu_file, items[hovered].file)
+        im.OpenPopup("##resource_menu")
+    }
+
     if hovered >= 0 {
         it := items[hovered]
         im.BeginTooltip()
         im.Text("%s", fmt.ctprintf("%s", it.name))
         im.TextDisabled("%s", fmt.ctprintf("%s · %s · %s", it.owner, trs(KIND_LABEL[it.kind]), bytes_text(it.bytes)))
         im.TextDisabled("%s", fmt.ctprintf("%s", it.detail))
-        if it.atlas != nil do ui_probe_atlas_image(it.atlas, RESOURCE_ATLAS_PREVIEW * app.dispaly_scale)
+        if it.atlas != nil do ui_probe_atlas_image(it.atlas, RESOURCE_PREVIEW * app.dispaly_scale)
+        if it.image >= 0 do resource_texture_image(it.image, RESOURCE_PREVIEW * app.dispaly_scale)
+        if !focused do im.TextDisabled("%s", tr(.Res_Hint_Focus))
+        if it.file != "" do im.TextDisabled("%s", tr(.Res_Hint_Explorer))
         im.EndTooltip()
     }
+}
+
+// The right-clicked block's menu: show only its group, show its file in Explorer.
+@(private="file")
+resource_menu :: proc(focused: bool) {
+    if !im.BeginPopup("##resource_menu") do return
+    defer im.EndPopup()
+    owner := sbuf_str(&resources_ui.menu_owner)
+    if !focused && im.MenuItem(fmt.ctprintf(trs(.Res_Focus), owner)) do sbuf_set(&resources_ui.focus, owner)
+    file := sbuf_str(&resources_ui.menu_file)
+    if im.MenuItem(fmt.ctprintf("%s  %s", ICON_FOLDER_OPEN, tr(.Btn_Show_In_Explorer)), nil, false, file != "") do app_show_in_explorer(file)
+}
+
+// An asset texture, its longest side `size` points (the ImGui-heap SRV asset_buffers_create made for it).
+@(private="file")
+resource_texture_image :: proc(image: int, size: f32) {
+    if image >= len(asset_buffers.texture_ui) do return   // mid hot reload
+    img := asset_system.images[image]
+    scale := size / f32(max(img.width, img.height, 1))
+    gpu := dx.descriptor_heap_gpu_handle_at(renderer_dx.ui_heap, asset_buffers.texture_ui[image].heap_slot)
+    im.Image(im.TextureRef{_TexID = im.TextureID(gpu.ptr)}, {f32(img.width) * scale, f32(img.height) * scale})
+}
+
+// The file an asset key comes from, the path before its first ':' ("assets/models/car.gltf:body" ->
+// "assets/models/car.gltf"); "" for a key that isn't a path (a built-in image like "white").
+@(private="file")
+asset_key_file :: proc(key: string) -> string {
+    file := key
+    if i := strings.index_byte(key, ':'); i >= 0 do file = key[:i]
+    return strings.contains_rune(file, '/') ? file : ""
 }
 
 // Text clipped to a block, so a long key never spills into its neighbour.
