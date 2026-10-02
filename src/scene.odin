@@ -18,8 +18,11 @@ import hm "core:container/handle_map"
 // Format: one `[entity]` section per entity, `field = value` lines. Vectors and quaternions
 // are comma-separated floats. The same block format is the clipboard payload (see world_entity.odin).
 
-// Every scene file the editor can open: `.ini` files under assets/ or assets_engine/ that contain at
-// least one [entity] block (content, not name, decides — a stray config .ini there won't show up).
+// The extension that makes a file a level. Other files in the same format (the entity templates)
+// use another extension, so they never show up as levels.
+LEVEL_EXT :: ".level"
+
+// Every scene file the editor can open: LEVEL_EXT files under assets/ or assets_engine/.
 // Appends project-relative paths, cloned with `allocator`.
 scene_find_files :: proc(out: ^[dynamic]string, allocator: runtime.Allocator) {
     files := make([dynamic]os.File_Info, context.temp_allocator)
@@ -27,9 +30,7 @@ scene_find_files :: proc(out: ^[dynamic]string, allocator: runtime.Allocator) {
     _ = common.get_all_files("./assets_engine", &files, context.temp_allocator)
 
     for fi in files {
-        if strings.to_lower(filepath.ext(fi.fullpath), context.temp_allocator) != ".ini" do continue
-        data, err := os.read_entire_file(fi.fullpath, context.temp_allocator)
-        if err != nil || entity_count_blocks(string(data)) == 0 do continue
+        if strings.to_lower(filepath.ext(fi.fullpath), context.temp_allocator) != LEVEL_EXT do continue
         append(out, asset_key(fi.fullpath, allocator))
     }
     slice.sort(out[:])

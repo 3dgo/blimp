@@ -13,7 +13,15 @@ PBR version later is additive.
   pipeline's NDC→viewport Y-flip is the extra flip that makes reflection alone insufficient).
   Don't remove the swap.
 - **Reversed-Z**: float depth, swapped near/far, `GREATER` compare, clear to 0.
-- **Render to a float HDR target**, quantize only at the end of the post chain.
+- **Render to a float HDR target**, quantize only at the end of the post chain. Each view has
+  an `R16G16B16A16_FLOAT` scene target (`hdr_tex`) and an `RGBA8_UNORM` display target
+  (`tex`) that ImGui samples and screenshots read. `render_post.odin` resolves one into the
+  other; debug lines draw after it, onto the display target, so their colours stay exact.
+- **Shading is linear.** Colour textures are `_SRGB` views (decoded on sample); glTF material
+  and vertex colours and light `color` are linear (the picker shows light colour as sRGB,
+  `widget:linear_color`). The world `background` is display-space (sRGB): the scene target
+  clears to it with alpha 0, the scene writes alpha 1, and the tonemap passes alpha-0 pixels
+  through untouched, so the background shows exactly as picked.
 - Light data lives in a GPU buffer indexed from the shader, not root constants.
 - Hardware floor is Resource Binding Tier 3 (~2015 GPUs). No fallback path. Log
   `ResourceBindingTier` and `DXGI_QUERY_VIDEO_MEMORY_INFO` at startup.
@@ -153,6 +161,21 @@ Baked probes for indirect, realtime direct with hard shadows.
   contact darkening. Per-mesh means no atlas packing.
 - **Emissives carry the composition** — lamp glass, windows, candles. Unlit emissive
   materials plus tight bloom, separate from the lighting solve.
+- **Realtime light falloff is per light** (`falloff`), over `range` = inner, outer radius;
+  every mode reaches exactly zero at `range.y`. Not photoreal by default — pick per light:
+  - *Inverse Square* (default): `intensity / d²`, held flat inside `range.x` (the source's
+    size), windowed by `saturate(1 - (d/r)⁴)²` (Karis 2013; Unreal / Unity URP). Intensity
+    is the light at 1 unit.
+  - *Linear*: full inside `range.x`, straight down to zero at `range.y`.
+  - *Smooth*: full inside `range.x`, smoothstep to zero at `range.y`.
+
+  Directional intensity is unattenuated. Spot cone: full inside `inner_fov`,
+  `saturate((cosθ - cosOuter) / (cosInner - cosOuter))²` to zero at `fov` (both full angles,
+  inner clamped to outer). No 1/π on diffuse, as in URP.
+- **Cylinder** light: a spot whose beam is a cylinder, not a cone. Parallel rays along +Z
+  from a disc at the entity (`L = -forward`, like a directional light, nothing behind the
+  disc). The falloff runs along the beam over `range`; across it the edge fades like the
+  spot's cone, full inside `inner_radius`, squared to zero at `radius`.
 - Only two or three genuinely-moving realtime lights. A baked fire's intensity can be
   modulated at runtime and reads as flickering.
 
@@ -197,7 +220,8 @@ Era tells, most recognizable first:
 5. **Dithering** — 4×4 Bayer, 5 bits per channel. Least conspicuous, but its absence shows
    as banding in fog, which dominates these scenes.
 
-**Post chain order: tonemap → LUT → quantize + dither → upscale.** Quantize in display
+**Post chain order: tonemap → LUT → quantize + dither → upscale.** The tonemap is ACES
+filmic (Hill's RRT+ODT fit) after `2^exposure` (world setting, EV), then sRGB-encoded. Quantize in display
 space, not linear — these scenes sit at the bottom of the value range where linear 5-bit
 gives almost no levels.
 

@@ -108,7 +108,7 @@ ui_draw_entity_panel :: proc(p: ^Entity_Panel) {
     im.End()
 }
 
-// "Follow active (scene.ini)" / one entry per open world.
+// "Follow active (scene.level)" / one entry per open world.
 @(private="file")
 ui_panel_target_combo :: proc(p: ^Entity_Panel) {
     active := active_world()
@@ -141,7 +141,8 @@ ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
             rename_row(p, w, h)
             continue
         }
-        clicked := im.Selectable(fmt.ctprintf("%s##%v", e.name, h.idx), e.selected)
+        icon, _ := entity_icon(e)
+        clicked := ui_icon_selectable(fmt.ctprintf("##e%v", h.idx), icon, sbuf_str(&e.name), e.selected)
         if im.IsItemHovered() && im.IsMouseReleased(.Right) {
             if !e.selected do selection_only(w, h)
             open_menu = true
@@ -275,4 +276,17 @@ ui_paste_over :: proc(w: ^World) {
         entity_apply_text(e, clip, vmem.arena_allocator(&w.arena), {"identity", "placement"})
         e.model = asset_model_key(e.model)                      // re-intern the pasted model key
     }
+}
+
+// A one-line selectable with an icon column (blank when `icon` is "") and `name` after it, so names
+// line up whether or not a row has an icon. The entity and template lists. `id` is the row's
+// "##label", unique in the window. The selectable is the last item, so IsItemHovered still applies.
+ui_icon_selectable :: proc(id: cstring, icon, name: string, selected: bool) -> (clicked: bool) {
+    clicked = im.Selectable(id, selected)
+    mn := im.GetItemRectMin()
+    dl := im.GetWindowDrawList()
+    text := im.GetColorU32ImVec4(im.GetStyleColorVec4(.Text)^)   // takes style alpha, so it dims when disabled
+    if icon != "" do im.DrawList_AddText(dl, mn, text, fmt.ctprintf("%s", icon))
+    im.DrawList_AddText(dl, {mn.x + im.GetTextLineHeight() * 1.6, mn.y}, text, fmt.ctprintf("%s", name))
+    return
 }

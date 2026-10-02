@@ -39,6 +39,11 @@ editor_entity_shapes :: proc(e: ^Entity, selected_color: Maybe(vec4)) {
     }
 
     col := selected_color.? or_else editor_dim(editor_light_color(e))
+    // Where the falloff starts (range.x, clamped to the reach): the same shape as the reach, dimmer.
+    // Dim shapes (falloff start, inner cone / radius) are skipped where they'd coincide with the bright
+    // ones: at 0 the start collapses onto the light, and at or past the outer value it would draw over it.
+    start := e.range.x
+    has_start := start > 0 && start < e.range.y
     switch e.light_type {
     case .None:
     case .Directional:
@@ -47,9 +52,24 @@ editor_entity_shapes :: proc(e: ^Entity, selected_color: Maybe(vec4)) {
         debug_circle(p, right, up, 0.25, col)
     case .Point:
         debug_sphere(p, e.range.y, col, e.rotation)   // its reach (falloff radius)
+        if has_start do debug_sphere(p, start, editor_dim(col), e.rotation)
     case .Spot:
         half := math.to_radians(e.fov) * 0.5
         debug_cone(p, forward, e.range.y, half, col)   // out to its reach
+        if has_start do debug_circle(p + forward * (start * math.cos(half)), right, up, start * math.sin(half), editor_dim(col))   // just the rim: a second cone's sides would sit on the first's
+        if selected_color != nil && e.inner_fov < e.fov {   // and its full-intensity core, like Unreal's inner cone
+            inner := math.to_radians(e.inner_fov) * 0.5
+            debug_cone(p, forward, e.range.y, inner, editor_dim(col), cap = false)
+        }
+    case .Cylinder:
+        // Its beam out to its reach, an arrow down the axis, and (selected) its full-intensity core.
+        r := max(e.radius, 0)
+        debug_cylinder(p, forward, e.range.y, r, col)
+        debug_arrow(p, p + forward * min(e.range.y, 1.5), col, 0.3)
+        if has_start do debug_circle(p + forward * start, right, up, r, editor_dim(col))   // a ring: its sides would sit on the beam's
+        if selected_color != nil && e.inner_radius < r {
+            debug_cylinder(p, forward, e.range.y, max(e.inner_radius, 0), editor_dim(col))
+        }
     }
 }
 
@@ -86,14 +106,21 @@ Editor_Icon :: struct {
     alpha:  f32,
 }
 
-// The icon `e` shows, if any: an enabled, unhidden camera or light. A light wins over a camera on the
-// same entity (two roles are normally two entities).
+// The icon `e` shows in the viewport, if any: entity_icon (its own icon, else its light or camera
+// type's), while it's enabled and unhidden.
 editor_entity_icon :: proc(e: ^Entity) -> (icon: string, ok: bool) {
     if .Enabled not_in e.basic_flags || .Hidden in e.basic_flags do return
+    return entity_icon(e)
+}
+
+// The icon of `e`'s light or camera type, whatever its flags; none for other entities. A light wins
+// over a camera on the same entity (two roles are normally two entities).
+entity_type_icon :: proc(e: ^Entity) -> (icon: string, ok: bool) {
     switch e.light_type {
     case .None:
     case .Point:       return ICON_LIGHT_POINT, true
     case .Spot:        return ICON_LIGHT_SPOT, true
+    case .Cylinder:    return ICON_LIGHT_BEAM, true
     case .Directional: return ICON_LIGHT_SUN, true
     }
     if e.camera_type != .None do return ICON_CAMERA, true

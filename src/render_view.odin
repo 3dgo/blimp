@@ -1,7 +1,9 @@
 package blimp
 
+import "core:math"
 import "core:mem"
 import "vendor:directx/d3d12"
+import "vendor:directx/dxgi"
 import "dx"
 
 // A view onto a world: a render target, a camera, and the per-flight frame constants that pair
@@ -24,11 +26,15 @@ Render_View :: struct {
     debug_first, debug_count: u32,   // this frame's overlay range in debug_draw.verts
 }
 
+// The scene target: linear, float, unclamped. Quantized only at the end of the post chain.
+VIEW_HDR_FORMAT :: dxgi.FORMAT.R16G16B16A16_FLOAT
+
 render_view_create :: proc(view: ^Render_View, world: ^World, camera: Camera, width, height: u32) {
     view.world  = world
     view.camera = camera
     view.target = dx.viewport_create(renderer_dx.render_context,
-        {init_width = width, init_height = height, format = .R8G8B8A8_UNORM, depth_format = .D32_FLOAT, clear_color = render_view_clear_color(world), ui_heap_srv = &renderer_dx.ui_heap},
+        {init_width = width, init_height = height, format = .R8G8B8A8_UNORM, hdr_format = VIEW_HDR_FORMAT, depth_format = .D32_FLOAT,
+         clear_color = render_view_clear_color(world), ui_heap_srv = &renderer_dx.ui_heap, resource_heap_srv = &renderer_dx.resource_heap},
         app.allocators.perm)
     for i in 0..<FRAMES_IN_FLIGHT {
         view.frame_constants[i]     = dx.buffer_create(renderer_dx.render_context, {element_size = size_of(Frame_Constants), num_elements = 1, heap_type = .UPLOAD})
@@ -86,6 +92,8 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         sampler_slot          = asset_buffers.sampler.heap_slot,
         
         debug_line_buffer_slot = debug_draw.buffer_srv[frame_slot].heap_slot,
+        hdr_texture_slot       = view.target.hdr_srv.heap_slot,
+        exposure               = math.pow(2, world.settings.exposure),
     }
     if e, ok := render_view_game_camera(view); ok {
         frame_constants.view_mat = entity_camera_view(e)
@@ -95,17 +103,17 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
     mem.copy(view.frame_constants_ptr[frame_slot], &frame_constants, size_of(Frame_Constants))
 }
 
-// Records the scene pass: clears the view's target and draws its world's mesh instances into it.
-// Leaves the target + this view's constants bound, so a caller may draw more (debug lines) after.
+// Records the scene pass: clears the view's HDR scene target and draws its world's mesh instances into it.
+// The post chain (render_post.odin) then resolves it into the display target.
 render_view_draw :: proc(view: ^Render_View, frame_slot: u64) {
     cmd   := renderer_dx.cmd_gfx
     world := view.world
 
-    dx.texture_transition(cmd, &view.target.tex, {.RENDER_TARGET}, {.RENDER_TARGET}, .RENDER_TARGET)
+    dx.texture_transition(cmd, &view.target.hdr_tex, {.RENDER_TARGET}, {.RENDER_TARGET}, .RENDER_TARGET)
     dx.texture_transition(cmd, &view.target.depth_tex, {.DEPTH_STENCIL}, {.DEPTH_STENCIL_WRITE}, .DEPTH_STENCIL_WRITE)
-    cmd.handle->OMSetRenderTargets(1, &view.target.rtv.cpu_handle, false, &view.target.dsv.cpu_handle)
+    cmd.handle->OMSetRenderTargets(1, &view.target.hdr_rtv.cpu_handle, false, &view.target.dsv.cpu_handle)
 
-    cmd.handle->ClearRenderTargetView(view.target.rtv.cpu_handle, &view.target.clear_color, 0, nil)
+    cmd.handle->ClearRenderTargetView(view.target.hdr_rtv.cpu_handle, &view.target.clear_color, 0, nil)
     cmd.handle->ClearDepthStencilView(view.target.dsv.cpu_handle, {.DEPTH}, 0.0, 0, 0, nil)   // reversed-Z: 0 = far
 
     dx.descriptor_heap_bind(cmd, {renderer_dx.resource_heap, renderer_dx.sampler_heap})
@@ -128,12 +136,13 @@ render_view_end :: proc(view: ^Render_View) {
     dx.texture_transition(renderer_dx.cmd_gfx, &view.target.tex, {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)
 }
 
-// The view's background: its world's settings.background (the target is UNORM, not sRGB, so this is
-// the displayed value as-is). It's also the target's optimized clear value, so when it changes the
-// target is recreated (render_view_needs_rebuild) rather than cleared to a mismatched colour.
+// The view's background: its world's settings.background, a display-space (sRGB) colour, cleared with
+// alpha 0 so the tonemap passes it through as picked (the scene writes alpha 1). It's also the target's
+// optimized clear value, so when it changes the target is recreated (render_view_needs_rebuild) rather
+// than cleared to a mismatched colour.
 render_view_clear_color :: proc(w: ^World) -> [4]f32 {
     bg := w.settings.background
-    return {bg.r, bg.g, bg.b, 1}
+    return {bg.r, bg.g, bg.b, 0}
 }
 
 // True when the target must be recreated before drawing: a new size, or a new background colour.
@@ -141,3 +150,4 @@ render_view_clear_color :: proc(w: ^World) -> [4]f32 {
 render_view_needs_rebuild :: proc(view: ^Render_View, size: uvec2) -> bool {
     return size.x != view.target.width || size.y != view.target.height || view.target.clear_color != render_view_clear_color(view.world)
 }
+

@@ -118,10 +118,12 @@ asset_key_from_clipboard :: proc(key: string, kind: Asset_Kind) -> (string, bool
 // Editable inline string (sbuf64/128/256). Each size has a fixed capacity, so a stack buffer one
 // byte larger than the biggest (for the NUL ImGui needs) round-trips it with no allocation; ImGui
 // is told the field's real capacity so it can't accept more than fits. Edits write straight back.
-ui_param_sbuf :: proc(name: string, value: any, options := DEFAULT_PARAM_UI_OPTIONS) {
+// `shown` is an extra bit of label after the name (an icon field's glyph); it isn't part of the ID, so
+// it can change while the field is being typed in.
+ui_param_sbuf :: proc(name: string, value: any, options := DEFAULT_PARAM_UI_OPTIONS, shown := "") {
     text, ok := sbuf_any_str(value)
     if !ok do return
-    ui_param_label(name, options)
+    ui_param_label(shown == "" ? name : fmt.tprintf("%s  %s", name, shown), options)
     buf: [cap(sbuf256{}) + 1]u8
     copy(buf[:], text)
     im.BeginDisabled(options.readonly)
@@ -332,7 +334,12 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
                 case:           ui_param_string(label, field_value.(string), field_options)   // no/unknown widget: read-only
                 }
             case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
-                ui_param_sbuf(label, field_value, field_options)   // sbuf64/128/256; other fixed arrays are skipped
+                // sbuf64/128/256; other fixed arrays are skipped. `widget:icon` (a hex codepoint) shows its glyph.
+                shown: string
+                if widget, _ := param_tag_value(tags, "widget:"); widget == "icon" {
+                    if hex, ok := sbuf_any_str(field_value); ok do shown, _ = icon_from_hex(hex)
+                }
+                ui_param_sbuf(label, field_value, field_options, shown)
             case runtime.Type_Info_Integer:
                 ui_param_int(label, field_value.data, field_type.size, typeinfo.signed, field_options)
             case runtime.Type_Info_Float:
@@ -355,8 +362,11 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
                         switch typeinfo.count {
                             case 2: ui_param_vec2(label, &field_value.(vec2), field_options)
                             case 3:
-                                if widget, _ := param_tag_value(tags, "widget:"); widget == "color" do ui_param_color(label, &field_value.([3]f32), field_options)
-                                else do ui_param_vec3(label, &field_value.(vec3), field_options)
+                                switch widget, _ := param_tag_value(tags, "widget:"); widget {
+                                case "color":        ui_param_color(label, &field_value.([3]f32), false, field_options)
+                                case "linear_color": ui_param_color(label, &field_value.([3]f32), true, field_options)
+                                case:                ui_param_vec3(label, &field_value.(vec3), field_options)
+                                }
                             case 4: ui_param_vec4(label, &field_value.(vec4), field_options)
                         }
                 }
@@ -368,10 +378,20 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
     if !options.headerless do im.Unindent()
 }
 
-// An RGB colour (a [3]f32 tagged `widget:color`): swatch + picker.
-ui_param_color :: proc(name: string, value: ^[3]f32, options := DEFAULT_PARAM_UI_OPTIONS) {
+// An RGB colour: swatch + picker, always shown and edited as sRGB (what the swatch displays).
+//   `widget:color`        — stored as sRGB too (a display colour, e.g. the background): edited as-is.
+//   `widget:linear_color` — stored linear (a light's colour, which the shader multiplies): converted for
+//                           the picker and back only when the user changes it, so it doesn't drift.
+ui_param_color :: proc(name: string, value: ^[3]f32, linear: bool, options := DEFAULT_PARAM_UI_OPTIONS) {
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
-    im.ColorEdit3(fmt.ctprintf("##%s", name), value)
+    if linear {
+        shown := [3]f32{linear_to_srgb(value.r), linear_to_srgb(value.g), linear_to_srgb(value.b)}
+        if im.ColorEdit3(fmt.ctprintf("##%s", name), &shown) {
+            value^ = {srgb_to_linear(shown.r), srgb_to_linear(shown.g), srgb_to_linear(shown.b)}
+        }
+    } else {
+        im.ColorEdit3(fmt.ctprintf("##%s", name), value)
+    }
     im.EndDisabled()
 }

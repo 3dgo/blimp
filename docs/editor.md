@@ -7,12 +7,14 @@
   - Any number of worlds can be open at once. They live in a pointer-stable registry,
     `worlds: [dynamic]^World` (`world_registry.odin`), where each world is individually allocated
     because views, panels and undo hold `^World`.
-  - Nothing is open at startup except the Worlds window, which lists open worlds, scenes (`.ini`
-    files with `[entity]` blocks under `assets/` and `assets_engine/` only) and kits.
+  - First launch opens the Worlds window with Templates docked above it. After that imgui.ini keeps the
+    layout, the UI language and which project-wide windows are open (`ui_saved_state.odin`); world windows, views and entity
+    panels belong to a world and aren't reopened. Worlds lists open worlds, scenes (`.level`
+    files under `assets/` and `assets_engine/` only: the extension decides) and kits.
   - Closing a world or view is deferred to `world_registry_process_pending`, after
     `renderer_dx_wait_idle`.
 - **A kit is just a world built from a glTF.** There is no kit or preview world type.
-  - A scene world is built from an `.ini` (`world_open_scene`), a kit world from a glTF
+  - A scene world is built from a `.level` (`world_open_scene`), a kit world from a glTF
     (`world_open_kit`, one entity per `Kit_Node`). That constructor is the only difference.
   - `save_path == ""` marks a kit, which can't be saved back to its glTF.
   - There is no read-only mode. The inspector shows a "won't be saved" warning instead.
@@ -119,7 +121,7 @@
   the generic codec in `serialize.odin`).
   - One format backs save, duplicate, instantiate-from-kit and apply-settings. There is no drag
     and no bespoke asset-placement path.
-  - It uses the OS clipboard (via ImGui), so blocks interchange with scene `.ini` files in a text
+  - It uses the OS clipboard (via ImGui), so blocks interchange with `.level` files in a text
     editor and work across worlds.
   - **Ctrl+C** copies the selected entity in the active world.
   - **Ctrl+V always creates new** entities and never overwrites. Placement comes from the paste
@@ -132,6 +134,16 @@
   - **Per-field paste**: the `widget:` picker has a Paste button beside it. It accepts a whole
     `[entity]` block (and takes that field's value) or a bare key such as
     `assets/models/car.gltf:police`.
+- **Templates** (`ui_templates.odin`, Show menu) add a light, camera or other starting entity to the active
+  world. They are the `[entity]` blocks of `assets_engine/entity_templates.ini`: the level format, but
+  not a `.level`, so the Worlds window never lists it.
+  - A click works like a one-block Ctrl+V at the viewport centre, but keeps the block's rotation and
+    scale (a spot starts pointing down). Fields a block leaves out take their schema default.
+  - **Icons**: an entity's `icon` field is a hex Material Symbols codepoint (`E835`), shown in the viewport
+    (where it can be clicked), the entity list, the Templates window and beside the inspector field.
+    Empty means a light or camera shows its type's icon (`entity_icon`) and anything else none.
+  - Edit Templates opens the file as a world, so templates are authored with the editor's own tools.
+    Save it and press Refresh.
 - **Undo is whole-world snapshots** (`editor_undo.odin`): before any edit, copy the world's entity map.
   - The map is a fixed-size `Static_Handle_Map` value of plain-data entities, so a snapshot is one
     struct copy. Restoring it brings back exact handles, so no fix-up is needed for deletes or pastes.
@@ -171,6 +183,10 @@ worlds, open/save/close, entities/get/set/paste/delete/select, play/stop/pause, 
 timings (GPU time per pass, `render_gpu_timer.odin`), assets (asset GPU payload per asset, the data behind the
 Asset Buffers treemap window, `ui_asset_buffers.odin`),
 screenshot (writes a PNG, replies with its path), and lua.
+
+- `screenshot <view>` is the view's render target: the 3D scene only. Icons, the gizmo and panels are ImGui,
+  drawn later, so they need `screenshot ui`: the whole main window as shown, copied from the swapchain
+  inside the next frame and answered then. Panels dragged out into their own OS window aren't in it.
 
 - Commands run on the main thread between frames, polled before `ui_update`, with no threads.
 - The reply's first line is `ok` or `error`. Entity text uses the scene `[entity]` format.

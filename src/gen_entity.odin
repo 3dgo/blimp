@@ -6,6 +6,7 @@ Entity :: struct {
     handle: Entity_Handle `hidden, noserialize`,
     selected: bool `hidden, noserialize`,
     name: sbuf64 `identity`,
+    icon: sbuf64 `widget:icon`,
     basic_static_flags: EntityBasicStaticFlags,
     basic_flags: EntityBasicFlags,
     position: vec3 `placement`,
@@ -14,9 +15,13 @@ Entity :: struct {
     model: string `widget:model`,
     camera_type: EntityCameraType,
     light_type: EntityLightType,
-    color: vec3 `widget:color`,
+    color: vec3 `widget:linear_color`,
     intensity: f32,
     fov: f32,
+    inner_fov: f32,
+    radius: f32,
+    inner_radius: f32,
+    falloff: EntityLightFalloff,
     size: vec3,
     range: vec2,
     shadow: bool,
@@ -33,6 +38,13 @@ EntityLightType :: enum u64 {
     Directional,
     Point,
     Spot,
+    Cylinder,
+}
+
+EntityLightFalloff :: enum u64 {
+    Inverse_Square,
+    Linear,
+    Smooth,
 }
 
 EntityBasicStaticFlag :: enum u64 {
@@ -59,6 +71,10 @@ entity_apply_defaults :: proc(e: ^Entity) {
     e.color = {1, 1, 1}
     e.intensity = 1
     e.fov = 60
+    e.inner_fov = 40
+    e.radius = 1
+    e.inner_radius = 0.75
+    e.falloff = .Inverse_Square
     e.size = {10, 10, 50}
     e.range = {0.1, 20}
     e.shadow = false
@@ -69,6 +85,7 @@ entity_field_label :: proc(name: string) -> (string, bool) {
     l: [Lang]string
     switch name {
     case "name": l = {.EN = "Name", .ZH = "名称"}
+    case "icon": l = {.EN = "Icon", .ZH = "图标"}
     case "basic_static_flags": l = {.EN = "Static Flags", .ZH = "静态标志"}
     case "basic_flags": l = {.EN = "Flags", .ZH = "基本标志"}
     case "position": l = {.EN = "Position", .ZH = "位置"}
@@ -80,6 +97,10 @@ entity_field_label :: proc(name: string) -> (string, bool) {
     case "color": l = {.EN = "Color", .ZH = "颜色"}
     case "intensity": l = {.EN = "Intensity", .ZH = "强度"}
     case "fov": l = {.EN = "FOV", .ZH = "视角"}
+    case "inner_fov": l = {.EN = "Inner FOV", .ZH = "内视角"}
+    case "radius": l = {.EN = "Radius", .ZH = "半径"}
+    case "inner_radius": l = {.EN = "Inner Radius", .ZH = "内半径"}
+    case "falloff": l = {.EN = "Falloff", .ZH = "衰减"}
     case "size": l = {.EN = "Size", .ZH = "尺寸"}
     case "range": l = {.EN = "Range", .ZH = "范围"}
     case "shadow": l = {.EN = "Cast Shadow", .ZH = "投射阴影"}
@@ -104,6 +125,13 @@ entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bo
         case "Directional": l = {.EN = "Directional", .ZH = "平行光"}
         case "Point": l = {.EN = "Point", .ZH = "点光源"}
         case "Spot": l = {.EN = "Spot", .ZH = "聚光灯"}
+        case "Cylinder": l = {.EN = "Cylinder", .ZH = "圆柱光"}
+        }
+    case "EntityLightFalloff":
+        switch member {
+        case "Inverse_Square": l = {.EN = "Inverse Square", .ZH = "平方反比"}
+        case "Linear": l = {.EN = "Linear", .ZH = "线性"}
+        case "Smooth": l = {.EN = "Smooth", .ZH = "平滑"}
         }
     case "EntityBasicStaticFlag":
         switch member {

@@ -74,11 +74,14 @@ Mesh_Instance_Data :: struct {
 // One light entity, rebuilt each frame. Mirrors the Light struct in the shader.
 GPU_Light :: struct {
     position: vec3, type: u32,         // u32(EntityLightType)
-    direction: vec3, radius: f32,      // entity +Z; range.y (point / spot)
-    color: vec3, cos_cone: f32,        // linear colour; cos(fov / 2) (spot)
-    intensity: f32, _pad: [3]f32,
+    direction: vec3, radius: f32,      // entity +Z (also the cylinder's axis); range.y, where the falloff reaches zero
+    color: vec3, cos_outer: f32,       // linear colour; cos(fov / 2) (spot)
+    intensity: f32, cos_inner: f32,    // cos(inner_fov / 2) (spot)
+    inner_radius: f32, falloff: u32,   // range.x; u32(EntityLightFalloff)
+    beam_radius: f32, beam_inner: f32, // radius, inner_radius (cylinder)
+    _pad: [2]f32,
 }
-#assert(size_of(GPU_Light) == 64)
+#assert(size_of(GPU_Light) == 80)
 
 // A GPU resource paired with the CPU-writable upload buffer that stages data into it.
 Resource_With_Upload :: struct {
@@ -195,11 +198,23 @@ buffers_build_scene :: proc(world: ^World) {
                 color = entity.color,
                 intensity = entity.intensity,
             }
+            if entity.light_type != .Directional {
+                // Inner clamped to outer; the shader keeps the fade width above zero, so inner == outer is
+                // a hard edge, not a divide by zero.
+                light.radius       = max(entity.range.y, 0.001)
+                light.inner_radius = clamp(entity.range.x, 0, light.radius)
+                light.falloff      = u32(entity.falloff)
+            }
             #partial switch entity.light_type {
-                case .Point: light.radius = entity.range.y
+                case .Cylinder: {
+                    light.beam_radius = max(entity.radius, 0)
+                    light.beam_inner  = clamp(entity.inner_radius, 0, light.beam_radius)
+                }
                 case .Spot: {
-                    light.radius = entity.range.y
-                    light.cos_cone = math.cos(math.to_radians(entity.fov) * 0.5)   // fov is the full cone angle
+                    // fov and inner_fov are full cone angles. Inner is clamped to outer; the shader keeps the
+                    // fade width above zero, so inner == outer is a hard edge, not a divide by zero.
+                    light.cos_outer = math.cos(math.to_radians(entity.fov) * 0.5)
+                    light.cos_inner = math.cos(math.to_radians(min(entity.inner_fov, entity.fov)) * 0.5)
                 }
             }
 

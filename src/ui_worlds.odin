@@ -47,7 +47,7 @@ ui_draw_worlds :: proc() {
 // Scenes and kits.
 @(private="file")
 worlds_browse :: proc(filter: string) {
-    // Scenes: .ini files with [entity] blocks under assets/ and assets_engine/ (rescanned on refresh).
+    // Scenes: .level files under assets/ and assets_engine/ (rescanned on refresh).
     scenes_open := worlds_section(ICON_SCENE, tr(.Worlds_Scenes), len(ui.scene_paths), "scenes", true)
     if worlds_refresh_clicked() || !ui.scene_paths_scanned {
         for p in ui.scene_paths do delete(p, app.allocators.perm)
@@ -256,7 +256,6 @@ worlds_level_count :: proc() -> (n: int) {
 }
 
 // Dimmed text that wraps at the window edge (TextDisabled doesn't wrap).
-@(private="file")
 text_dim_wrapped :: proc(s: cstring) {
     im.PushStyleColorImVec4(.Text, im.GetStyleColorVec4(.TextDisabled)^)
     im.TextWrapped("%s", s)

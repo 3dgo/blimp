@@ -34,6 +34,12 @@ Renderer_DX :: struct {
     frame_fence_gfx: dx.Fence,
 
     frame_val: u64,
+
+    // Full-window screenshot (remote `screenshot ui`): set ui_shot_requested and the next frame copies the
+    // swapchain image after the UI draws; ui_shot_frame (0 = none) is the frame_val to wait for before reading ui_shot.
+    ui_shot_requested: bool,
+    ui_shot: dx.Texture_Readback,
+    ui_shot_frame: u64,
 }
 renderer_dx: Renderer_DX
 
@@ -57,8 +63,10 @@ Frame_Constants :: struct {
     sampler_slot: u32,
     
     debug_line_buffer_slot: u32,
+    hdr_texture_slot: u32,   // the view's scene target, read by the tonemap pass
+    exposure: f32,           // 2^world.settings.exposure
 
-    _padding: [256 - 4*16*2 - 4 - 4*2 - 4*3 - 4 - 4*10]byte,
+    _padding: [256 - 4*16*2 - 4 - 4*2 - 4*3 - 4 - 4*11 - 4]byte,
 }
 #assert(size_of(Frame_Constants) == 256)
 // HLSL cbuffer packing: a vector may not straddle a 16-byte row (the shader would push it to the
@@ -117,7 +125,10 @@ renderer_dx_init :: proc() {
     renderer_dx.slang_compiler  = dx.slang_compiler_create("./assets_engine/shaders/", app.allocators.perm)
     renderer_dx.compiled_shader = dx.slang_compiler_compile_shader(renderer_dx.slang_compiler, "triangle", "vert_main", "frag_main")
     
-    renderer_dx.pso             = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, renderer_dx.compiled_shader)
+    scene_opts := dx.PIPELINE_OPTIONS_DEFAULT
+    scene_opts.rtv_format = VIEW_HDR_FORMAT
+    renderer_dx.pso             = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, renderer_dx.compiled_shader, scene_opts)
+    render_post_init()   // tonemap: HDR scene target → display target (render_post.odin)
     
     // Debug line renderer — its own shader, PSO, and per-flight buffers
     debug_draw_init()
@@ -185,7 +196,8 @@ renderer_dx_update :: proc() {
     for v in views {
         t_view := gpu_timer_begin(renderer_dx.cmd_gfx, fmt.tprintf("view %d (%s)", v.id, v.world.title))
         render_view_draw(v, frame_slot)
-        debug_draw_lines(renderer_dx.cmd_gfx, v.debug_first, v.debug_count)   // its target + constants still bound
+        render_post_draw(v)
+        debug_draw_lines(renderer_dx.cmd_gfx, v.debug_first, v.debug_count)   // display target, depth + constants still bound: after the tonemap, so line colours stay exact
         gpu_timer_end(renderer_dx.cmd_gfx, t_view)
     }
     debug_draw_clear()
@@ -201,6 +213,12 @@ renderer_dx_update :: proc() {
     renderer_dx.cmd_gfx.handle->ClearRenderTargetView(renderer_dx.swapchain.back_buffer_views[backbuffer_idx].cpu_handle, &clear_color, 0, nil)
     ui_draw()
     gpu_timer_end(renderer_dx.cmd_gfx, t_ui)
+    if renderer_dx.ui_shot_requested {   // the main window as shown: views, overlays and ImGui (not windows dragged out of it)
+        renderer_dx.ui_shot_requested = false
+        if rb, ok := dx.texture_readback_record(renderer_dx.render_context, renderer_dx.cmd_gfx, &renderer_dx.swapchain.back_buffers[backbuffer_idx]); ok {
+            renderer_dx.ui_shot, renderer_dx.ui_shot_frame = rb, renderer_dx.frame_val
+        }
+    }
 
     dx.texture_transition(renderer_dx.cmd_gfx, &renderer_dx.swapchain.back_buffers[backbuffer_idx], {}, {.NO_ACCESS}, .PRESENT)
     
@@ -225,6 +243,7 @@ renderer_dx_shutdown :: proc() {
     dx.fence_wait(renderer_dx.frame_fence_gfx, renderer_dx.frame_val)
 
     debug_draw_shutdown()
+    render_post_shutdown()
     gpu_timer_shutdown()
 
     dx.pipeline_destroy_pso(renderer_dx.pso)

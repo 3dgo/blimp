@@ -35,6 +35,7 @@ UI :: struct {
     maximize_focus: bool,             // bring the maximized view to the front on its first frame
     game: ^Render_View,               // game mode: this view is the whole window as the game, the editor hidden (ui_game.odin); nil = the editor
     show_game_settings: bool,
+    show_templates: bool,             // the Templates window (ui_templates.odin)
 }
 ui: UI
 
@@ -44,6 +45,7 @@ ui_init :: proc() {
     im.CHECKVERSION()
     im.CreateContext()
     ui.io = im.GetIO()
+    ui_saved_state_init()   // before the first NewFrame reads imgui.ini
     ui.io.ConfigFlags = {.NavEnableKeyboard, .NavEnableGamepad, .DockingEnable, .ViewportsEnable}
     ui.io.ConfigWindowsMoveFromTitleBarOnly = true   // body drags belong to the content (orbit, pan, gizmo)
     ui.snap = GIZMO_SNAP_DEFAULT
@@ -101,7 +103,9 @@ ui_init :: proc() {
         font_size, &merge_config)
     
     ui.show_demo_window = false
-    ui.show_worlds = true    // the only window open at startup: open a scene or kit from it
+    // Open on first launch; after that imgui.ini remembers which windows were open (ui_saved_state.odin).
+    ui.show_worlds = true      // open a scene or kit from it
+    ui.show_templates = true   // docked above Worlds (ui_build_default_layout)
     ui.show_stats = false
 }
 
@@ -137,6 +141,7 @@ ui_update :: proc() {
             // Each opens another floating panel (world windows have their own list and inspector).
             if im.MenuItem(tr(.Menu_Entity_List))      do ui_entity_panel_new(.List)
             if im.MenuItem(tr(.Menu_Entity_Inspector)) do ui_entity_panel_new(.Inspector)
+            im.MenuItemBoolPtr(tr(.Menu_Templates), nil, &ui.show_templates)
             menu_section(tr(.Menu_Section_Project))
             im.MenuItemBoolPtr(tr(.Menu_Schema_Editor), nil, &ui.show_schema_editor)
             im.MenuItemBoolPtr(tr(.Menu_Game_Settings), nil, &ui.show_game_settings)
@@ -164,6 +169,7 @@ ui_update :: proc() {
     ui_draw_entity_panels()
     ui_draw_world_settings()
     ui_draw_game_settings()
+    ui_draw_templates()
     ui_draw_unsaved_prompt()   // the modal, if a close or quit is waiting on Save / Don't Save / Cancel
 
     if ui.show_schema_editor {
@@ -181,6 +187,7 @@ ui_update :: proc() {
     if ui.show_demo_window {
         im.ShowDemoWindow(&ui.show_demo_window)
     }
+    ui_saved_state_update()
     
     im.Render()
 }
@@ -237,7 +244,10 @@ ui_build_default_layout :: proc(dockspace_id: im.ID) {
     left := dockspace_id
     right: im.ID
     im.DockBuilderSplitNode(left, .Right, 0.22, &right, &left)   // Worlds on the right, world windows fill the rest
+    top: im.ID
+    im.DockBuilderSplitNode(right, .Up, 0.3, &top, &right)      // Templates above Worlds
 
+    im.DockBuilderDockWindow(tr(.Win_Templates), top)
     im.DockBuilderDockWindow(tr(.Win_Worlds), right)
     im.DockBuilderFinish(dockspace_id)
 }
@@ -257,6 +267,7 @@ ui_draw :: proc() {
 ui_shutdown :: proc() {
     for p in ui.scene_paths do delete(p, app.allocators.perm)
     delete(ui.scene_paths)
+    ui_templates_shutdown()
     delete(ui.panels)
     delete(ui.hosts)
     editor_views_shutdown()
@@ -265,5 +276,3 @@ ui_shutdown :: proc() {
     im_sdl3.Shutdown()
     im.DestroyContext()
 }
-
-SCENE_PATH :: "assets/scenes/scene.ini"

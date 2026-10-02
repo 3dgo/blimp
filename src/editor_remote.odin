@@ -42,11 +42,17 @@ Remote_Client :: struct {
     buf:    [dynamic]u8,
     opened: f64,
     wait_captures: u32,   // > 0: request done, reply once RenderDoc has this many captures
+    wait_ui_shot:  bool,  // request done (`screenshot ui`), reply once the frame that copied the window has finished
+    shot_path:     sbuf256,
 }
 
 // Set by a command that answers later (`capture`); read by remote_poll right after it runs.
 @(private="file")
 remote_wait_captures: u32
+
+// Set by `screenshot ui` to where the PNG goes; remote_poll answers once the next frame has copied the window.
+@(private="file")
+remote_wait_ui_shot: string
 
 @(private="file")
 remote: struct {
@@ -99,6 +105,15 @@ remote_poll :: proc() {
             } else {
                 continue
             }
+        } else if cl.wait_ui_shot {
+            if renderer_dx.ui_shot_frame != 0 {
+                reply = remote_ui_shot_reply(sbuf_str(&cl.shot_path))
+            } else if now - cl.opened > REMOTE_CAPTURE_TIMEOUT_SEC {
+                renderer_dx.ui_shot_requested = false
+                reply = "error\nthe window wasn't captured (no frame rendered)\n"
+            } else {
+                continue
+            }
         } else {
             done, failed := false, false
             chunk: [4096]u8
@@ -114,9 +129,15 @@ remote_poll :: proc() {
 
             if done {
                 remote_wait_captures = 0
+                remote_wait_ui_shot = ""
                 reply = remote_execute(string(cl.buf[:]))
                 if remote_wait_captures > 0 {   // the command asked to reply later
                     cl.wait_captures, cl.opened = remote_wait_captures, now
+                    continue
+                }
+                if remote_wait_ui_shot != "" {
+                    cl.wait_ui_shot, cl.opened = true, now
+                    sbuf_set(&cl.shot_path, remote_wait_ui_shot)
                     continue
                 }
             }
@@ -134,6 +155,32 @@ remote_poll :: proc() {
 }
 
 
+// The reply to a `screenshot ui` whose frame has been submitted: waits for that frame, reads the copy
+// and writes the PNG.
+@(private="file")
+remote_ui_shot_reply :: proc(path: string) -> string {
+    dx.fence_wait(renderer_dx.frame_fence_gfx, renderer_dx.ui_shot_frame)
+    renderer_dx.ui_shot_frame = 0
+    pixels := dx.texture_readback_pixels(renderer_dx.ui_shot, context.temp_allocator)
+    abs, err := remote_write_png(path, pixels, renderer_dx.ui_shot.width, renderer_dx.ui_shot.height)
+    if msg, failed := err.?; failed do return fmt.tprintf("error\n%s\n", msg)
+    return fmt.tprintf("ok\n%s\n", abs)
+}
+
+// Writes tightly packed RGBA8 `pixels` to `path` (creating its folder) as an opaque PNG, and returns
+// its absolute path.
+@(private="file")
+remote_write_png :: proc(path: string, pixels: []u8, w, h: u32) -> (abs: string, err: Remote_Error) {
+    dir := path[:max(strings.last_index_any(path, "/\\"), 0)]
+    if dir != "" do os.make_directory_all(dir)
+    for i := 3; i < len(pixels); i += 4 do pixels[i] = 255   // render targets' alpha isn't meaningful
+    if stbi.write_png(strings.clone_to_cstring(path, context.temp_allocator), c.int(w), c.int(h), 4, raw_data(pixels), c.int(w * 4)) == 0 {
+        return "", fmt.tprintf("couldn't write '%s'", path)
+    }
+    abs, _ = os.get_absolute_path(path, context.temp_allocator)
+    return abs, nil
+}
+
 // Runs one request and returns the whole reply text, status line included.
 @(private="file")
 remote_execute :: proc(request: string) -> string {
@@ -150,9 +197,9 @@ remote_execute :: proc(request: string) -> string {
 
 REMOTE_HELP :: `Worlds and entities  (<world> = index, title, or scene path; <name> = entity name)
   worlds                                  list open worlds
-  open <path>                             open a scene (.ini) or kit (.gltf/.glb)
+  open <path>                             open a level (.level) or kit (.gltf/.glb)
   close <world>                           close a world and its views
-  save <world>                            write a scene world back to its .ini
+  save <world>                            write a scene world back to its .level
   entities <world>                        one line per entity: name, model, position
   get <world> [name]                      [entity] text of one entity, or of all
   set <world> <name> <field> <value...>   set one field (same syntax as scene files); undoable
@@ -175,7 +222,9 @@ Views  (<view> = view id, see 'views')
   game <view>                             game mode on a playing view (the window is the game, through its camera entity), or back (F8)
   stats [on|off]                          the FPS / GPU-per-pass overlay (F3)
   gameview <view>                         hide / show icons, outlines and the gizmo in the view (G)
-  screenshot <view> [path.png]            save the view's last frame; replies with the file path
+  screenshot <view> [path.png]            save the view's last frame (the 3D scene only); replies with the file path
+  screenshot ui [path.png]                save the whole main window as shown: views, icons, gizmo, every docked or
+                                          floating panel (not panels dragged out into their own OS window)
   timings                                 CPU frame time + GPU time per pass (latest frame)
   tool [select|move|...] [global|local] [center|pivots]   get or set the viewport tool, gizmo space and pivot
   assets [show|hide]                      asset GPU payload, one line per asset (largest first); shows/hides
@@ -212,8 +261,10 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         if len(args) < 1 do return "usage: open <path>"
         path := args[0]
         ext := strings.to_lower(path[strings.last_index_byte(path, '.') + 1:], context.temp_allocator)
-        w: ^World
-        if ext == "gltf" || ext == "glb" {
+        w := world_find_open(path)   // already open: focus it, as the Worlds window does, rather than open a second copy
+        if w != nil {
+            ui_world_focus(w)
+        } else if ext == "gltf" || ext == "glb" {
             for &kit in asset_system.kits do if kit.path == path { w = world_open_kit(&kit); break }
             if w == nil do return fmt.tprintf("no loaded kit '%s' (kits are loaded at startup)", path)
         } else {
@@ -435,18 +486,19 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
 
 
     case "screenshot":
+        if len(args) >= 1 && args[0] == "ui" {
+            // The swapchain image is copied inside the next frame (render_dx.odin); remote_poll replies then.
+            if renderer_dx.ui_shot_requested || renderer_dx.ui_shot_frame != 0 do return "a window screenshot is already in progress"
+            renderer_dx.ui_shot_requested = true
+            remote_wait_ui_shot = len(args) >= 2 ? args[1] : "out/screenshots/ui.png"
+            break
+        }
         v := remote_view(args) or_return
         path := len(args) >= 2 ? args[1] : fmt.tprintf("out/screenshots/view%d.png", v.id)
-        dir := path[:max(strings.last_index_any(path, "/\\"), 0)]
-        if dir != "" do os.make_directory_all(dir)
         renderer_dx_wait_idle()
         pixels, w, h, ok := dx.texture_readback_rgba8(renderer_dx.render_context, renderer_dx.cmd_queue_gfx, &v.target.tex, context.temp_allocator)
         if !ok do return "view hasn't rendered yet"
-        for i := 3; i < len(pixels); i += 4 do pixels[i] = 255   // the target's alpha isn't meaningful
-        if stbi.write_png(strings.clone_to_cstring(path, context.temp_allocator), c.int(w), c.int(h), 4, raw_data(pixels), c.int(w * 4)) == 0 {
-            return fmt.tprintf("couldn't write '%s'", path)
-        }
-        abs, _ := os.get_absolute_path(path, context.temp_allocator)
+        abs := remote_write_png(path, pixels, w, h) or_return
         fmt.sbprintf(out, "%s\n", abs)
 
     case "tool":

@@ -5,7 +5,7 @@ import "core:strings"
 import "core:path/filepath"
 
 // Every open world, and every view onto one. At startup only Game Settings' start level is open (ui_game_start);
-// the user opens scenes (.ini) and kits (.gltf) from the Worlds window. Both open the same way — a World plus a Render_View in its
+// the user opens scenes (.level) and kits (.gltf) from the Worlds window. Both open the same way — a World plus a Render_View in its
 // own world window — and differ only in how the World is filled and whether it has a save_path.
 // Each is individually allocated so its address is stable (views, selection and panels hold ^World /
 // ^Render_View; a [dynamic]World would move them on grow).
@@ -63,7 +63,7 @@ world_open_scene :: proc(path: string) -> ^World {
     return w
 }
 
-// Writes a scene world back to the .ini it was opened from. Kits and play worlds (no save_path) can't
+// Writes a scene world back to the .level it was opened from. Kits and play worlds (no save_path) can't
 // be saved: the running game's state is never written.
 world_save :: proc(w: ^World) -> bool {
     if w.save_path == "" || !scene_save(w, w.save_path) do return false

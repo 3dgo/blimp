@@ -3,6 +3,7 @@ package blimp
 import "common"
 import "base:runtime"
 import "core:fmt"
+import "core:math"
 import vmem "core:mem/virtual"
 
 @(lua_ffi="Vec2")  vec2 :: common.vec2
@@ -137,4 +138,13 @@ frame_alloc_proc :: proc(data: rawptr, mode: runtime.Allocator_Mode,
         panic(fmt.tprintf("frame arena exhausted: %v (size %d)", err, size), loc)
     }
     return result, err
+}
+// One colour channel between sRGB (display) encoding and linear: the exact piecewise curve, as the GPU's
+// _SRGB formats decode it and the tonemap pass encodes it.
+srgb_to_linear :: proc(c: f32) -> f32 {
+    return c <= 0.04045 ? c / 12.92 : math.pow((c + 0.055) / 1.055, 2.4)
+}
+
+linear_to_srgb :: proc(c: f32) -> f32 {
+    return c <= 0.0031308 ? c * 12.92 : 1.055 * math.pow(c, 1.0 / 2.4) - 0.055
 }

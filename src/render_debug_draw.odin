@@ -94,8 +94,9 @@ debug_sphere :: proc(center: vec3, radius: f32, color := vec4{1, 1, 1, 1}, rotat
 
 // A cone from `apex` along the unit `dir`, opening by `half_angle` radians and reaching `length` from
 // the apex in every direction, so it's capped by a piece of sphere (what a spot light lights): its rim
-// circle, four side lines and two arcs over the cap through the tip.
-debug_cone :: proc(apex, dir: vec3, length, half_angle: f32, color := vec4{1, 1, 1, 1}) {
+// circle, four side lines and two arcs over the cap through the tip. `cap = false` leaves the arcs out,
+// for a cone drawn inside another of the same length (their arcs would lie on each other and z-fight).
+debug_cone :: proc(apex, dir: vec3, length, half_angle: f32, color := vec4{1, 1, 1, 1}, cap := true) {
     u := linalg.normalize(linalg.cross(abs(dir.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, dir))
     v := linalg.cross(dir, u)
     debug_circle(apex + dir * (length * math.cos(half_angle)), u, v, length * math.sin(half_angle), color)
@@ -103,6 +104,10 @@ debug_cone :: proc(apex, dir: vec3, length, half_angle: f32, color := vec4{1, 1,
     for side in ([2]vec3{u, v}) {
         prev := apex + (dir * math.cos(half_angle) - side * math.sin(half_angle)) * length
         debug_line(apex, prev, color)
+        if !cap {
+            debug_line(apex, apex + (dir * math.cos(half_angle) + side * math.sin(half_angle)) * length, color)
+            continue
+        }
         for i in 1 ..= SEGMENTS {
             t := half_angle * (2 * f32(i) / SEGMENTS - 1)
             next := apex + (dir * math.cos(t) + side * math.sin(t)) * length
@@ -111,6 +116,17 @@ debug_cone :: proc(apex, dir: vec3, length, half_angle: f32, color := vec4{1, 1,
         }
         debug_line(apex, prev, color)
     }
+}
+
+// A cylinder from `base` along unit `dir`: its two end circles and four side lines (what a cylinder
+// light lights).
+debug_cylinder :: proc(base, dir: vec3, length, radius: f32, color := vec4{1, 1, 1, 1}) {
+    u := linalg.normalize(linalg.cross(abs(dir.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, dir))
+    v := linalg.cross(dir, u)
+    tip := base + dir * length
+    debug_circle(base, u, v, radius, color)
+    debug_circle(tip, u, v, radius, color)
+    for side in ([4]vec3{u, -u, v, -v}) do debug_line(base + side * radius, tip + side * radius, color)
 }
 
 // A line with a two-stroke head, `head` world units long.

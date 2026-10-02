@@ -16,7 +16,7 @@ World :: struct {
     select_anchor: Entity_Handle,   // entity list: where a Shift+click range starts (the last plain or Ctrl click)
     title:     string,      // shown in the Worlds window and on its viewport tabs
     save_path: string,      // where scene_save writes; "" ⇒ opened from a kit (can't save back to a glTF)
-    source:    string,      // the file it was opened from (scene .ini or kit glTF), so it isn't opened twice
+    source:    string,      // the file it was opened from (scene .level or kit glTF), so it isn't opened twice
 
     // Unsaved-changes tracking. Every edit goes through undo_push, which gives the world a fresh
     // state id; undo/redo restore the id along with the snapshot. So the world is dirty exactly when
@@ -39,11 +39,12 @@ World :: struct {
 // entities). Only fields something reads today; sky / atmosphere / bake settings join as those
 // systems land — one line each, edited and saved for free (reflection inspector + serializer).
 World_Settings :: struct {
-    background: [3]f32 `loc:World_Background, widget:color`,   // the viewport clear colour
+    background: [3]f32 `loc:World_Background, widget:color`,   // the viewport clear colour: display-space (sRGB), shown as picked, not tonemapped
+    exposure:   f32 `loc:World_Exposure`,   // stops (EV): the HDR scene is scaled by 2^exposure before the tonemap
     script:     sbuf256 `loc:World_Script`,   // the world's Lua script (init + update), e.g. assets/scripts/level.lua
 }
 
-WORLD_SETTINGS_DEFAULT :: World_Settings{background = {0.19, 0.19, 0.19}}   // Unity's scene-view grey (#313131)
+WORLD_SETTINGS_DEFAULT :: World_Settings{background = {19.0 / 255, 19.0 / 255, 19.0 / 255}}   // #131313
 // Lua's target until world scripts exist (the @(lua) world/entity procs pin to it). Not shown by the
 // editor — worlds the user works on are opened from the Worlds window (world_registry.odin).
 game_world: World
