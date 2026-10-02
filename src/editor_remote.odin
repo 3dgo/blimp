@@ -1,0 +1,630 @@
+package blimp
+
+import "core:c"
+import hm "core:container/handle_map"
+import "core:fmt"
+import "core:log"
+import vmem "core:mem/virtual"
+import "core:math"
+import "core:math/linalg"
+import "core:net"
+import "core:os"
+import "core:strconv"
+import "core:strings"
+import lua "vendor:lua/5.1"
+import stbi "vendor:stb/image"
+import "dx"
+
+// Remote control: a localhost TCP port taking text commands, so tools (bin/blimpctl.exe — and Claude
+// through it) can drive the running editor: inspect and edit entities, open worlds, move cameras,
+// pick, take screenshots, run Lua.
+//
+// One request per connection: the client sends a command line, optionally followed by a body (after
+// the first '\n'), half-closes its side, then reads the reply until the server closes. The reply's
+// first line is `ok` or `error`; the rest is text. Polled once per frame on the main thread before
+// the UI, non-blocking, so commands run between frames like any UI action — no threads, no locks.
+// A command's effect is rendered by the next frame; blimpctl calls are sequential, so a
+// `set` followed by a `screenshot` always sees the change.
+//
+// Debug builds only, bound to 127.0.0.1. Run `blimpctl help` for the command list.
+REMOTE_PORT        :: 47800   // must match tools/blimpctl
+REMOTE_MAX_REQUEST :: 1 << 20
+REMOTE_TIMEOUT_SEC :: 5.0     // a client that never finishes sending is dropped
+REMOTE_CAPTURE_TIMEOUT_SEC :: 15.0
+
+// A failed command's message; nil = success. A Maybe so lookups can `or_return` it straight out of a handler.
+@(private="file")
+Remote_Error :: Maybe(string)
+
+@(private="file")
+Remote_Client :: struct {
+    socket: net.TCP_Socket,
+    buf:    [dynamic]u8,
+    opened: f64,
+    wait_captures: u32,   // > 0: request done, reply once RenderDoc has this many captures
+}
+
+// Set by a command that answers later (`capture`); read by remote_poll right after it runs.
+@(private="file")
+remote_wait_captures: u32
+
+@(private="file")
+remote: struct {
+    listener: net.TCP_Socket,
+    clients:  [dynamic]Remote_Client,   // editor state → general heap
+    running:  bool,
+}
+
+remote_init :: proc() {
+    when !ODIN_DEBUG do return
+    sock, err := net.listen_tcp({net.IP4_Loopback, REMOTE_PORT})
+    if err != nil {
+        log.warnf("Remote control disabled: can't listen on 127.0.0.1:%v (%v)", REMOTE_PORT, err)
+        return
+    }
+    net.set_blocking(sock, false)
+    remote.listener, remote.running = sock, true
+    log.infof("Remote control listening on 127.0.0.1:%v", REMOTE_PORT)
+}
+
+remote_shutdown :: proc() {
+    if !remote.running do return
+    for &cl in remote.clients { net.close(cl.socket); delete(cl.buf) }
+    delete(remote.clients)
+    net.close(remote.listener)
+    remote.running = false
+}
+
+remote_poll :: proc() {
+    if !remote.running do return
+    for {
+        sock, _, err := net.accept_tcp(remote.listener)
+        if err != nil do break   // .Would_Block: nobody waiting
+        net.set_blocking(sock, false)
+        append(&remote.clients, Remote_Client{socket = sock, opened = timer_sec_since_init()})
+    }
+
+    now := timer_sec_since_init()
+    for i := 0; i < len(remote.clients); i += 1 {
+        cl := &remote.clients[i]
+        reply: string
+
+        if cl.wait_captures > 0 {
+            // A `capture` request: answered once RenderDoc has written the file (a frame later).
+            if renderdoc_num_captures() >= cl.wait_captures {
+                path, _ := renderdoc_capture_path(cl.wait_captures - 1)
+                reply = fmt.tprintf("ok\n%s\n", path)
+            } else if now - cl.opened > REMOTE_CAPTURE_TIMEOUT_SEC {
+                reply = "error\nRenderDoc didn't produce a capture (see the engine log)\n"
+            } else {
+                continue
+            }
+        } else {
+            done, failed := false, false
+            chunk: [4096]u8
+            for {
+                n, err := net.recv_tcp(cl.socket, chunk[:])
+                if err == .Would_Block do break
+                if err != nil { failed = true; break }
+                if n == 0 { done = true; break }   // client half-closed: the request is complete
+                append(&cl.buf, ..chunk[:n])
+                if len(cl.buf) > REMOTE_MAX_REQUEST { failed = true; break }
+            }
+            if !done && !failed && now - cl.opened < REMOTE_TIMEOUT_SEC do continue
+
+            if done {
+                remote_wait_captures = 0
+                reply = remote_execute(string(cl.buf[:]))
+                if remote_wait_captures > 0 {   // the command asked to reply later
+                    cl.wait_captures, cl.opened = remote_wait_captures, now
+                    continue
+                }
+            }
+        }
+
+        if reply != "" {
+            net.set_blocking(cl.socket, true)
+            net.send_tcp(cl.socket, transmute([]u8)reply)
+        }
+        net.close(cl.socket)
+        delete(cl.buf)
+        unordered_remove(&remote.clients, i)
+        i -= 1
+    }
+}
+
+
+// Runs one request and returns the whole reply text, status line included.
+@(private="file")
+remote_execute :: proc(request: string) -> string {
+    line, _, body := strings.partition(request, "\n")
+    args := remote_tokenize(strings.trim_space(line))
+    b := strings.builder_make(context.temp_allocator)
+    if len(args) == 0 do return "error\nempty request\n"
+
+    if err, failed := remote_command(args[0], args[1:], body, &b).?; failed {
+        return fmt.tprintf("error\n%s\n", err)
+    }
+    return fmt.tprintf("ok\n%s", strings.to_string(b))
+}
+
+REMOTE_HELP :: `Worlds and entities  (<world> = index, title, or scene path; <name> = entity name)
+  worlds                                  list open worlds
+  open <path>                             open a scene (.ini) or kit (.gltf/.glb)
+  close <world>                           close a world and its views
+  save <world>                            write a scene world back to its .ini
+  entities <world>                        one line per entity: name, model, position
+  get <world> [name]                      [entity] text of one entity, or of all
+  set <world> <name> <field> <value...>   set one field (same syntax as scene files); undoable
+  paste <world> -                         add the [entity] blocks in the body (blimpctl: from stdin)
+  delete <world> <name>                   delete an entity; undoable
+  select <world> <name...|none>           replace the selection; the last name is active
+  duplicate <world>                       copy the selection in place and select the copies (Ctrl+D)
+  settings <world> [field value...]       show or set the world's [world] settings (undoable)
+  play <world> [stop|pause|step]          play the world's level in a copy; stop, toggle pause, or step a frame
+  rename <world>                          start renaming the active entity in its entity list (F2)
+  undo | redo
+Views  (<view> = view id, see 'views')
+  views                                   list views: id, world, size, camera
+  camera <view> [x y z yaw pitch dist]    get or set the camera (pivot, degrees, distance)
+  frame <view>                            frame the world's selection (F)
+  pick <view> <x> <y> [add|remove|toggle]  click at view pixel x,y (selects; like Shift / Ctrl+Shift / Ctrl)
+  marquee <view> <x0> <y0> <x1> <y1> [add|remove|toggle]  marquee-select a view rectangle
+  menu <view> <x> <y>                     right-click at view pixel x,y (selects, opens the context menu)
+  maximize <view>                         the view fills the main window, or goes back (F11)
+  game <view>                             game mode on a playing view (the window is the game, through its camera entity), or back (F8)
+  stats [on|off]                          the FPS / GPU-per-pass overlay (F3)
+  gameview <view>                         hide / show icons, outlines and the gizmo in the view (G)
+  screenshot <view> [path.png]            save the view's last frame; replies with the file path
+  timings                                 CPU frame time + GPU time per pass (latest frame)
+  tool [select|move|...] [global|local] [center|pivots]   get or set the viewport tool, gizmo space and pivot
+  assets [show|hide]                      asset GPU payload, one line per asset (largest first); shows/hides
+                                          the Asset Buffers window
+RenderDoc  (engine started with --renderdoc, or launched from RenderDoc)
+  capture                                 capture the next frame; replies with the .rdc path
+  captures                                list this session's captures
+  rdui [index]                            open a capture in RenderDoc (default: the latest)
+Lua
+  lua <code...>                           run Lua (targets game_world); replies with its print()
+                                          output, then return values as "=> value"
+`
+
+@(private="file")
+remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.Builder) -> Remote_Error {
+    switch cmd {
+    case "help":
+        strings.write_string(out, REMOTE_HELP)
+
+    case "worlds":
+        for w, i in worlds {
+            n := 0
+            it := hm.iterator_make(&w.entities)
+            for _, _ in hm.iterate(&it) do n += 1
+            fmt.sbprintf(out, "%d  %s  entities=%d  views=", i, w.title, n)
+            sep := ""
+            for v in views do if v.world == w { fmt.sbprintf(out, "%s%d", sep, v.id); sep = "," }
+            if w.play_world != nil do strings.write_string(out, "  [playing]")
+            if w.play_source != nil do fmt.sbprintf(out, "  [play of %s]", w.play_source.title)
+            fmt.sbprintf(out, "  %s%s%s\n", w.save_path != "" ? w.save_path : w.play_source != nil ? "(play)" : "(kit)", world_dirty(w) ? "  [unsaved]" : "", active_world() == w ? "  [active]" : "")
+        }
+
+    case "open":
+        if len(args) < 1 do return "usage: open <path>"
+        path := args[0]
+        ext := strings.to_lower(path[strings.last_index_byte(path, '.') + 1:], context.temp_allocator)
+        w: ^World
+        if ext == "gltf" || ext == "glb" {
+            for &kit in asset_system.kits do if kit.path == path { w = world_open_kit(&kit); break }
+            if w == nil do return fmt.tprintf("no loaded kit '%s' (kits are loaded at startup)", path)
+        } else {
+            if !os.exists(path) do return fmt.tprintf("no file '%s'", path)
+            w = world_open_scene(path)
+        }
+        for v in views do if v.world == w do fmt.sbprintf(out, "opened %s  view=%d\n", w.title, v.id)
+
+    case "close":
+        w := remote_world(args) or_return
+        world_request_close(w)
+        fmt.sbprintf(out, "closing %s\n", w.title)
+
+    case "save":
+        w := remote_world(args) or_return
+        if w.play_source != nil do return "a play world can't be saved (nothing from play is ever saved)"
+        if w.save_path == "" do return "a kit can't be saved"
+        if !world_save(w) do return "save failed (see log)"
+        fmt.sbprintf(out, "saved %s\n", w.save_path)
+
+    case "entities":
+        w := remote_world(args) or_return
+        it := hm.iterator_make(&w.entities)
+        for e, _ in hm.iterate(&it) {
+            fmt.sbprintf(out, "%s  model=%s  position=%v%s\n", sbuf_str(&e.name), e.model, e.position, w.active == e.handle ? "  [active]" : e.selected ? "  [selected]" : "")
+        }
+
+    case "get":
+        w := remote_world(args) or_return
+        if len(args) >= 2 {
+            e := remote_entity(w, args[1]) or_return
+            strings.write_string(out, entity_to_text(e, context.temp_allocator))
+        } else {
+            it := hm.iterator_make(&w.entities)
+            for e, _ in hm.iterate(&it) { strings.write_string(out, entity_to_text(e, context.temp_allocator)); strings.write_byte(out, '\n') }
+        }
+
+    case "set":
+        if len(args) < 4 do return "usage: set <world> <name> <field> <value...>"
+        w := remote_world(args) or_return
+        e := remote_entity(w, args[1]) or_return
+        before := entity_to_text(e, context.temp_allocator)
+        snapshot := e^
+        deserialize_field(e, args[2], strings.join(args[3:], " ", context.temp_allocator), vmem.arena_allocator(&w.arena))
+        if args[2] == "model" do e.model = asset_model_key(e.model)
+        world_fix_duplicate_name(w, e.handle)
+        after := entity_to_text(e, context.temp_allocator)
+        if after == before do return fmt.tprintf("nothing changed (unknown field '%s', or same value)", args[2])
+        undo_push_edited(w, e.handle, snapshot)
+        strings.write_string(out, after)
+
+    case "paste":
+        w := remote_world(args) or_return
+        if entity_count_blocks(body) == 0 do return "no [entity] blocks in the body (blimpctl: pass '-' and pipe them on stdin)"
+        undo_push(w)
+        handles := make([dynamic]Entity_Handle, context.temp_allocator)
+        scene_load_from_text(w, body, &handles)
+        for h in handles do if e, ok := entity_get(w, h); ok do fmt.sbprintf(out, "added %s\n", sbuf_str(&e.name))
+        selection_clear(w)
+        for h in handles do selection_set(w, h, true)   // what was pasted becomes the selection
+
+    case "delete":
+        w := remote_world(args) or_return
+        e := remote_entity(w, len(args) > 1 ? args[1] : "") or_return
+        h := e.handle
+        undo_push(w)
+        world_remove(w, h)
+        fmt.sbprintf(out, "deleted\n")
+
+    case "select":
+        // Replace the selection with the named entities (or `none`); the last one is active.
+        w := remote_world(args) or_return
+        if len(args) < 2 do return "usage: select <world> <name...|none>"
+        hs := make([dynamic]Entity_Handle, context.temp_allocator)
+        if args[1] != "none" do for name in args[1:] {
+            e := remote_entity(w, name) or_return
+            append(&hs, e.handle)
+        }
+        selection_clear(w)
+        for h in hs do selection_set(w, h, true)
+
+
+    case "duplicate":
+        // Ctrl+D: copy the selection in place and select the copies; undoable.
+        w := remote_world(args) or_return
+        if selection_count(w) == 0 do return "nothing selected"
+        undo_push(w)
+        selection_duplicate(w)
+        for h in selection_handles(w) do if e, ok := entity_get(w, h); ok do fmt.sbprintf(out, "%s\n", sbuf_str(&e.name))
+
+    case "settings":
+        // The world's [world] section; with a field and value, set it (undoable, like the window).
+        w := remote_world(args) or_return
+        if len(args) >= 3 {
+            before := w.settings
+            v, ok := struct_field_by_path(w.settings, args[1])
+            if !ok do return fmt.tprintf("no world setting '%s'", args[1])
+            deserialize_value(v, strings.join(args[2:], " ", context.temp_allocator), vmem.arena_allocator(&w.arena))
+            undo_push_settings_edited(w, before)
+        }
+        serialize_struct(out, w.settings)
+
+    case "play":
+        // Play mode (world_play.odin) on a world's level: play, stop, or toggle pause.
+        w := remote_world(args) or_return
+        switch len(args) > 1 ? args[1] : "" {
+        case "":      world_play(w)
+        case "stop":  world_stop(w)
+        case "pause": world_pause_toggle(w)
+        case "step":  world_step(w)
+        case:         return "usage: play <world> [stop|pause|step]"
+        }
+        p := world_level(w).play_world
+        fmt.sbprintf(out, "%s\n", p == nil ? "stopped" : p.paused ? "paused" : "playing")
+
+    case "undo": undo()
+    case "redo": redo()
+
+    case "views":
+        for v in views {
+            c := v.camera
+            fmt.sbprintf(out, "%d  world=%s  size=%dx%d  camera=%v %v %v %v%s\n", v.id, v.world.title,
+                v.target.width, v.target.height, c.pivot, math.to_degrees(c.yaw), math.to_degrees(c.pitch), c.distance,
+                active_view == v ? "  [active]" : "")
+        }
+
+    case "camera":
+        v := remote_view(args) or_return
+        c := &v.camera
+        if len(args) >= 7 {
+            f: [6]f32
+            for i in 0 ..< 6 {
+                val, ok := strconv.parse_f32(args[1 + i])
+                if !ok do return fmt.tprintf("not a number: '%s'", args[1 + i])
+                f[i] = val
+            }
+            c.pivot = {f[0], f[1], f[2]}
+            c.yaw, c.pitch, c.distance = math.to_radians(f[3]), math.to_radians(f[4]), max(f[5], CAMERA_MIN_DISTANCE)
+        } else if len(args) != 1 {
+            return "usage: camera <view> [x y z yaw pitch dist]"
+        }
+        fmt.sbprintf(out, "%v %v %v %v %v %v\n", c.pivot.x, c.pivot.y, c.pivot.z, math.to_degrees(c.yaw), math.to_degrees(c.pitch), c.distance)
+
+    case "frame":
+        v := remote_view(args) or_return
+        editor_frame_selection(editor_view(v))
+
+    case "pick":
+        // A click at view pixel x,y, exactly as the mouse does it; `ctrl` toggles instead of replacing.
+        v := remote_view(args) or_return
+        if len(args) < 3 do return "usage: pick <view> <x> <y> [add|remove|toggle]"
+        x, xok := strconv.parse_f32(args[1])
+        y, yok := strconv.parse_f32(args[2])
+        if !xok || !yok do return "x and y must be numbers"
+        ev := editor_view(v)
+        if ih, iok := editor_icon_pick(ev, ev.screen_min + {x, y}); iok {   // a camera / light icon wins, as for the mouse
+            selection_click(ev, ev.screen_min + {x, y}, remote_selection_op(args[3:]))
+            if e, eok := entity_get(v.world, ih); eok do fmt.sbprintf(out, "hit %s  (icon)\n", sbuf_str(&e.name))
+            break
+        }
+        ray := camera_ray(v.camera, x, y, ev.screen_size.x, ev.screen_size.y)
+        hit, ok := pick_entity(v.world, ray)
+        selection_click(ev, ev.screen_min + {x, y}, remote_selection_op(args[3:]))
+        if !ok { strings.write_string(out, "miss\n"); break }
+        if e, eok := entity_get(v.world, hit.entity); eok do fmt.sbprintf(out, "hit %s  point=%v  t=%v\n", sbuf_str(&e.name), hit.point, hit.t)
+
+    case "maximize":
+        // F11: the view fills the main window, or goes back.
+        v := remote_view(args) or_return
+        ui_maximize_toggle(v)
+        fmt.sbprintf(out, "%s\n", ui.maximized == v ? "maximized" : "restored")
+
+    case "game":
+        // F8: game mode on the view (it must be showing a play world), or back to the editor.
+        v := remote_view(args) or_return
+        if ui.game == v do ui_game_leave()
+        else            do ui_game_enter(v)
+        fmt.sbprintf(out, "%s  camera=%v\n", ui.game == v ? "game" : "editor", v.game_camera)
+
+    case "gameview":
+        // G: hide everything editor-only in the view, or show it again.
+        v := remote_view(args) or_return
+        ui_game_view_toggle(v)
+        fmt.sbprintf(out, "%s\n", editor_view(v).game_view ? "on" : "off")
+
+    case "stats":
+        // F3: the stats overlay.
+        ui.show_stats = len(args) > 0 ? args[0] == "on" : !ui.show_stats
+        fmt.sbprintf(out, "%s\n", ui.show_stats ? "on" : "off")
+
+    case "rename":
+        // F2: inline rename of the world's active entity in its entity list.
+        w := remote_world(args) or_return
+        ui_entity_rename_begin(w)
+
+    case "menu":
+        // A right-click at view pixel x,y: selects what's there and opens the context menu next frame.
+        v := remote_view(args) or_return
+        if len(args) < 3 do return "usage: menu <view> <x> <y>"
+        x, xok := strconv.parse_f32(args[1])
+        y, yok := strconv.parse_f32(args[2])
+        if !xok || !yok do return "x and y must be numbers"
+        editor_view(v).remote_context = vec2{x, y}
+
+    case "marquee":
+        // A marquee drag between two view pixels, exactly as the mouse does it; `ctrl` toggles.
+        v := remote_view(args) or_return
+        if len(args) < 5 do return "usage: marquee <view> <x0> <y0> <x1> <y1> [add|remove|toggle]"
+        c: [4]f32
+        for i in 0 ..< 4 {
+            val, ok := strconv.parse_f32(args[1 + i])
+            if !ok do return fmt.tprintf("not a number: '%s'", args[1 + i])
+            c[i] = val
+        }
+        ev := editor_view(v)
+        a, b := ev.screen_min + {c[0], c[1]}, ev.screen_min + {c[2], c[3]}
+        selection_marquee(ev, linalg.min(a, b), linalg.max(a, b), remote_selection_op(args[5:]))
+        for h in selection_handles(v.world) do if e, eok := entity_get(v.world, h); eok do fmt.sbprintf(out, "%s\n", sbuf_str(&e.name))
+
+
+    case "screenshot":
+        v := remote_view(args) or_return
+        path := len(args) >= 2 ? args[1] : fmt.tprintf("out/screenshots/view%d.png", v.id)
+        dir := path[:max(strings.last_index_any(path, "/\\"), 0)]
+        if dir != "" do os.make_directory_all(dir)
+        renderer_dx_wait_idle()
+        pixels, w, h, ok := dx.texture_readback_rgba8(renderer_dx.render_context, renderer_dx.cmd_queue_gfx, &v.target.tex, context.temp_allocator)
+        if !ok do return "view hasn't rendered yet"
+        for i := 3; i < len(pixels); i += 4 do pixels[i] = 255   // the target's alpha isn't meaningful
+        if stbi.write_png(strings.clone_to_cstring(path, context.temp_allocator), c.int(w), c.int(h), 4, raw_data(pixels), c.int(w * 4)) == 0 {
+            return fmt.tprintf("couldn't write '%s'", path)
+        }
+        abs, _ := os.get_absolute_path(path, context.temp_allocator)
+        fmt.sbprintf(out, "%s\n", abs)
+
+    case "tool":
+        // The viewport tool (toolbar / Q W E R), for driving the editor without the mouse.
+        for a in args {
+            switch a {
+            case "select": ui.tool = .Select
+            case "move":   ui.tool = .Move
+            case "rotate": ui.tool = .Rotate
+            case "scale":  ui.tool = .Scale
+            case "global": ui.space = .Global
+            case "local":  ui.space = .Local
+            case "center": ui.pivot = .Selection_Center
+            case "pivots": ui.pivot = .Individual_Pivots
+            case:          return "usage: tool [select|move|rotate|scale] [global|local] [center|pivots]"
+            }
+        }
+        fmt.sbprintf(out, "%v %v %v\n", ui.tool, ui.space, ui.pivot)
+
+    case "assets":
+        // The Asset Buffers window's data as text (ui_asset_buffers.odin).
+        if len(args) > 0 do ui.show_asset_buffers = args[0] == "show"
+        for it in asset_mem_items() {
+            fmt.sbprintf(out, "%-8v %10s  %s  (%s)\n", it.kind, bytes_text(it.bytes), it.name, it.detail)
+        }
+
+    case "timings":
+        // GPU: per-pass timestamps from the latest completed frame (render_gpu_timer.odin), nested by indent.
+        fmt.sbprintf(out, "%-32s %.3f ms\n", "cpu frame", timer_delta_sec() * 1000)
+        for &t in gpu_timings {
+            label := fmt.tprintf("%*s%s", t.depth * 2, "", sbuf_str(&t.name))
+            fmt.sbprintf(out, "gpu %-28s %.3f ms\n", label, t.ms)
+        }
+
+    case "capture":
+        if !renderdoc_active() do return "RenderDoc isn't active: start the engine with --renderdoc (or launch it from RenderDoc)"
+        renderdoc_request_capture()
+        remote_wait_captures = renderdoc_num_captures() + 1   // remote_poll replies with its path once written
+
+    case "captures":
+        if !renderdoc_active() do return "RenderDoc isn't active"
+        for i in 0 ..< renderdoc_num_captures() {
+            if path, ok := renderdoc_capture_path(i); ok do fmt.sbprintf(out, "%d  %s\n", i, path)
+        }
+
+    case "rdui":
+        n := renderdoc_num_captures()
+        if n == 0 do return "no captures yet (run 'capture' first)"
+        idx := n - 1
+        if len(args) > 0 {
+            i, ok := strconv.parse_int(args[0])
+            if !ok || i < 0 || i >= int(n) do return fmt.tprintf("no capture %s (see 'captures')", args[0])
+            idx = u32(i)
+        }
+        path, _ := renderdoc_capture_path(idx)
+        if _, err := os.process_start({command = {RENDERDOC_UI, path}}); err != nil do return fmt.tprintf("couldn't start %s: %v", RENDERDOC_UI, err)
+        fmt.sbprintf(out, "opened %s\n", path)
+
+    case "lua":
+        // print() output is captured into the reply while the code runs (and still echoed to the
+        // console); return values follow, each as "=> value". The original print is restored after.
+        code := len(args) > 0 ? strings.join(args, " ", context.temp_allocator) : body
+        L := lua_system.L
+        top := lua.gettop(L)
+        defer lua.settop(L, top)
+        lua.getglobal(L, "print")   // stack[top+1]: the original, restored below
+        lua.pushcfunction(L, remote_lua_print)
+        lua.setglobal(L, "print")
+        remote_print_out = out
+        defer {
+            remote_print_out = nil
+            lua.pushvalue(L, top + 1)
+            lua.setglobal(L, "print")
+        }
+        if lua.L_loadstring(L, strings.clone_to_cstring(code, context.temp_allocator)) != .OK || lua.pcall(L, 0, lua.MULTRET, 0) != 0 {
+            return fmt.tprintf("%slua: %s", strings.to_string(out^), lua.tostring(L, -1))
+        }
+        for i in top + 2 ..= lua.gettop(L) {
+            fmt.sbprintf(out, "=> %s\n", remote_lua_tostring(L, c.int(i)))
+            lua.pop(L, 1)   // remote_lua_tostring leaves its string on the stack
+        }
+
+    case:
+        return fmt.tprintf("unknown command '%s' (try 'help')", cmd)
+    }
+    return nil
+}
+
+/* --------------------------------- Lookups -------------------------------- */
+// Each returns an error message on failure, so handlers can `or_return` it as their own result.
+
+@(private="file")
+remote_world :: proc(args: []string) -> (^World, Remote_Error) {
+    if len(args) == 0 do return nil, "missing <world> (index, title, or scene path)"
+    ref := args[0]
+    if i, ok := strconv.parse_int(ref); ok && i >= 0 && i < len(worlds) do return worlds[i], nil
+    for w in worlds do if w.title == ref || w.save_path == ref do return w, nil
+    return nil, fmt.tprintf("no open world '%s' (see 'worlds')", ref)
+}
+
+@(private="file")
+remote_entity :: proc(w: ^World, name: string) -> (^Entity, Remote_Error) {
+    if name == "" do return nil, "missing entity name"
+    h, ok := world_find(w, name)
+    if !ok do return nil, fmt.tprintf("no entity '%s' in %s", name, w.title)
+    return entity_get(w, h), nil
+}
+
+@(private="file")
+remote_view :: proc(args: []string) -> (^Render_View, Remote_Error) {
+    if len(args) == 0 do return nil, "missing <view> id (see 'views')"
+    id, ok := strconv.parse_int(args[0])
+    if ok do for v in views do if int(v.id) == id do return v, nil
+    return nil, fmt.tprintf("no view '%s' (see 'views')", args[0])
+}
+
+// Splits on whitespace; "double quotes" group words (entity names may contain spaces).
+@(private="file")
+remote_tokenize :: proc(s: string) -> []string {
+    out := make([dynamic]string, context.temp_allocator)
+    i := 0
+    for i < len(s) {
+        for i < len(s) && strings.is_space(rune(s[i])) do i += 1
+        if i >= len(s) do break
+        if s[i] == '"' {
+            end := strings.index_byte(s[i + 1:], '"')
+            if end < 0 { append(&out, s[i + 1:]); break }
+            append(&out, s[i + 1:][:end])
+            i += end + 2
+        } else {
+            start := i
+            for i < len(s) && !strings.is_space(rune(s[i])) do i += 1
+            append(&out, s[start:i])
+        }
+    }
+    return out[:]
+}
+
+/* ---------------------------------- Lua ----------------------------------- */
+
+// Where the `lua` command's print() goes while it runs; nil otherwise.
+@(private="file")
+remote_print_out: ^strings.Builder
+
+// Stand-in for print() during a `lua` command: same formatting (tab-separated, tostring'd).
+@(private="file")
+remote_lua_print :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    n := lua.gettop(L)
+    line := strings.builder_make(context.temp_allocator)
+    for i in 1 ..= n {
+        if i > 1 do strings.write_byte(&line, '\t')
+        strings.write_string(&line, string(remote_lua_tostring(L, i)))
+        lua.pop(L, 1)
+    }
+    fmt.println(strings.to_string(line))   // keep the console echo print() always had
+    if remote_print_out != nil do fmt.sbprintln(remote_print_out, strings.to_string(line))
+    return 0
+}
+
+// Lua 5.1 has no luaL_tolstring: format through the global tostring() so tables/nil/bools work.
+// Leaves the resulting string on the stack (the caller pops it).
+@(private="file")
+remote_lua_tostring :: proc(L: ^lua.State, idx: c.int) -> cstring {
+    lua.getglobal(L, "tostring")
+    lua.pushvalue(L, idx)
+    lua.call(L, 1, 1)
+    return lua.tostring(L, -1)
+}
+
+// The optional selection-op word after a pick / marquee ("ctrl" kept as toggle).
+@(private="file")
+remote_selection_op :: proc(rest: []string) -> Selection_Op {
+    if len(rest) == 0 do return .Replace
+    switch rest[0] {
+    case "add":            return .Add
+    case "remove":         return .Remove
+    case "toggle", "ctrl": return .Toggle
+    }
+    return .Replace
+}

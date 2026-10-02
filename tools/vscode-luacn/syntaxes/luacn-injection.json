@@ -1,0 +1,19 @@
+{
+    "scopeName": "luacn.keywords",
+    "injectionSelector": "L:source.lua",
+    "patterns": [
+        {
+            "comment": "Control flow keywords — 否则如果 must appear before 否则",
+            "name": "keyword.control.lua",
+            "match": "(否则如果|如果|那么|否则|结束|当|重复|直到|对于|在|做|函数|返回|本地|中断)"
+        },
+        {
+            "name": "keyword.operator.lua",
+            "match": "(和|或|非)"
+        },
+        {
+            "name": "constant.language.lua",
+            "match": "(真|假|空)"
+        }
+    ]
+}

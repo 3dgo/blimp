@@ -1,0 +1,14 @@
+{
+    "Lua.runtime.version": "Lua 5.1",
+    "Lua.runtime.plugin": "${workspaceFolder}/tools/vscode-luacn/lsp-plugin.lua",
+    "files.associations": {
+        "*.luacn": "lua"
+    },
+    "Lua.workspace.ignoreDir": [
+        "assets/scripts/main.lua",
+        "assets_engine/scripts/test_luacn.lua"
+    ],
+    "Lua.diagnostics.disable": [
+        "duplicate-set-field"
+    ]
+}

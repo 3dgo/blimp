@@ -1,0 +1,188 @@
+# Editor: worlds, editing, play mode, remote control
+
+### Worlds & editing
+
+- **`World` is an instantiable struct**: `entities` handle map, level arena, `render: World_Render`,
+  `active`, `title` and `save_path`. It is not globals, and systems take `^World`.
+  - Any number of worlds can be open at once. They live in a pointer-stable registry,
+    `worlds: [dynamic]^World` (`world_registry.odin`), where each world is individually allocated
+    because views, panels and undo hold `^World`.
+  - Nothing is open at startup except the Worlds window, which lists open worlds, scenes (`.ini`
+    files with `[entity]` blocks under `assets/` and `assets_engine/` only) and kits.
+  - Closing a world or view is deferred to `world_registry_process_pending`, after
+    `renderer_dx_wait_idle`.
+- **A kit is just a world built from a glTF.** There is no kit or preview world type.
+  - A scene world is built from an `.ini` (`world_open_scene`), a kit world from a glTF
+    (`world_open_kit`, one entity per `Kit_Node`). That constructor is the only difference.
+  - `save_path == ""` marks a kit, which can't be saved back to its glTF.
+  - There is no read-only mode. The inspector shows a "won't be saved" warning instead.
+- **A world owns its GPU draw mirror; a view is cheap.**
+  - `World_Render` holds the world's per-flight transform, mesh-instance and draw-command buffers.
+    It is built once per world per frame.
+  - `Render_View` is `{target, camera, world, frame_constants}`. You can open many per world:
+    several viewports on one scene are several views sharing one `world` pointer.
+  - **Editor state stays off core structs.** A view's editor side is an `Editor_View`
+    (`editor_view.odin`): screen rect, hover, camera navigation, gizmo, marquee and window placement.
+    The UI keeps one per view (`editor_view(v)`, freed with the view).
+    - `render_camera.odin` is camera maths only; mouse/keyboard navigation and F-framing live in
+      `editor_view.odin`.
+    - New editor features add state there, or to other editor-side structs, not to `Render_View`,
+      `Camera` or the renderer.
+  - **Drawing in a viewport at a 3D position comes in two layers.** Use these rather than ad hoc ImGui calls.
+    - `debug_*` (`render_debug_draw.odin`): lines in the scene pass, depth-tested so geometry hides them, 1px.
+      It has line, box, axes, circle, sphere, cone, arrow and frustum. Use it for things that live in the
+      world, like a light's reach.
+    - `ui_overlay_*` (`ui_overlay.odin`): world-space shapes drawn with ImGui on top of one view, crisp and any
+      thickness. Lines are clipped at the near plane. It has line, polyline, circle, box, arrow, disc, a
+      shaded cone and cube, text, and icon (a font-glyph sprite). Use it for tools and markers, such as
+      the gizmo and the camera/light icons.
+      - Use it inside the view's window: `o := ui_overlay_begin(ev); defer ui_overlay_end(o)`.
+      - `ui_world_to_screen` lives there too.
+  - Shared static asset GPU data lives in `Asset_Buffers` / `asset_buffers`.
+  - Picking and each view's debug-line range are per view. Selection is per world (next bullet).
+- **Selection** (`editor_selection.odin`): membership is the entity's `selected` field (`hidden, noserialize`).
+  - That way undo snapshots carry it, delete and paste need no bookkeeping, and it never reaches
+    files or the clipboard. Selection changes don't call `undo_push`, so they don't dirty the world.
+  - `World.active` is the selected entity the inspector shows and the gizmo pivots on.
+  - Viewport: click or a crossing marquee replaces the selection; Shift adds, Ctrl+Shift removes,
+    Ctrl toggles (`Selection_Op`). Alt stays orbit.
+    Ctrl+D duplicates the selection in place and selects the copies (Unity). Ctrl+A selects all.
+  - **Right-click menu** (`ui_context_menu.odin`): in a viewport, an RMB release without flying (under
+    `NAV_CLICK_PX` of travel, no WASD) is a click. It and the entity list open one menu: copy, paste at
+    the click, Paste Over, duplicate, delete, select all / deselect, frame, hide / unhide all.
+    - Right-clicking an unselected entity selects it first, so the menu acts on it.
+    - The shortcuts call the same action procs, so the two can't drift.
+    Entity list: Shift+click selects a range from `select_anchor`, Ctrl+Shift adds the range.
+  - Operations act on the whole selection: gizmo, copy, delete, Paste Over, F.
+  - Gizmo: the same change applies to every member. Pivot mode (the tool column left of the viewport): **Selection Center**
+    (default) rotates/scales the group about its combined bounds centre; **Individual Pivots** turns
+    each about its own pivot.
+  - Pasting several blocks keeps their layout, centred on the paste point; pasting one ignores its
+    transform (as before).
+- **World window.** Opening a world creates a `World_Host`: one floating window (centred, cascaded,
+  960×540, 320×180 minimum) titled "`<file>` 视口". It holds its own DockSpace laid out as
+  [ viewport | entity list / inspector ], with the tab bar auto-hidden.
+  - Its panels start pinned to that world. They keep the Follow/pin combo, so they can be retargeted.
+  - `Entity_Panel.owner` means only that the panel is docked in that window and closes with it.
+  - "New Viewport" adds a plain extra view window onto an open world.
+  - Panel targeting is explicit: follow the active world, or pin to one. Docking never links a panel.
+- **`active_view`** is the viewport you last focused, or the world you last clicked in a panel
+  (`world_activate`). It may be nil. Its world is the target of Ctrl+C/V. Undo entries carry their
+  own world.
+- **Lua has two tiers** (`lua_world_script.odin`).
+  - Engine hooks (`引擎.开始/更新/完结`) run for the whole session.
+  - World scripts belong to a world and run only while it's open. The script is the world's
+    `[world] script` path; it defines `init()`/`初始化()` and `update(dt)`/`更新(时间差)`.
+  - Each world script runs in its own environment (falls back to `_G`), so open worlds can't clobber
+    each other. Its hooks are plain functions in that environment, not fields of the shared `世界` table.
+  - `@(lua)` world/entity procs take no `^World`, since a world pointer can't be marshalled. They act
+    on `lua_world()`: the world whose script is running, else `game_world`. That world is unrendered,
+    isn't in `worlds`, and is what engine hooks act on.
+  - World scripts run only in play worlds (next bullet). Init runs at Play, or when the script path
+    changes. A script error logs once and stops that world's script.
+- **Play mode runs a copy** (`world_play.odin`). Play builds a play world from the level (same entities
+  and settings), and every view of the level switches to it. Stop switches them back and closes the copy.
+  - The level is never touched while playing, so nothing from play can leak into it. This was chosen over
+    snapshot-and-restore because forgetting to reset something would silently corrupt the level, whereas
+    a copy fails loudly.
+  - Links: `level.play_world` points to the copy, and `play.play_source` points back to the level.
+    `world_level(w)` is the world that's saved and edited.
+  - Nothing is saved from play. A play world has no save_path, and the toolbar Save is disabled while playing.
+  - A play world keeps no undo: `undo_push` returns false there. A playing level's own steps wait
+    until Stop.
+  - Editor state pinned to a world follows the switch (`ui_retarget_world`), and drags in progress end.
+    New editor state that pins a `^World` hooks in there, next to `ui_forget_world`.
+  - Closing a play view, a playing level or a play world stops play first (`world_registry_process_pending`).
+    The unsaved prompt asks about the level.
+  - Runtime systems (physics, animation, audio) belong to the play world: built with it, freed when it closes.
+  - Keys (and toolbar buttons): F5 Play, F6 Pause, F7 Stop, F10 step one frame while paused (game systems check `w.ticks`,
+    set once per frame by `world_play_tick`, never `paused`). Esc stays the game's. No Restart: Stop is the reset.
+  - **Game mode** (`ui_game.odin`): Play also makes that view the whole window as the game, rendered through
+    the play world's first enabled camera entity (`Render_View.game_camera`; the editor camera if there's none).
+    The editor isn't drawn at all, so no editor window, input or letter shortcut runs, and docking is untouched.
+    F8 switches between game mode and the editor while the game keeps running; Stop leaves it. Only function
+    keys work in game mode. A release build is always in it: it plays the start level at startup.
+- **Game Settings** (`game_settings.odin`, `game.ini` at the project root, Show menu): settings that belong to
+  the game, not one world. `start_level` opens at startup (and plays in release). Not undoable; written after each edit.
+- **Editor function keys** (`ui_handle_shortcuts`): F2 renames the active entity in place in the entity list,
+  F3 toggles the stats overlay (FPS, GPU time per pass, on the foreground draw list), F11 maximizes the
+  hovered viewport over the main window (its host keeps running underneath, so docking survives), and F9
+  relaunches the engine through the unsaved prompt. F12 is left to RenderDoc's capture key.
+    While playing, the viewport has a border (amber when paused) and the title shows ▶.
+- **World settings** (`World_Settings`) are the scene file's `[world]` section, written before the
+  entities: background colour, script path, and later sky/atmosphere/bake fields.
+  - Only fields something reads; adding one is one line (reflection inspector + serializer).
+  - Edited in the World Settings window (gear button on the viewport toolbar). Undo and unsaved
+    tracking cover them.
+  - Pasted text never touches them: only `scene_load` reads `[world]`.
+- **The clipboard is the scene `[entity]` text format** (`entity_to_text` / `entity_apply_text` over
+  the generic codec in `serialize.odin`).
+  - One format backs save, duplicate, instantiate-from-kit and apply-settings. There is no drag
+    and no bespoke asset-placement path.
+  - It uses the OS clipboard (via ImGui), so blocks interchange with scene `.ini` files in a text
+    editor and work across worlds.
+  - **Ctrl+C** copies the selected entity in the active world.
+  - **Ctrl+V always creates new** entities and never overwrites. Placement comes from the paste
+    point, not the block: the mouse raycast hit in the active view, or the viewport-centre ray when
+    the mouse is outside it. If either ray misses, the entity lands 5 units in front of the camera.
+  - **Paste Over** (one button at the top of the inspector) overrides the selected entity in place.
+    It keeps the target's handle, skips `identity` and `placement` fields, snapshots for undo first,
+    and is enabled only for a single-block clipboard. Everything else it touches is controlled by
+    *what you copy*.
+  - **Per-field paste**: the `widget:` picker has a Paste button beside it. It accepts a whole
+    `[entity]` block (and takes that field's value) or a bare key such as
+    `assets/models/car.gltf:police`.
+- **Undo is whole-world snapshots** (`editor_undo.odin`): before any edit, copy the world's entity map.
+  - The map is a fixed-size `Static_Handle_Map` value of plain-data entities, so a snapshot is one
+    struct copy. Restoring it brings back exact handles, so no fix-up is needed for deletes or pastes.
+  - New editor operations just call `undo_push(w)` first. Edits noticed after the fact (gizmo drag,
+    inspector widgets) use `undo_push_edited` with the entity's pre-edit state.
+  - There is one history across worlds: Ctrl+Z undoes, Ctrl+Shift+Z redoes.
+  - Rule: data an entity points into (arena strings, later slices) is replaced, never mutated in
+    place, because snapshots share it.
+  - **Unsaved changes come from undo too.** `undo_push` gives the world a fresh `state_id`, and
+    undo/redo restore it along with the snapshot.
+    - The world is dirty when `state_id != saved_state_id`, so undoing back to the save is clean.
+    - Dirty worlds show `*`, Save is disabled when clean, and closing a dirty world or quitting asks
+      Save / Don't Save / Cancel (`ui_unsaved.odin`). Kits are never dirty.
+    - An edit that bypasses `undo_push` would also bypass this. Every edit path must call it.
+- **Entity names are unique per world.** `world_add`, scene load and paste go through
+  `world_unique_name`, which yields `base_1`, `base_2` and so on. The inspector re-checks once no
+  item is active, not per keystroke.
+- Backtick tags drive the above alongside `noserialize`/`hidden`/`readonly`:
+  - **`identity`**: kept on any override, e.g. `name`.
+  - **`placement`**: the entity's placement and relationships in the scene. Today that's the
+    transform; later it covers fields like a parent/attach. It is ignored by every paste.
+  - Both are authored per field in the schema; extending them is a tag, not code.
+- **Text fields: the type says who owns it.** `sbuf64` / `sbuf128` / `sbuf256` = text the entity owns,
+  inline, sized by content (64: names, ids, gameplay tags · 128: labels · 256: paths, descriptions) —
+  editable in the inspector by default (`readonly` disables). `string` = a
+  reference to text owned elsewhere (an asset key in the asset arena) — never free-text edited; a
+  **`widget:<kind>`** tag chooses how it's picked (`widget:model`, `widget:texture`: a dropdown over
+  the loaded assets' keys, storing the interned key — no allocation), otherwise shown read-only.
+  Prefer `sbuf64` unless the string already exists somewhere and the entity shouldn't own it.
+
+
+## Remote control (tools / Claude)
+
+A debug build listens on `127.0.0.1:47800` (`src/editor_remote.odin`). `bin/blimpctl.exe` (`tools/blimpctl`,
+built by `build.odin`) sends one text command and prints the reply. `blimpctl help` lists the commands:
+worlds, open/save/close, entities/get/set/paste/delete/select, play/stop/pause, game, undo/redo, views/camera/frame/pick/menu, tool,
+timings (GPU time per pass, `render_gpu_timer.odin`), assets (asset GPU payload per asset, the data behind the
+Asset Buffers treemap window, `ui_asset_buffers.odin`),
+screenshot (writes a PNG, replies with its path), and lua.
+
+- Commands run on the main thread between frames, polled before `ui_update`, with no threads.
+- The reply's first line is `ok` or `error`. Entity text uses the scene `[entity]` format.
+- Use it to verify engine changes yourself, cheapest check first (the ladder in CLAUDE.md): text
+  replies before screenshots. Don't hand back an unverified build when the engine can be driven.
+- **RenderDoc** (`src/editor_renderdoc.odin`): it's active only when the engine is started with
+  `--renderdoc`, or launched from RenderDoc, because it has to hook D3D12 before the device exists.
+  - `blimpctl capture` captures the next frame (one `renderer_dx_update`) to `out/captures/*.rdc`
+    and replies with the path. `captures` lists them; `rdui [i]` opens one in qrenderdoc.
+  - To read a capture: `"C:/Program Files/RenderDoc/renderdoccmd.exe" convert -f X.rdc -o X.xml -c xml`.
+    The XML holds every API call with its arguments: draws, ExecuteIndirect counts, barrier
+    sync/access/layout. `renderdoccmd thumb` extracts the final image.
+- The build is `odin run build.odin -file` (there is no build.exe). Close a running engine first,
+  since Windows locks `bin/blimp.exe`.
+

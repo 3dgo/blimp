@@ -1,0 +1,14 @@
+{
+    "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
+    "enable_document_symbols": true,
+    "enable_hover": true,
+    "enable_snippets": true,
+    "enable_semantic_tokens": false,
+    "checker_args": "-custom-attribute:lua -custom-attribute:lua_zh -custom-attribute:table -custom-attribute:method -custom-attribute:lua_ffi -custom-attribute:as -custom-attribute:lua_int",
+    "collections": [
+        {
+            "name": "lib",
+            "path": "E:/Libraries/odin_lib"
+        }
+    ]
+}

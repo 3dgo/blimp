@@ -1,0 +1,8 @@
+# Build output and third-party DLLs
+bin/
+
+# Screenshots, RenderDoc captures, line counts
+out/
+
+# Local Claude Code permissions
+.claude/settings.local.json

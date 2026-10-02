@@ -1,0 +1,34 @@
+// raddbg 0.9.26 project file
+
+recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcruntime/src/string/amd64/memcpy.asm"
+recent_file: path: "src/asset/importer_png.odin"
+recent_file: path: "../../Libraries/Odin/core/mem/mem.odin"
+recent_file: path: "src/renderer_dx.odin"
+recent_file: path: "src/dx/resource.odin"
+recent_file: path: "src/dx/command.odin"
+recent_file: path: "src/app.odin"
+recent_file: path: "src/asset_system.odin"
+recent_file: path: "../../Libraries/Odin/base/runtime/error_checks.odin"
+recent_file: path: "../../Libraries/Odin/base/runtime/procs_windows_amd64.odin"
+recent_file: path: "src/asset/importer_gltf.odin"
+recent_file: path: "../../Libraries/Odin/base/runtime/entry_windows.odin"
+recent_file: path: "src/entry_point.odin"
+recent_file: path: "../../Libraries/odin_lib/gltf2/gltf.odin"
+recent_file: path: "C:/SDKBuild/build-X64-1.4.341.0/DirectXShaderCompiler/lib/Support/CommandLine.cpp"
+recent_file: path: "../../Libraries/Odin/core/encoding/json/tokenizer.odin"
+recent_file: path: "../../Libraries/Odin/base/runtime/internal.odin"
+recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcruntime/src/string/amd64/memset.asm"
+recent_file: path: "src/asset/registry.odin"
+recent_file: path: "src/asset/manager.odin"
+recent_file: path: "../../Libraries/Odin/core/os/dir.odin"
+recent_file: path: "../../Libraries/Odin/base/runtime/core.odin"
+debug_info:
+{
+  path: "E:/Projects/blimp/bin/blimp.pdb"
+  timestamp: 66224972983005
+}
+debug_info:
+{
+  path: "C:/VulkanSDK/1.4.341.1/Bin/dxcompiler.pdb"
+  timestamp: 66205247877700
+}

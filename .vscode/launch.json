@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "build and debug",
+            "type": "raddebugger",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/blimp.exe",
+            "preLaunchTask": "build"
+        }
+    ]
+}

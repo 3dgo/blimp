@@ -1,0 +1,17 @@
+{
+    "publisher": "blimp",
+    "name": "luacn",
+    "displayName": "LuaCN — Chinese Lua keywords",
+    "description": "Syntax highlighting for .luacn files (Lua with Chinese keywords).",
+    "version": "0.1.0",
+    "engines": { "vscode": "^1.74.0" },
+    "contributes": {
+        "grammars": [
+            {
+                "path": "./syntaxes/luacn-injection.json",
+                "scopeName": "luacn.keywords",
+                "injectTo": ["source.lua"]
+            }
+        ]
+    }
+}
