@@ -11,20 +11,26 @@ import hm "core:container/handle_map"
 // probes (render_probes.odin). Probes hold indirect light only — sky and bounces. Direct light stays
 // realtime, so each light reaches a probe only off a surface it lit.
 //
-// Pass k: every probe casts BAKE_RAYS rays. A miss sees the sky. A hit on a front face sends back
-// albedo × (direct light there + pass k-1's grid sampled there), so BAKE_PASSES passes are that many
+// Pass k: every probe casts `rays` rays. A miss sees the sky. A hit on a front face sends back
+// albedo × (direct light there + pass k-1's grid sampled there), so `bounces` passes are that many
 // bounces. A back-face hit means the probe sees the inside of something; it sends back black.
-// Passes run probes in parallel (parallel_for); each probe writes only its own slot.
+// Passes run probes in parallel (parallel_for); each probe writes only its own slot. Rays, bounces and
+// what goes in come from World_Settings.bake.
 
-BAKE_RAYS    :: 256    // per probe per pass, on a Fibonacci sphere: the same set for every probe, so bakes repeat exactly
-BAKE_PASSES  :: 3      // bounces
-BAKE_EPSILON :: 1e-3   // offset off a hit surface (metres) for its shadow rays and grid lookup
+BAKE_RAYS_MIN    :: 16     // rays per probe per pass, on a Fibonacci sphere: the same set for every probe, so bakes repeat exactly
+BAKE_RAYS_MAX    :: 4096
+BAKE_BOUNCES_MAX :: 8
+BAKE_EPSILON     :: 1e-3   // offset off a hit surface (metres) for its shadow rays and grid lookup
 
-// A probe whose rays mostly hit back faces is inside geometry. Counted for the stats; nothing acts on
-// it yet (docs/rendering.md → Baker: see the leaking before fixing it).
+// A probe whose rays mostly hit back faces is inside geometry: its depth map is left all zero, so the
+// visibility test (probe_visibility) gives it next to no weight anywhere.
 BAKE_BURIED_FRACTION :: 0.25
 
-// What makes geometry block and bounce light in the bake: drawn, static, and not opted out.
+// How tightly a depth texel gathers the rays near its direction: weight = max(0, cos)^this (DDGI's 50).
+BAKE_DEPTH_SHARPNESS :: 50
+
+// What takes part in the bake: drawn, static, and not opted out (Cast Indirect). Geometry blocks and
+// bounces light; a light has its bounce baked, scaled by its `indirect`.
 entity_bakes :: proc(e: ^Entity) -> bool {
     return entity_drawn(e) && .Static in e.basic_static_flags && .Cast_Indirect in e.basic_static_flags
 }
@@ -46,13 +52,17 @@ Bake :: struct {
     scene:  Scene_BVH,
     lights: []GPU_Light,
     light_layer: []u8,            // each light's probe layer (its group's; layer 0 for group 0)
+    light_shadow: []bool,         // each light's `shadow`: its shadow ray is cast
     layers: int,
     sky:    vec3,                 // linear radiance of a miss (layer 0)
-    dirs:   [BAKE_RAYS]vec3,
-    basis:  [BAKE_RAYS][9]f32,    // sh_basis(dirs[k])
+    dirs:   []vec3,               // the rays, the same for every probe
+    basis:  [][9]f32,             // sh_basis(dirs[k])
     prev:   Probe_Grid,           // the previous pass (all zero on the first); only origin..probes are used
     out:    []Probe_SH,           // this pass, laid out like prev.probes
-    back:   []u32,                // this pass: back-face hits per probe
+    back:   []u32,                // back-face hits per probe (pass 0)
+    pass:   int,
+    depth:  []Probe_Depth,        // filled by pass 0, then prev.depth, so later passes' grid lookups test visibility
+    depth_weight: []f32,          // texel × ray: max(0, dot(texel direction, ray))^BAKE_DEPTH_SHARPNESS, row per texel
 }
 
 Bake_Layers :: [MAX_PROBE_LAYERS]vec3   // one radiance (or irradiance) per probe layer
@@ -66,6 +76,7 @@ Bake_Layers :: [MAX_PROBE_LAYERS]vec3   // one radiance (or irradiance) per prob
 // included (a group's light bounces within its own layer), and the runtime scales each layer by its group.
 bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     start := time.tick_now()
+    set := &w.settings.bake
     b: Bake
 
     b.scene = scene_bvh_build(w, entity_bakes, context.temp_allocator)
@@ -78,12 +89,16 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     // Lights, and a layer for every group that has one: layer 0 first, then the groups in order.
     lights := make([dynamic]GPU_Light, 0, MAX_LIGHTS, context.temp_allocator)
     groups := make([dynamic]int, 0, MAX_LIGHTS, context.temp_allocator)
+    shadows := make([dynamic]bool, 0, MAX_LIGHTS, context.temp_allocator)
     has_group: [MAX_LIGHT_GROUPS + 1]bool
     it := hm.iterator_make(&w.entities)
     for e, _ in hm.iterate(&it) {
-        if !entity_drawn(e) || e.light_type == .None || len(lights) == MAX_LIGHTS do continue
-        append(&lights, entity_gpu_light(e))   // at its own intensity: the group scale is applied at runtime
+        if !entity_bakes(e) || e.light_type == .None || len(lights) == MAX_LIGHTS do continue
+        light := entity_gpu_light(e)   // at its own intensity: the group scale is applied at runtime
+        light.intensity *= e.indirect
+        append(&lights, light)
         append(&groups, entity_light_group(e))
+        append(&shadows, e.shadow)
         has_group[entity_light_group(e)] = true
     }
     layer_group: [MAX_PROBE_LAYERS]u8
@@ -95,15 +110,23 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
         b.layers += 1
     }
     b.lights = lights[:]
+    b.light_shadow = shadows[:]
     b.light_layer = make([]u8, len(lights), context.temp_allocator)
     for g, i in groups do b.light_layer[i] = group_layer[g]
     stats.lights, stats.layers = len(lights), b.layers
-    b.sky = w.settings.bake.sky_color * w.settings.bake.sky_intensity
+    if set.sky do b.sky = set.sky_color * set.sky_intensity
 
-    // The grid covers the geometry's bounds plus one spacing all round.
-    spacing := max(w.settings.bake.probe_spacing, 0.05)
+    // The grid covers the geometry's bounds plus one spacing all round, or the manual box.
+    spacing := max(set.probe_spacing, 0.05)
     lo := b.scene.nodes[0].min - spacing
     hi := b.scene.nodes[0].max + spacing
+    if set.bounds == .Manual {
+        lo, hi = set.bounds_min, set.bounds_max
+        if hi.x <= lo.x || hi.y <= lo.y || hi.z <= lo.z {
+            log.errorf("Bake '%v': the manual grid box is empty (max must be above min on every axis)", w.title)
+            return
+        }
+    }
     dims: [3]i32
     for a in 0..<3 do dims[a] = i32(math.ceil((hi[a] - lo[a]) / spacing)) + 1
     count := int(dims.x) * int(dims.y) * int(dims.z)
@@ -115,8 +138,12 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
 
     // Fibonacci sphere: even coverage, no clumping, no randomness.
     GOLDEN_ANGLE :: math.PI * (3 - 2.2360679775)   // π(3 − √5)
-    for k in 0..<BAKE_RAYS {
-        z := 1 - (2 * f32(k) + 1) / BAKE_RAYS
+    rays := int(clamp(set.rays, BAKE_RAYS_MIN, BAKE_RAYS_MAX))
+    bounces := int(clamp(set.bounces, 1, BAKE_BOUNCES_MAX))
+    b.dirs  = make([]vec3, rays, context.temp_allocator)
+    b.basis = make([][9]f32, rays, context.temp_allocator)
+    for k in 0..<rays {
+        z := 1 - (2 * f32(k) + 1) / f32(rays)
         r := math.sqrt(1 - z * z)
         phi := f32(k) * GOLDEN_ANGLE
         b.dirs[k] = {r * math.cos(phi), r * math.sin(phi), z}
@@ -127,22 +154,31 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
         probes = make([]Probe_SH, count * b.layers, context.temp_allocator)}
     b.out  = make([]Probe_SH, count * b.layers, context.temp_allocator)
     b.back = make([]u32, count, context.temp_allocator)
+    b.depth = make([]Probe_Depth, count, context.temp_allocator)
+    TEXELS :: PROBE_DEPTH_RES * PROBE_DEPTH_RES
+    b.depth_weight = make([]f32, TEXELS * rays, context.temp_allocator)
+    for t in 0..<TEXELS {
+        td := probe_depth_texel_dir(t)
+        for dir, k in b.dirs do b.depth_weight[t * rays + k] = math.pow(max(linalg.dot(td, dir), 0), BAKE_DEPTH_SHARPNESS)
+    }
 
-    for pass in 0..<BAKE_PASSES {
+    for pass in 0..<bounces {
+        b.pass = pass
         stats.threads = parallel_for(count, &b, bake_probe)
         b.prev.probes, b.out = b.out, b.prev.probes   // this pass is the next one's light source
-        log.infof("Bake '%v': pass %v/%v done (%.1f s)", w.title, pass + 1, BAKE_PASSES, time.duration_seconds(time.tick_since(start)))
+        b.prev.depth = b.depth                        // and from pass 1 on, its lookups test visibility
+        log.infof("Bake '%v': pass %v/%v done (%.1f s)", w.title, pass + 1, bounces, time.duration_seconds(time.tick_since(start)))
     }
-    stats.rays = count * BAKE_RAYS * BAKE_PASSES
+    stats.rays = count * rays * bounces
 
     total_back := 0
     for n in b.back {
         total_back += int(n)
-        if f32(n) > BAKE_BURIED_FRACTION * BAKE_RAYS do stats.buried += 1
+        if f32(n) > BAKE_BURIED_FRACTION * f32(rays) do stats.buried += 1
     }
-    stats.backface = f32(total_back) / f32(count * BAKE_RAYS)
+    stats.backface = f32(total_back) / f32(count * rays)
 
-    probe_grid_set(w, lo, spacing, dims, layer_group[:b.layers], b.prev.probes)
+    probe_grid_set(w, lo, spacing, dims, layer_group[:b.layers], b.prev.probes, b.depth)
     world_render_probes_recreate(w)
     if w.save_path != "" {
         path := probes_path(w.save_path)
@@ -158,7 +194,17 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     return stats, true
 }
 
-// One probe, one pass, every layer (parallel_for body: no allocation, no logging).
+// The box an Auto bake would fill: the static geometry's bounds plus one spacing all round. Builds a
+// scene BVH in scratch, so it's for a button press, not every frame.
+bake_auto_bounds :: proc(w: ^World) -> (lo, hi: vec3, ok: bool) {
+    scene := scene_bvh_build(w, entity_bakes, context.temp_allocator)
+    if len(scene.nodes) == 0 do return
+    spacing := max(w.settings.bake.probe_spacing, 0.05)
+    return scene.nodes[0].min - spacing, scene.nodes[0].max + spacing, true
+}
+
+// One probe, one pass, every layer (parallel_for body: no allocation, no logging). Pass 0 also records
+// the probe's depth map and back-face count: geometry, the same every pass.
 @(private="file")
 bake_probe :: proc(data: rawptr, i: int) {
     b := (^Bake)(data)
@@ -168,28 +214,49 @@ bake_probe :: proc(data: rawptr, i: int) {
     z := i32(i) / (g.dims.x * g.dims.y)
     p := probe_position(g, x, y, z)
 
+    TEXELS :: PROBE_DEPTH_RES * PROBE_DEPTH_RES
     sh: [MAX_PROBE_LAYERS][9]vec3
     back: u32
-    for k in 0..<BAKE_RAYS {
-        L := bake_radiance(b, Ray{origin = p, dir = b.dirs[k]}, &back)
+    depth: [TEXELS][3]f32   // per texel: Σw, Σw·d, Σw·d²
+    max_d := PROBE_DEPTH_RANGE * g.spacing
+    rays := len(b.dirs)
+    for dir, k in b.dirs {
+        t: f32
+        L := bake_radiance(b, Ray{origin = p, dir = dir}, &back, &t)
         for l in 0..<b.layers do for c in 0..<9 do sh[l][c] += L[l] * b.basis[k][c]
+        if b.pass == 0 {
+            d := min(t, max_d)
+            for j in 0..<TEXELS {
+                w := b.depth_weight[j * rays + k]
+                if w > 0 do depth[j] += {w, w * d, w * d * d}
+            }
+        }
+    }
+    if b.pass == 0 {
+        b.back[i] = back
+        b.depth[i] = {}   // buried: all zero
+        if f32(back) <= BAKE_BURIED_FRACTION * f32(rays) {
+            for j in 0..<TEXELS do if depth[j][0] > 0 do b.depth[i].t[j] = {depth[j][1] / depth[j][0], depth[j][2] / depth[j][0]}
+        }
     }
     // Monte Carlo over the sphere (× 4π / N), then irradiance = the cosine lobe convolved (bands × π,
     // 2π/3, π/4), stored / π: bands × 1, 2/3, 1/4.
     BAND := [9]f32{1, 2.0/3, 2.0/3, 2.0/3, 0.25, 0.25, 0.25, 0.25, 0.25}
     count := probe_count(g)
-    for l in 0..<b.layers do for c in 0..<9 do b.out[l * count + i].c[c] = sh[l][c] * (4 * math.PI / BAKE_RAYS) * BAND[c]
-    b.back[i] = back
+    for l in 0..<b.layers do for c in 0..<9 do b.out[l * count + i].c[c] = sh[l][c] * (4 * math.PI / f32(len(b.dirs))) * BAND[c]
 }
 
-// Radiance arriving along r, per layer. One trace serves them all; only what lights the hit differs.
+// Radiance arriving along r, per layer, and how far the ray went (t; max(f32) for a miss). One trace
+// serves every layer; only what lights the hit differs.
 @(private="file")
-bake_radiance :: proc(b: ^Bake, r: Ray, back: ^u32) -> (L: Bake_Layers) {
+bake_radiance :: proc(b: ^Bake, r: Ray, back: ^u32, t: ^f32) -> (L: Bake_Layers) {
     hit, ok := scene_bvh_closest_hit(&b.scene, r)
     if !ok {
+        t^ = max(f32)
         L[0] = b.sky
         return
     }
+    t^ = hit.t
 
     // Front faces are clockwise seen from the front (left-handed, Y-up): cross(v1 − v0, v2 − v0) faces out.
     tri := scene_hit_triangle(&b.scene, hit)
@@ -212,7 +279,7 @@ bake_radiance :: proc(b: ^Bake, r: Ray, back: ^u32) -> (L: Bake_Layers) {
 }
 
 // Direct light at p facing n, into each light's layer, as scene.slang's frag_main lights it (diffuse only, no 1/π), with one
-// shadow ray per light that reaches p. Every light is shadowed here, whatever its `shadow` says.
+// shadow ray per light that reaches p, for the lights that cast shadows (`shadow`), as on screen.
 @(private="file")
 bake_direct :: proc(b: ^Bake, p, n: vec3) -> (e: Bake_Layers) {
     for &light, li in b.lights {
@@ -244,7 +311,7 @@ bake_direct :: proc(b: ^Bake, p, n: vec3) -> (e: Bake_Layers) {
         }
         ndl := linalg.dot(n, L)
         if ndl <= 0 || atten <= 0 do continue
-        if scene_bvh_any_hit(&b.scene, Ray{origin = p, dir = L}, dist) do continue
+        if b.light_shadow[li] && scene_bvh_any_hit(&b.scene, Ray{origin = p, dir = L}, dist) do continue
         e[b.light_layer[li]] += light.color * (light.intensity * atten * ndl)
     }
     return

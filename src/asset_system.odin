@@ -14,7 +14,9 @@ import "core:image/png"
 import "core:encoding/json"
 import "core:hash/xxhash"
 import "core:net"
+import "core:c"
 import "lib:gltf2"
+import b3 "vendor:box3d"
 import "common"
 
 Asset_System :: struct {
@@ -35,6 +37,8 @@ Asset_System :: struct {
     vertex_attributes: [dynamic]Vertex_Attributes,
 
     mesh_bvhs: []Mesh_BVH,
+    collision: map[string]^b3.MeshData,          // model key → its authored collision (the kit's <model>_col mesh, cooked); Box3D owns the data
+    render_collision: map[string]^b3.MeshData,   // model key → its render triangles cooked for collision, on first use (asset_render_collision)
     material_albedo: []vec3,   // per material: linear colour × its texture's average, clamped below 1 (the baker's bounce colour)
 
     arena: vmem.Arena,
@@ -98,11 +102,69 @@ Image_Format :: enum {
     RGBA8_SRGB,
 }
 
+// Asset keys handed out to entities (model and texture references), interned in their own arena. It
+// outlives the asset arena, which a hot reload throws away and rebuilds (asset_hot_reload.odin), so an
+// entity's model string, and every undo snapshot and clipboard copy of it, stays valid across reloads.
+Asset_Keys :: struct {
+    strings: map[string]string,   // key → its interned copy (both the same string)
+    arena:   vmem.Arena,
+}
+asset_keys: Asset_Keys
+
+// The permanent copy of `key`. A key nothing loaded under (a broken scene reference) is interned too,
+// so it stays a valid string; the renderer warns on it at draw time.
+asset_intern :: proc(key: string) -> string {
+    if s, ok := asset_keys.strings[key]; ok do return s
+    arena := vmem.arena_allocator(&asset_keys.arena)
+    if asset_keys.strings == nil do asset_keys.strings = make(map[string]string, arena)
+    s := strings.clone(key, arena)
+    asset_keys.strings[s] = s
+    return s
+}
+
 asset_system_init :: proc() {
+    asset_system_load()
+}
+
+// Throws every asset away and loads them again from disk: the asset arena, and the GPU copies
+// (asset_buffers). Entities keep pointing at the same keys (asset_keys), so they pick up whatever the
+// files hold now; a key that no longer loads draws nothing, with a warning.
+asset_system_reload :: proc() {
+    renderer_dx_wait_idle()
+    asset_buffers_destroy()
+    physics_worlds_stop()   // their shapes point at the collision data about to go
+    asset_collision_destroy()
+    vmem.arena_destroy(&asset_system.arena)
+    asset_system = {}
+    asset_system_load()
+    asset_buffers_create()
+    asset_buffers_upload()
+    physics_worlds_start()
+}
+
+@(private="file")
+asset_collision_destroy :: proc() {
+    for _, m in asset_system.collision do b3.DestroyMesh(m)
+    for _, m in asset_system.render_collision do if m != nil do b3.DestroyMesh(m)
+}
+
+// A model's own triangles as collision (an entity's `collision = Render_Mesh`). Cooked the first time an
+// entity asks and kept until the assets reload; nil for an unknown model or one Box3D can't build.
+asset_render_collision :: proc(key: string) -> ^b3.MeshData {
+    if m, cached := asset_system.render_collision[key]; cached do return m
+    model, ok := asset_system.models[key]
+    m := ok ? asset_cook_mesh(key, model, {}) : nil
+    asset_system.render_collision[asset_intern(key)] = m   // a nil is cached too, so it's tried once
+    return m
+}
+
+@(private="file")
+asset_system_load :: proc() {
     if err := vmem.arena_init_growing(&asset_system.arena); err != nil {
         log.panicf("Failed to init asset arena: %v", err)
     }
     context.allocator = vmem.arena_allocator(&asset_system.arena)
+    asset_system.render_collision = make(map[string]^b3.MeshData)   // filled during play, so it needs the arena allocator now
 
     asset_files := make([dynamic]os.File_Info, context.temp_allocator)
     if err := common.get_all_files("./assets_engine", &asset_files, context.temp_allocator); err != nil {
@@ -131,19 +193,19 @@ asset_system_init :: proc() {
     }
     slice.sort_by(asset_system.kits[:], proc(a, b: Kit) -> bool { return a.path < b.path })
     // More image keys than images means kits share textures (by path, or by embedded content).
-    log.infof("Assets: %v kits, %v meshes, %v images under %v keys", len(asset_system.kits),
-        len(asset_system.meshes), len(asset_system.images), len(asset_system.image_ids))
+    log.infof("Assets: %v kits, %v meshes, %v images under %v keys, %v collision models", len(asset_system.kits),
+        len(asset_system.meshes), len(asset_system.images), len(asset_system.image_ids), len(asset_system.collision))
 
     asset_build_bvhs()
     asset_build_albedos()
 }
 
-asset_system_update :: proc() {
-}
-
 asset_system_shutdown :: proc() {
+    asset_collision_destroy()
     vmem.arena_destroy(&asset_system.arena)
     asset_system = {}
+    vmem.arena_destroy(&asset_keys.arena)
+    asset_keys = {}
 }
 
 // The light baker's surface colour per material (docs/rendering.md → Lighting): its colour times the average
@@ -151,21 +213,29 @@ asset_system_shutdown :: proc() {
 MAX_BAKE_ALBEDO :: 0.9
 
 asset_build_albedos :: proc() {
-    lut: [256]f32   // sRGB byte → linear
-    for i in 0..<256 do lut[i] = srgb_to_linear(f32(i) / 255)
+    srgb_lut, unorm_lut: [256]f32   // byte → linear
+    for i in 0..<256 do srgb_lut[i]  = srgb_to_linear(f32(i) / 255)
+    for i in 0..<256 do unorm_lut[i] = f32(i) / 255
 
-    arena := vmem.arena_allocator(&asset_system.arena)
-    asset_system.material_albedo = make([]vec3, len(asset_system.materials), arena)
-    for mat, i in asset_system.materials {
-        img := asset_system.images[mat.color_tex]
+    // Each image's average once: materials share textures, and the images are large.
+    image_avg := make([]vec3, len(asset_system.images), context.temp_allocator)
+    for img, i in asset_system.images {
+        lut := img.format == .RGBA8_SRGB ? &srgb_lut : &unorm_lut
         sum: [3]f64
         n := len(img.pixels) / 4
         for p in 0..<n {
             px := img.pixels[4*p:][:3]
-            for c in 0..<3 do sum[c] += f64(img.format == .RGBA8_SRGB ? lut[px[c]] : f32(px[c]) / 255)
+            sum[0] += f64(lut[px[0]])
+            sum[1] += f64(lut[px[1]])
+            sum[2] += f64(lut[px[2]])
         }
-        avg := n > 0 ? vec3{f32(sum[0]), f32(sum[1]), f32(sum[2])} / f32(n) : vec3{1, 1, 1}
-        a := avg * mat.color.rgb
+        image_avg[i] = n > 0 ? vec3{f32(sum[0]), f32(sum[1]), f32(sum[2])} / f32(n) : vec3{1, 1, 1}
+    }
+
+    arena := vmem.arena_allocator(&asset_system.arena)
+    asset_system.material_albedo = make([]vec3, len(asset_system.materials), arena)
+    for mat, i in asset_system.materials {
+        a := image_avg[mat.color_tex] * mat.color.rgb
         asset_system.material_albedo[i] = {min(a.x, MAX_BAKE_ALBEDO), min(a.y, MAX_BAKE_ALBEDO), min(a.z, MAX_BAKE_ALBEDO)}
     }
 }
@@ -193,14 +263,9 @@ asset_system_assets_size :: proc() -> (total: int) {
 }
 
 // Returns the interned (permanent) key string for a model, so callers can store the
-// reference without owning a copy — model keys live in the asset arena, which outlives
-// every level. An unknown key is cloned into the asset arena so a broken scene
-// reference stays a valid string (the renderer warns on it at draw time).
+// reference without owning a copy (asset_intern).
 asset_model_key :: proc(key: string) -> string {
-    if model, ok := asset_system.models[key]; ok {
-        return model.key
-    }
-    return strings.clone(key, vmem.arena_allocator(&asset_system.arena))
+    return asset_intern(key)
 }
 
 asset_system_import_gltf_models :: proc(path: string) {
@@ -327,7 +392,7 @@ asset_system_import_gltf_models :: proc(path: string) {
         }
 
         model: Model
-        model.key = model_key   // model_key lives in the asset arena (permanent)
+        model.key = asset_intern(model_key)   // survives a reload (asset_keys)
         model.meshes = make([dynamic]u32, len(gltf_mesh.primitives))
 
         for gltf_prim, gltf_prim_idx in gltf_mesh.primitives {
@@ -468,18 +533,70 @@ asset_system_import_gltf_models :: proc(path: string) {
 
     // A glTF with meshes is a kit (CLAUDE.md → Assets). Its scene's mesh nodes are the display
     // layout the editor reproduces when the kit is opened as a world.
+    // Collision models (<model>_col) aren't laid out: they're never drawn.
     kit := Kit{path = strings.clone(file_key)}
+    model_pos := make(map[string]vec3, context.temp_allocator)   // where the first node placing each model sits
     for node, ni in data.nodes {
         mi, has_mesh := node.mesh.(gltf2.Integer)
         if !has_mesh || !node_reached[ni] || mesh_model_keys[mi] == "" do continue
         w := node_world[ni]
+        pos := vec3{-w[0, 3], w[1, 3], w[2, 3]}   // glTF RH -> engine LH: negate X, like the vertices
+        key := mesh_model_keys[mi]
+        if key not_in model_pos do model_pos[key] = pos
+        if strings.has_suffix(key, COLLISION_SUFFIX) do continue
         append(&kit.nodes, Kit_Node{
-            name     = strings.clone(node.name.(string) or_else mesh_model_keys[mi][len(file_key) + 1:]),
-            model    = mesh_model_keys[mi],
-            position = {-w[0, 3], w[1, 3], w[2, 3]},   // glTF RH -> engine LH: negate X, like the vertices
+            name     = strings.clone(node.name.(string) or_else key[len(file_key) + 1:]),
+            model    = key,
+            position = pos,
         })
     }
     append(&asset_system.kits, kit)
+
+    for key, pos in model_pos {
+        if !strings.has_suffix(key, COLLISION_SUFFIX) do continue
+        target := key[:len(key) - len(COLLISION_SUFFIX)]
+        target_pos, placed := model_pos[target]
+        if !placed do target_pos = pos   // no node of its own model: its vertices are already relative to the same pivot
+        asset_cook_collision(asset_intern(target), asset_system.models[key], pos - target_pos)
+    }
+}
+
+// Authored collision (docs/gameplay.md → Physics): a mesh named <model>_col in the same kit is <model>'s collision
+// (an entity's `collision = Collision_Mesh`, the default). Its vertices hold only its node's rotation and scale, like any model's, so
+// `offset` moves them from its own pivot to the model's (where the two nodes sit).
+COLLISION_SUFFIX :: "_col"
+
+@(private="file")
+asset_cook_collision :: proc(target: string, col: Model, offset: vec3) {
+    data := asset_cook_mesh(target, col, offset)
+    if data == nil do return
+    if old, exists := asset_system.collision[target]; exists do b3.DestroyMesh(old)
+    asset_system.collision[target] = data
+}
+
+// A model's triangles, moved by offset, as Box3D mesh data (nil if it has none or Box3D can't build it). `name`
+// is for the log.
+@(private="file")
+asset_cook_mesh :: proc(name: string, col: Model, offset: vec3) -> ^b3.MeshData {
+    verts := make([dynamic]b3.Vec3, context.temp_allocator)
+    indices := make([dynamic]i32, context.temp_allocator)
+    for mi in col.meshes {
+        m := asset_system.meshes[mi]
+        base := i32(len(verts))
+        for v in 0..<m.vertex_count do append(&verts, asset_system.vertex_positions[m.vertex_offset + v] + offset)
+        for t in 0..<m.index_count do append(&indices, base + i32(asset_system.vertex_indices[m.index_offset + t]))
+    }
+    if len(indices) < 3 do return nil
+    // Front faces: cross(v1 - v0, v2 - v0) points out (CLAUDE.md), which is Box3D's CCW rule in its own terms.
+    def := b3.MeshDef{
+        vertices = raw_data(verts), indices = raw_data(indices),
+        vertexCount = c.int(len(verts)), triangleCount = c.int(len(indices) / 3),
+        weldVertices = true, weldTolerance = 0.001,
+        identifyEdges = true,   // adjacency, so a capsule sliding across a seam doesn't catch on the inner edge
+    }
+    data := b3.CreateMesh(def, nil, 0)
+    if data == nil do log.errorf("Collision for '%v': Box3D couldn't build the mesh", name)
+    return data
 }
 
 // World matrix of every node reachable from the glTF's default scene (or, if it declares no scenes,

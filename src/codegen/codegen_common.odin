@@ -2,6 +2,7 @@ package codegen
 
 import "core:log"
 import "core:os"
+import "../common"
 
 // Entry point for all codegen passes. Runs before `odin build src` (see build.odin), so
 // every generated file exists before the engine is compiled.
@@ -17,8 +18,8 @@ main :: proc() {
     generate_file("src/gen_lua_bindings.odin")
 
     // LuaCN: transpile Chinese-keyword .luacn scripts to .lua.
-    scan_folder_luacn("assets_engine")
-    scan_folder_luacn("assets")
+    common.luacn_scan_folder("assets_engine")
+    common.luacn_scan_folder("assets")
 }
 
 // Writes a generated file and logs the outcome. Shared by every pass.

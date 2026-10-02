@@ -15,8 +15,7 @@ Debug_Draw :: struct {
     buffer: [FRAMES_IN_FLIGHT]dx.Resource,
     buffer_ptr: [FRAMES_IN_FLIGHT]rawptr,
     buffer_srv: [FRAMES_IN_FLIGHT]dx.Resource_View,
-    shader: dx.Compiled_Shader,
-    pso: dx.Pipeline_State,
+    pipeline: Shader_Pipeline,
 }
 debug_draw: Debug_Draw
 
@@ -28,20 +27,17 @@ debug_draw_init :: proc() {
         debug_draw.buffer_ptr[i] = dx.buffer_map(debug_draw.buffer[i])
         debug_draw.buffer_srv[i] = dx.descriptor_heap_register_srv(renderer_dx.render_context, &renderer_dx.resource_heap, debug_draw.buffer[i])  
     }
-    debug_draw.shader = dx.slang_compiler_compile_shader(renderer_dx.slang_compiler, "debug_line", "vert_main", "frag_main")
-
     line_opts := dx.PIPELINE_OPTIONS_DEFAULT
     line_opts.topology    = .LINE
     line_opts.cull_mode   = .NONE
     line_opts.depth_test  = false   // tested against the scene's depth in the shader: it's at the scene size, the lines at the display size
     line_opts.depth_write = false
     line_opts.dsv_format  = .UNKNOWN
-    debug_draw.pso = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, debug_draw.shader, line_opts)
+    debug_draw.pipeline = shader_pipeline_create("debug_line", "vert_main", "frag_main", line_opts)
 }
 
 debug_draw_shutdown :: proc() {
-    dx.pipeline_destroy_pso(debug_draw.pso)
-    dx.slang_compiler_destroy_shader(debug_draw.shader)
+    shader_pipeline_destroy(debug_draw.pipeline)
     for i in 0..<FRAMES_IN_FLIGHT {
         dx.descriptor_heap_free(&renderer_dx.resource_heap, debug_draw.buffer_srv[i].heap_slot)
         dx.buffer_unmap(debug_draw.buffer[i])
@@ -188,7 +184,7 @@ debug_draw_lines :: proc(cmd: dx.Command_List, first, count: u32) {
     if first >= MAX_DEBUG_LINE_VERTS do return
     n := min(count, MAX_DEBUG_LINE_VERTS - first)
     if n == 0 do return
-    cmd.handle->SetPipelineState(debug_draw.pso.handle)
+    cmd.handle->SetPipelineState(debug_draw.pipeline.pso.handle)
     cmd.handle->IASetPrimitiveTopology(.LINELIST)
     cmd.handle->DrawInstanced(n, 1, first, 0)
 }

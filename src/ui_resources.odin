@@ -96,6 +96,8 @@ resource_items :: proc(allocator := context.temp_allocator) -> []Resource_Item {
         if w.render.probes.resource.handle != nil {
             add(&items, w.title, trs(.Res_Probes), .Probes, len(g.probes) * size_of(Probe_SH),
                 fmt.aprintf("%d × %d × %d × %d layers · %s", g.dims.x, g.dims.y, g.dims.z, g.layers, capacity(len(g.probes), size_of(Probe_SH), 1), allocator = allocator))
+            add(&items, w.title, trs(.Res_Probe_Depth), .Probes, len(g.depth) * size_of(Probe_Depth),
+                fmt.aprintf("%d × %d octahedral · %s", PROBE_DEPTH_RES, PROBE_DEPTH_RES, capacity(len(g.depth), size_of(Probe_Depth), 1), allocator = allocator))
         }
         if w.render.probe_atlas.resource.handle != nil {
             add(&items, w.title, trs(.Bake_Atlas), .Texture, len(g.atlas.pixels), fmt.aprintf("%d × %d RGBA8", g.atlas.width, g.atlas.height, allocator = allocator), w)

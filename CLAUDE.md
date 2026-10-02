@@ -44,9 +44,10 @@ When a decision changes, update the doc that owns it. Only rules that apply ever
 - **Memory:** group arenas by lifetime first — permanent (assets, never reset), level (entities,
   level unload), frame (frame start), scratch (`context.temp_allocator`). Prefer `core:mem/virtual`
   `Arena`. Dynamic arrays in arenas strand memory on grow: reserve up front.
-- **Assets** load at init and never change at runtime: no streaming, manifests or meta files. A glTF
-  file is a kit. Keys are project-relative forward-slash paths plus a name
-  (`assets/models/car.gltf:body`), never absolute, no UUIDs.
+- **Assets** load at init and never change at runtime: no streaming, manifests or meta files. Debug
+  hot reload rebuilds all of them, as init would (`asset_hot_reload.odin`). A glTF file is a kit. Keys are
+  project-relative forward-slash paths plus a name (`assets/models/car.gltf:body`), never absolute, no UUIDs.
+  Anything that keeps a key interns it (`asset_intern`), so it outlives a reload.
 - **Coordinates:** left-handed, Y-up, +Z forward, clockwise front faces. glTF import reflects `-X`
   **and** swaps winding; both are required, don't remove the swap. Reversed-Z (`GREATER`, clear 0).
   Float HDR target. Simple forward, not clustered.
@@ -72,6 +73,8 @@ When a decision changes, update the doc that owns it. Only rules that apply ever
 
 - Build: `odin run build.odin -file` (there is no build.exe). Close a running engine first, since
   Windows locks `bin/blimp.exe`.
+- Game: `odin run build.odin -file -- game` → `out/game/game.exe` (release: no editor, plays
+  `game.ini`'s start level) with the DLLs and assets beside it.
 - Type-check only (faster): `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib -custom-attribute:lua,lua_zh,table,method,lua_ffi,as,lua_int`
 - A debug build serves `bin/blimpctl.exe` on `127.0.0.1:47800` (`blimpctl help`). Commands and the
   RenderDoc workflow are in `docs/editor.md`.
@@ -89,7 +92,7 @@ When a decision changes, update the doc that owns it. Only rules that apply ever
 1. **GPU timestamps per pass, and a debug line renderer.** Everything is easier once you can
    see. Do these first.
 2. **Reversed-Z**, before any shader assumes otherwise.
-3. Shader hot reload, and asset hot reload via timestamp polling (~100 lines, no meta files).
+3. ~~Shader hot reload, and asset hot reload~~ — done (directory watcher, no meta files).
 4. Simplest animation: one clip, one time, one pose. Blending after.
 5. PS1 post chain — small, and the fun visible one.
 6. Debug-only fence assertion layer for buffer/GPU write hazards.

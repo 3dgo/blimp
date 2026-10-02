@@ -41,7 +41,7 @@ Asset_Buffers :: struct {
 
     texture_buffers: [dynamic]Resource_With_Upload,
     sampler:       dx.Resource_View,   // linear: render mode .Clean
-    sampler_point: dx.Resource_View,   // point: render mode .PS1
+    sampler_point: dx.Resource_View,   // point: the retro look's point sampling
 }
 asset_buffers: Asset_Buffers
 
@@ -62,13 +62,16 @@ World_Render :: struct {
     // The world's baked probe grid (World.probes), one copy: it only changes on a bake or load, which wait
     // for the GPU first (world_render_probes_recreate). No handle when not baked.
     probes:        Resource_With_Upload,
+    probe_depth:   Resource_With_Upload,    // World.probes.depth, one Probe_Depth per probe
     probe_atlas:    Resource_With_Upload,   // World.probes.atlas as a texture, for ImGui (Bake and Resources windows)
     probe_atlas_ui: dx.Resource_View,       // its SRV in the ImGui heap
     probes_upload: bool,   // stage both on the copy queue next frame
 
     draw_cmd:     [FRAMES_IN_FLIGHT]dx.Resource,
     draw_cmd_ptr: [FRAMES_IN_FLIGHT]rawptr,
-    draw_cmd_data: [dynamic]d3d12.DRAW_INDEXED_ARGUMENTS,
+    draw_cmd_data: [dynamic]d3d12.DRAW_INDEXED_ARGUMENTS,   // grouped by blend, in EntityBlend order
+    draw_first:    [EntityBlend]u32,   // each blend's range of draw_cmd_data: its own PSO, one ExecuteIndirect
+    draw_count:    [EntityBlend]u32,
 
     // Shadow maps (render_shadows.odin). One map: it's drawn and read within a frame on the gfx queue, so
     // flights never overlap on it. The slice cameras are per flight, written in place like draw_cmd.
@@ -89,6 +92,21 @@ Mesh_Instance_Data :: struct {
     transform: u32,
     mesh: u32,
     material: u32,
+    shading: u32,   // u32(ShadingModel): SHADING_* in shading.slang
+}
+#assert(size_of(Mesh_Instance_Data) == 16)
+
+// What an entity's shading means in `world`: Default is the level's.
+entity_shading :: proc(world: ^World, entity: ^Entity) -> ShadingModel {
+    switch entity.shading {
+    case .Default: return world.settings.shading
+    case .Unlit:   return .Unlit
+    case .Gouraud: return .Gouraud
+    case .Lambert: return .Lambert
+    case .Flat:    return .Flat
+    case .Phong:   return .Phong
+    }
+    return .Lambert
 }
 
 // One light entity, rebuilt each frame. Mirrors the Light struct in the shader.
@@ -114,7 +132,8 @@ Resource_With_Upload :: struct {
 
 // ============================ Lifetime ============================
 
-// Creates the shared, static, asset-derived buffers once at init.
+// Creates the shared, static, asset-derived buffers: at init, and again after an asset hot reload
+// (asset_system_reload). asset_buffers_upload fills them.
 asset_buffers_create :: proc() {
     asset_buffers.mesh_buffer      = buffers_resource_create(size_of(Mesh), u32(len(asset_system.meshes)), &renderer_dx.resource_heap)
     asset_buffers.index_buffer     = buffers_resource_create(size_of(u32), u32(len(asset_system.vertex_indices)), &renderer_dx.resource_heap)
@@ -134,8 +153,11 @@ asset_buffers_create :: proc() {
         })
     }
     asset_buffers.material_buffer = buffers_resource_create(size_of(Material), u32(len(asset_buffers.material_buffer_data)), &renderer_dx.resource_heap)
+}
 
-    asset_buffers.sampler = dx.descriptor_heap_register_sampler(renderer_dx.render_context, &renderer_dx.sampler_heap, {
+// The samplers materials use. Not asset data, so they live from init to shutdown, across reloads.
+asset_samplers_create :: proc() {
+    asset_buffers.sampler =dx.descriptor_heap_register_sampler(renderer_dx.render_context, &renderer_dx.sampler_heap, {
         Filter = .MIN_MAG_MIP_LINEAR,
         AddressU = .WRAP, AddressV = .WRAP, AddressW = .WRAP,
         ComparisonFunc = .NEVER, MaxLOD = max(f32),
@@ -147,21 +169,26 @@ asset_buffers_create :: proc() {
     })
 }
 
+asset_samplers_destroy :: proc() {
+    dx.descriptor_heap_free(&renderer_dx.sampler_heap, asset_buffers.sampler.heap_slot)
+    dx.descriptor_heap_free(&renderer_dx.sampler_heap, asset_buffers.sampler_point.heap_slot)
+}
+
+// Frees the asset buffers and hands their bindless slots back. The GPU must be idle.
 asset_buffers_destroy :: proc() {
     for tex in asset_buffers.texture_buffers {
         dx.descriptor_heap_free(&renderer_dx.resource_heap, tex.resource_view.heap_slot)
         buffers_resource_destroy(tex)
     }
-    dx.descriptor_heap_free(&renderer_dx.sampler_heap, asset_buffers.sampler.heap_slot)
-    dx.descriptor_heap_free(&renderer_dx.sampler_heap, asset_buffers.sampler_point.heap_slot)
     delete(asset_buffers.texture_buffers)
+    asset_buffers.texture_buffers = nil
 
-    buffers_resource_destroy(asset_buffers.material_buffer)
-    buffers_resource_destroy(asset_buffers.attribute_buffer)
-    buffers_resource_destroy(asset_buffers.position_buffer)
-    buffers_resource_destroy(asset_buffers.index_buffer)
-    buffers_resource_destroy(asset_buffers.mesh_buffer)
+    for b in ([?]Resource_With_Upload{asset_buffers.material_buffer, asset_buffers.attribute_buffer, asset_buffers.position_buffer, asset_buffers.index_buffer, asset_buffers.mesh_buffer}) {
+        dx.descriptor_heap_free(&renderer_dx.resource_heap, b.resource_view.heap_slot)
+        buffers_resource_destroy(b)
+    }
     delete(asset_buffers.material_buffer_data)
+    asset_buffers.material_buffer_data = nil
 }
 
 // Creates a world's GPU draw mirror: per-flight transform/mesh-instance (copy-queue staged) and
@@ -212,6 +239,7 @@ world_render_destroy :: proc(world: ^World) {
 world_render_probes_create :: proc(w: ^World) {
     if len(w.probes.probes) == 0 do return
     w.render.probes = buffers_resource_create(size_of(Probe_SH), u32(len(w.probes.probes)), &renderer_dx.resource_heap)
+    w.render.probe_depth = buffers_resource_create(size_of(Probe_Depth), u32(len(w.probes.depth)), &renderer_dx.resource_heap)
     if a := w.probes.atlas; len(a.pixels) > 0 {
         w.render.probe_atlas    = buffers_texture_create(a.width, a.height, dx_format(a.format))
         w.render.probe_atlas_ui = dx.descriptor_heap_register_srv(renderer_dx.render_context, &renderer_dx.ui_heap, w.render.probe_atlas.resource)
@@ -224,12 +252,14 @@ world_render_probes_destroy :: proc(w: ^World) {
     if w.render.probes.resource.handle == nil do return
     dx.descriptor_heap_free(&renderer_dx.resource_heap, w.render.probes.resource_view.heap_slot)
     buffers_resource_destroy(w.render.probes)
+    dx.descriptor_heap_free(&renderer_dx.resource_heap, w.render.probe_depth.resource_view.heap_slot)
+    buffers_resource_destroy(w.render.probe_depth)
     if w.render.probe_atlas.resource.handle != nil {
         dx.descriptor_heap_free(&renderer_dx.resource_heap, w.render.probe_atlas.resource_view.heap_slot)
         dx.descriptor_heap_free(&renderer_dx.ui_heap, w.render.probe_atlas_ui.heap_slot)
         buffers_resource_destroy(w.render.probe_atlas)
     }
-    w.render.probes, w.render.probe_atlas, w.render.probe_atlas_ui = {}, {}, {}
+    w.render.probes, w.render.probe_depth, w.render.probe_atlas, w.render.probe_atlas_ui = {}, {}, {}, {}
 }
 
 // After w.probes is replaced on a world already on screen (a bake). Waits for the GPU, so call it
@@ -254,6 +284,19 @@ buffers_build_scene :: proc(world: ^World) {
     clear(&r.shadow_cameras)
     r.shadow_missed = 0
     defer light_shadow_report(r)
+    // Opaque draws go straight into draw_cmd_data; the other blends gather here and follow it in
+    // EntityBlend order once every entity is in (deferred, so the MAX_MESH_INSTANCES return does it too).
+    later: [EntityBlend][dynamic]d3d12.DRAW_INDEXED_ARGUMENTS
+    for &d in later do d = make([dynamic]d3d12.DRAW_INDEXED_ARGUMENTS, context.temp_allocator)
+    defer {
+        r.draw_count[.Opaque] = u32(len(r.draw_cmd_data))
+        for blend in EntityBlend {
+            if blend == .Opaque do continue
+            r.draw_first[blend] = u32(len(r.draw_cmd_data))
+            r.draw_count[blend] = u32(len(later[blend]))
+            append(&r.draw_cmd_data, ..later[blend][:])
+        }
+    }
     group_scales := light_group_scales(world, timer_sec_since_start())   // world_light_groups.odin: power cuts, flicker
 
     it := hm.iterator_make(&world.entities)
@@ -279,6 +322,7 @@ buffers_build_scene :: proc(world: ^World) {
         transform_idx := u32(len(r.transform_data))
         append(&r.transform_data, entity_transform(entity))
         drawn := entity_drawn(entity)   // instances for every entity, draw commands only for drawn ones
+        shading := entity_shading(world, entity)
 
         for mesh_idx in model.meshes {
             if len(r.mesh_instance_data) >= MAX_MESH_INSTANCES {
@@ -292,15 +336,18 @@ buffers_build_scene :: proc(world: ^World) {
                 transform = transform_idx,
                 mesh = mesh_idx,
                 material = mesh.material,
+                shading = u32(shading),
             })
             if !drawn do continue
-            append(&r.draw_cmd_data, d3d12.DRAW_INDEXED_ARGUMENTS {
+            cmd := d3d12.DRAW_INDEXED_ARGUMENTS {
                 IndexCountPerInstance = mesh.index_count,
                 InstanceCount = 1,
                 StartIndexLocation = mesh.index_offset,
                 BaseVertexLocation = 0,
                 StartInstanceLocation = instance_idx,
-            })
+            }
+            if entity.blend == .Opaque do append(&r.draw_cmd_data, cmd)
+            else do append(&later[entity.blend], cmd)
         }
     }
 }
@@ -339,8 +386,24 @@ entity_gpu_light :: proc(entity: ^Entity) -> GPU_Light {
 
 // ============================ Uploads ============================
 
-// One-time upload of the static, asset-derived buffers (geometry, tables, textures) via the
-// copy queue. The entity buffers are staged per frame from renderer_dx_update instead.
+// Uploads the asset buffers through the copy queue and waits for it, on a command list of its own so it
+// works between frames as well as at init. The entity buffers are staged per frame from
+// renderer_dx_update instead.
+asset_buffers_upload :: proc() {
+    alloc := dx.command_allocator_create(renderer_dx.render_context, {type = .COPY})
+    cmd   := dx.command_list_create(renderer_dx.render_context, alloc, {type = .COPY})
+    fence := dx.fence_create(renderer_dx.render_context, 0)
+    buffers_upload_static(cmd)
+    dx.command_list_close(cmd)
+    dx.command_list_execute(renderer_dx.cmd_queue_copy, {cmd})
+    dx.command_queue_signal(renderer_dx.cmd_queue_copy, fence, 1)
+    dx.fence_wait(fence, 1)
+    dx.fence_destroy(fence)
+    dx.command_list_destroy(cmd)
+    dx.command_allocator_destroy(alloc)
+}
+
+@(private="file")
 buffers_upload_static :: proc(cmd: dx.Command_List) {
     buffers_resource_copy(cmd, &asset_buffers.mesh_buffer,      asset_system.meshes[:])
     buffers_resource_copy(cmd, &asset_buffers.index_buffer,     asset_system.vertex_indices[:])
@@ -382,6 +445,7 @@ world_render_upload :: proc(world: ^World, frame_slot: u64) {
     world_shadows_upload(world, frame_slot)
     if r.probes_upload {
         buffers_resource_copy(renderer_dx.cmd_copy, &r.probes, world.probes.probes)
+        if len(world.probes.depth) > 0 do buffers_resource_copy(renderer_dx.cmd_copy, &r.probe_depth, world.probes.depth)
         if r.probe_atlas.resource.handle != nil do buffers_texture_copy(renderer_dx.cmd_copy, &r.probe_atlas, world.probes.atlas)
         r.probes_upload = false
     }
@@ -392,7 +456,10 @@ world_render_begin :: proc(world: ^World, frame_slot: u64) {
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.mesh_instance[frame_slot].resource, {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.transform[frame_slot].resource,     {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.lights[frame_slot].resource,        {.ALL_SHADING}, {.SHADER_RESOURCE})
-    if world.render.probes.resource.handle != nil do dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probes.resource, {.ALL_SHADING}, {.SHADER_RESOURCE})
+    if world.render.probes.resource.handle != nil {
+        dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probes.resource,      {.ALL_SHADING}, {.SHADER_RESOURCE})
+        dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probe_depth.resource, {.ALL_SHADING}, {.SHADER_RESOURCE})
+    }
     // Copied once per bake, so (like asset textures) it stays readable rather than going back to NO_ACCESS.
     if world.render.probe_atlas.resource.handle != nil do dx.texture_transition(renderer_dx.cmd_gfx, &world.render.probe_atlas.resource, {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)
 }
@@ -403,7 +470,10 @@ world_render_end :: proc(world: ^World, frame_slot: u64) {
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.transform[frame_slot].resource,     {}, {.NO_ACCESS})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.mesh_instance[frame_slot].resource, {}, {.NO_ACCESS})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.lights[frame_slot].resource,        {}, {.NO_ACCESS})
-    if world.render.probes.resource.handle != nil do dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probes.resource, {}, {.NO_ACCESS})
+    if world.render.probes.resource.handle != nil {
+        dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probes.resource,      {}, {.NO_ACCESS})
+        dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probe_depth.resource, {}, {.NO_ACCESS})
+    }
 }
 
 // gfx: shared asset buffers + textures → readable. Once per frame, regardless of world/view count.

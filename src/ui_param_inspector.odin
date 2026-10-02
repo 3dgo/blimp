@@ -33,7 +33,6 @@ DEFAULT_PARAM_UI_OPTIONS :: Param_UI_Options {
 }
 
 // A form-row prefix: left-aligned label, then the next item starts at the shared column, full width.
-@(private="file")
 ui_param_label :: proc(label: string, options: Param_UI_Options) {
     im.AlignTextToFramePadding()
     im.TextUnformatted(fmt.ctprintf("%s", label))
@@ -58,11 +57,11 @@ ui_param_string :: proc(name: string, value: string, options := DEFAULT_PARAM_UI
     im.TextDisabled("%s", fmt.ctprintf("%s", value))
 }
 
-Asset_Kind :: enum { Model, Texture }
+Asset_Kind :: enum { Model, Texture, Sound }
 
-// `widget:model` / `widget:texture`: a dropdown over the keys of every loaded model / texture
-// (filled at startup when the glTFs load). The field ends up referencing the asset system's own
-// interned key — the asset arena owns the string — so picking allocates nothing.
+// `widget:model` / `widget:texture` / `widget:sound`: a dropdown over the keys of every loaded model /
+// texture / sound clip, and none. The field ends up referencing the interned key (asset_intern), so it
+// survives an asset reload.
 //
 // A paste button sits beside it: takes this field's value from the clipboard — the matching
 // `key = value` line of a copied entity (copy a car in a kit, paste just its model onto another
@@ -82,10 +81,12 @@ ui_param_asset_picker :: proc(name: string, value: ^string, kind: Asset_Kind, op
         switch kind {
         case .Model:   for key in asset_system.models    do append(&keys, key)
         case .Texture: for key in asset_system.image_ids do append(&keys, key)
+        case .Sound:   append(&keys, ..sound_clip_keys(context.temp_allocator))
         }
         slice.sort(keys[:])
+        if im.Selectable(tr(.Asset_None), value^ == "") do value^ = ""
         for key in keys {
-            if im.Selectable(fmt.ctprintf("%s", key), key == value^) do value^ = key
+            if im.Selectable(fmt.ctprintf("%s", key), key == value^) do value^ = asset_intern(key)
         }
         im.EndCombo()
     }
@@ -110,7 +111,9 @@ asset_key_from_clipboard :: proc(key: string, kind: Asset_Kind) -> (string, bool
     case .Model:
         if m, found := asset_system.models[text]; found do return m.key, true
     case .Texture:
-        for k in asset_system.image_ids do if k == text do return k, true
+        if text in asset_system.image_ids do return asset_intern(text), true
+    case .Sound:
+        if text in sound_system.clip_ids do return asset_intern(text), true
     }
     return "", false
 }
@@ -189,7 +192,7 @@ ui_param_quat :: proc(name: string, value: ^quat, options := DEFAULT_PARAM_UI_OP
 }
 
 ui_param_enum :: proc(name: string, type: typeid, value: ^u64, options := DEFAULT_PARAM_UI_OPTIONS) {
-    enum_type, _ := type_info_of(type).variant.(runtime.Type_Info_Enum)
+    enum_type, _ := runtime.type_info_base(type_info_of(type)).variant.(runtime.Type_Info_Enum)
     type_name := param_type_name(type_info_of(type))
     selected_enum_name, _ := reflect.enum_name_from_value_any(any{value, type})
     ui_param_label(name, options)
@@ -331,6 +334,7 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
                 switch widget {
                 case "model":   ui_param_asset_picker(label, &field_value.(string), .Model,   field_options)
                 case "texture": ui_param_asset_picker(label, &field_value.(string), .Texture, field_options)
+                case "sound":   ui_param_asset_picker(label, &field_value.(string), .Sound,   field_options)
                 case:           ui_param_string(label, field_value.(string), field_options)   // no/unknown widget: read-only
                 }
             case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
@@ -352,7 +356,7 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
                 base := typeinfo.base
                 #partial switch _ in base.variant {
                     case runtime.Type_Info_Enum:
-                        ui_param_enum(label, base.id, cast(^u64)field_value.data, field_options)
+                        ui_param_enum(label, field_type.id, cast(^u64)field_value.data, field_options)
                     case runtime.Type_Info_Struct:
                         ui_param_struct(label, base.id, field_value, field_options, typeinfo.name)
                 }

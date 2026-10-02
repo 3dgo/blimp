@@ -15,19 +15,19 @@ PBR version later is additive.
 - **Reversed-Z**: float depth, swapped near/far, `GREATER` compare, clear to 0.
 - **Render to a float HDR target**, quantize only at the end of the post chain. Each view has
   an `R16G16B16A16_FLOAT` scene target (`hdr_tex`) and an `RGBA8_UNORM` display target
-  (`tex`) that ImGui samples and screenshots read. `render_post.odin` (`post.slang`, one
-  fullscreen pass) resolves one into the other; debug lines draw after it, onto the display
-  target, so their colours stay exact.
+  (`tex`) that ImGui samples and screenshots read. `render_post.odin` (`post.slang`,
+  fullscreen passes) resolves one into the other; debug lines draw after it, onto the display
+  target, so their colours stay exact. A `.Retro` view also has scene-size intermediates
+  (`post_targets`): the signal (`RGBA8`) and two bloom targets (`RGBA16F`).
 - **The scene target and depth are the display size ÷ `scene_scale`, rounded up**
   (`dx.Viewport_Options.scene_scale`). The scene VS squeezes NDC by `sceneCover` so the image
   lines up with the display pixel for pixel while the projection stays the display's (CPU
   picking is unaffected). Depth is `R32_TYPELESS` with a DSV and an `R32_FLOAT` SRV: passes at
   the display size can't bind it as a DSV, so debug lines depth-test against it in the shader.
-- **Render mode** is per view (`Render_View.mode`, viewport toolbar). `.PS1` (default, and
-  always in release): scale = the whole number bringing the height closest to 216, vertices
-  snapped to whole scene pixels (`vertexSnap`), affine UVs (`affine` = `PS1_AFFINE`), point
-  sampler, dither on. `.Clean`: scale 1, none of the rest. Same shaders and passes; only frame
-  constants and the scale differ, so the two can't drift. Affine UVs are a second
+- **Render mode** is per view (`Render_View.mode`, viewport toolbar). `.Retro` (default, and
+  always in release): the effects of the level's `Retro_Settings` (see Retro look below).
+  `.Clean`: scale 1, none of them. Same scene shaders and passes; only frame constants, the
+  scale and the post passes differ, so the two can't drift. Affine UVs are a second
   `noperspective` varying blended by `affine`, since interpolation can't switch at runtime.
   Debug lines don't snap, so an outline can sit up to a scene pixel off its jittering mesh.
 - **Shading is linear.** Colour textures are `_SRGB` views (decoded on sample); glTF material
@@ -78,7 +78,7 @@ Material :: struct {
 }
 
 Transform     :: struct { world, prev_world: matrix[3,4]f32 }
-Mesh_Instance :: struct { transform, mesh, material, flags: u32 }
+Mesh_Instance :: struct { transform, mesh, material, shading: u32 }
 
 Draw_Command :: struct {              // 24-byte stride
     instance_index: u32,              // root constant in the command signature
@@ -109,8 +109,32 @@ Update frequencies, which drive upload strategy:
 - Shader reads the constant → `mesh_instances[i]` → transform and material.
 - Use `ExecuteIndirect` even while commands are filled on the CPU, so switching to a
   compute cull pass changes only who writes the buffer.
-- Separate command buffer + counter per PSO bucket (opaque, alpha-test, shadow). Group
-  mesh instances so each bucket is a contiguous range — retrofitting this is painful.
+- One command buffer, one contiguous range per PSO bucket (`World_Render.draw_first` /
+  `draw_count`), one `ExecuteIndirect` each. The buckets are the entity blends, below; the
+  shadow pass draws the first two ranges.
+
+### Shading models and blend
+
+Two entity fields, two different axes (`entity_schema.ini`):
+
+- **`shading`** — how a surface takes light, listed cheapest first: `Unlit`; `Gouraud` (light
+  per vertex, diffuse only: the PS1's); `Lambert` (per pixel, smooth normals, diffuse only);
+  `Flat` (Lambert with the face normal from derivatives); `Phong` (per pixel, Blinn-Phong
+  highlight). Gouraud's shadows are per pixel: an interpolated shadow loses any edge between
+  vertices, so the VS hands over the first 4 shadowed lights' light separately (`VertexLight`)
+  and the PS shadows each; any more shadow per vertex. `Default` means the level's `World_Settings.shading` (default Lambert), resolved by
+  `entity_shading` while building instances, so the shader only sees a `ShadingModel` on the
+  instance. A shader branch, uniform per draw, not a PSO: one pipeline for every model.
+- **`blend`** — how pixels combine: `Opaque`, `Cutout` (discard below alpha 0.5), `Alpha`,
+  `Additive`. Each is a PSO and a draw bucket, drawn in that order. Alpha and Additive test depth
+  but don't write it, don't cast shadows, and aren't sorted (entity order); sort when a scene
+  shows it's needed. A Cutout casts its whole quad, since the shadow pass has no pixel shader.
+  The alpha is the material's colour × texture × vertex colour.
+
+All lighting lives in `shading.slang`: `light_surface` (everything lighting a point) and one
+`shade_*` function per model behind `shade()`; Gouraud's share runs in the VS via
+`vertex_lighting`. A new model is a `ShadingModel` + `EntityShading` member, its case in
+`entity_shading`, a `SHADING_*` constant, and a function + case in `shade()`.
 - One command per mesh instance is fine. Batching identical meshes needs sort + compact
   and gives up the root constant. Only if it profiles badly.
 
@@ -142,6 +166,17 @@ Start CPU-side into a dynamic vertex buffer.
   attribute for this rule, so constant-buffer structs also `#assert` each vector field's
   `offset_of(T, f) % 16 + size_of(f) <= 16` (see `Frame_Constants`). Structured buffers pack
   tightly and don't need it.
+
+### Debug layer
+
+Debug builds enable the D3D12 debug layer and break on errors. GPU-based validation is off by
+default: it patches every PSO on first use (over 2 s on the first frame of the castle map) and
+slows every frame after. Launch with `--gpu-validation` (or `blimpctl restart --gpu-validation`)
+when chasing a bad descriptor index or resource state; docs/editor.md has the launch options.
+
+Slang caches each entry point's DXIL per session (`Slang_Compiler.entry_code`), so pipelines
+that share an entry point (every scene blend uses `vert_main`) compile it once. Shader hot
+reload starts a new session, which clears it.
 
 
 ## Lighting
@@ -190,6 +225,9 @@ Baked probes for indirect, realtime direct with hard shadows.
   disc). The falloff runs along the beam over `range`; across it the edge fades like the
   spot's cone, full inside `inner_radius`, squared to zero at `radius`.
 - Only two or three genuinely-moving realtime lights.
+- **Headlight**: a world with no drawn lights (a kit, a new level) is lit by a white, intensity-1
+  directional light from each view's eye (`L = V`, in the scene shader), so a model can be looked at
+  before anyone places a light. Per view, unshadowed, never baked; the first light entity turns it off.
 - **Light groups** (`world_light_groups.odin`, Quake lightstyles): every light has `light_group`. Group 0
   is static; groups 1–4 are named in World Settings (`light_groups`: name, starting scale, flicker pattern —
   a letter per 1/10 s, a = 0, m = 1, z ≈ 2, stepped). A group's scale multiplies **everything its lights
@@ -211,13 +249,20 @@ is worth more than a 100× speedup.
   snapshot — the baker builds one per bake over `entity_bakes` (drawn, `Static`, `Cast_Indirect`).
   Closest-hit and any-hit (shadow rays) queries, iterative with a fixed stack.
 - **Indirect only.** Every light stays realtime direct; a light reaches a probe only off a
-  surface it lit. The sky (World Settings `sky_color × sky_intensity`, linear) is in the probes.
-- **Grid**: the static geometry's bounds plus one `probe_spacing` all round, at most
-  `MAX_PROBES`. Per pass, every probe casts 256 rays on a **Fibonacci sphere** (the same set
-  everywhere, so a bake repeats exactly). Miss → sky. Front-face hit → `albedo × (direct + previous
-  pass's grid sampled there)`; direct is the scene shader's diffuse with one shadow ray per light
-  that reaches the point, shadowed whatever the light's `shadow` says. Back-face hit → black, and
-  counted (a probe with > 25% is "buried"). Three passes = three bounces.
+  surface it lit. The sky (`bake.sky_color × sky_intensity`, linear) is in the probes unless `bake.sky`
+  is off. A light bakes by the same rule as geometry, `entity_bakes`: clear `Static` for one that
+  moves (its bounce would stay where it was placed), `Cast_Indirect` for a fill or rim light that
+  shouldn't bounce. Its `indirect` field (default 1) scales its baked bounce, not its direct light.
+- **Grid**: the static geometry's bounds plus one `probe_spacing` all round (`bake.bounds = Auto`), or
+  a manual box (`bounds_min`/`bounds_max`), at most `MAX_PROBES`. Per pass, every probe casts
+  `bake.rays` rays (16–4096) on a **Fibonacci sphere** (the same set everywhere, so a bake repeats
+  exactly). Miss → sky. Front-face hit → `albedo × (direct + previous pass's grid sampled there)`;
+  direct is the scene shader's diffuse with one shadow ray per light that reaches the point, for the
+  lights whose `shadow` (Cast Shadow) is on, as on screen. Back-face hit → black, and
+  counted (a probe with > 25% is "buried"). `bake.bounces` passes (1–8) = that many bounces.
+- **Quality presets** (`bake.quality`): Draft 64 rays × 1 bounce, Medium 256 × 3 (the default), High
+  1024 × 4. Picking one in the window fills rays and bounces; editing either makes it Custom. Only
+  rays and bounces are read by the baker; the preset is a label.
 - **Projection**: Monte Carlo `c_i += L·Y_i·4π/N`, convolved with the cosine lobe and **divided by
   π**, so the shader's indirect is `albedo × max(0, sh_eval(N))` — the same no-1/π convention as
   direct, so what's lit on screen is exactly what bounces.
@@ -227,7 +272,7 @@ is worth more than a 100× speedup.
   never allocates or logs.
 - **Albedo**: `asset_system.material_albedo`, computed at load, kept beside `Material` (whose
   layout is the GPU's).
-- **Storage**: the level's binary sidecar `foo.level` → `foo.probes` (version 2: header with the layer → light-group map, then each layer's `Probe_SH`),
+- **Storage**: the level's binary sidecar `foo.level` → `foo.probes` (version 3: header with the layer → light-group map, then each layer's `Probe_SH`, then one `Probe_Depth` per probe; an older version is refused, rebake),
   written by the bake and read by `scene_load`. A bake is **not an edit**: no undo step, nothing
   unsaved. The grid has its own arena (`Probe_Grid.arena`), freed whole on rebake. A play world
   lights with its level's grid. The GPU copy is one buffer per world, replaced after
@@ -236,7 +281,9 @@ is worth more than a 100× speedup.
   layout can't differ from Odin), manual 8-tap trilinear (`probe_irradiance`) — manual so the
   Chebyshev weight can fold into each corner. No grid → flat `AMBIENT`.
 - Settings are `World_Settings.bake` (saved as `bake.*` keys in `[world]`), edited in the **Probe Bake
-  window** (`ui_bake.odin`, its own toolbar button): settings, Bake, last-bake stats, and the **probe
+  window** (`ui_bake.odin`, its own toolbar button): settings (a hand-drawn form — Quality, Sky,
+  Probe Grid; a manual box shows as yellow scene lines while the window is open, with a Fit to
+  Geometry button and the probe count it gives), Bake, last-bake stats, and the **probe
   atlas** — a picture of the grid, not lighting data: each probe an 8×8 octahedral tile of `sh_eval`
   (centre up), one block per layer seen from above, at the exposure it was baked with; hover names
   the probe, outlines its tile and draws a yellow square on it in the world's views; double-click frames it. Built on the CPU with the grid (`probe_grid_atlas`), shown through an ImGui-heap SRV.
@@ -245,9 +292,20 @@ is worth more than a 100× speedup.
   Direct Only, Lighting Only (white albedo); baked probes vs the flat ambient; an indirect multiplier;
   Show Probes (six spokes per probe coloured by `sh_eval` along ±X/±Y/±Z). blimpctl `bake` / `probe`.
 - Build order: BVH and tracer → uniform grid with naive interpolation → **observe the
-  leaking** → add the visibility test. Don't add the fix before seeing the problem. **Done up to
-  naive interpolation.** Next, in order: buried probes get weight 0; octahedral depth + Chebyshev;
-  per-mesh AO.
+  leaking** → add the visibility test. Don't add the fix before seeing the problem. **Done up to the
+  visibility test.** Next: per-mesh AO.
+- **Visibility** (`.probes` v3): per probe one `Probe_Depth`, 8×8 octahedral texels of (mean, mean²)
+  distance, float32 (512 B; f16 loses the variance to cancellation), geometry only so one per probe, not
+  per layer. It's recorded in pass 0. Each texel takes the rays near its direction, weighted
+  `max(0, cos)^50` (a texel × ray table built once per bake), distances clamped to 2 spacings, misses
+  counting as that.
+  - A **buried** probe (over 25% back-face hits) gets an all-zero map, so Chebyshev gives it about zero
+    weight everywhere. That's the "weight 0" step, done by the same test.
+  - Sampling (`probe_visibility`, the same in `render_probes.odin` and `shading.slang`) moves the point
+    0.2 spacings along the normal first. Per corner it multiplies the trilinear weight by DDGI's smooth
+    backface term `((dot(toProbe, N) + 1) / 2)² + 0.2` and by Chebyshev cubed, with variance floored at
+    `1e-3 × spacing²`, floored at 1e-6, then renormalized.
+  - The bake's own bounce lookups use it too (from pass 1), so bounces don't leak either.
 
 ### Shadows
 
@@ -294,6 +352,36 @@ Era tells, most recognizable first:
 filmic (Hill's RRT+ODT fit) after `2^exposure` (world setting, EV), then sRGB-encoded. Quantize in display
 space, not linear — these scenes sit at the bottom of the value range where linear 5-bit
 gives almost no levels.
+
+### Retro look
+
+Art-directed per level: `World_Settings.retro` (`Retro_Settings`, saved as `retro.*` keys, undoable),
+edited in the Retro Look window (`ui_retro.odin`, the tune button beside the retro toggle, which
+flips the view between `.Retro` and `.Clean`). Two groups, each with its own `on`; every effect has
+its switch and its amounts. Views read the *level's* settings (`render_view_retro`), so edits show
+live, in play too. An effect that's off goes to the shader as 0 and is skipped.
+
+- **PS1**: low resolution (`lines`: the whole-number scale closest to it), vertex jitter (grid in
+  scene pixels), affine textures (warp), point sampling, colour depth (bits per channel + Bayer
+  dither strength).
+- **CRT** (off by default): replaces the point upscale with a composite TV's reconstruction of the
+  dithered signal, which is how the dither was meant to be seen: on a TV it blended away. Per
+  display pixel, from the raw signal pixels:
+  1. composite blur: horizontal-only low-pass in YIQ, luma narrower than chroma: melts the dither, bleeds colour;
+  2. scanlines: a Gaussian beam per line, width growing with brightness, area-normalized (dark
+     lines part into gaps, average brightness kept), strength blending from flat lines;
+  3. aperture grille at display pixels (averages 1);
+  4. bloom: the glass's glow, a wide Gaussian of the light at scene size, added on top. Not a
+     thresholded modern bloom.
+
+  Tube gamma decodes the signal to light and 2.2 re-encodes it, so 2.2 is neutral.
+
+Passes (`render_post.odin`): signal (scene size: tonemap + quantize/dither) → bloom across → bloom
+down (scene size, bloom on only) → upscale (display size). A clean view runs the signal pass alone,
+straight into the display target.
+
+Left out on purpose: curvature and vignette (break pixel alignment with picking and debug lines),
+phosphor persistence (needs the previous frame).
 
 UI renders at native resolution after the upscale; the world renders low-res.
 

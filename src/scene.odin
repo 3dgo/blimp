@@ -91,7 +91,7 @@ scene_load_from_text :: proc(world: ^World, text: string, out_handles: ^[dynamic
 
         if trimmed[0] == '[' && trimmed[len(trimmed) - 1] == ']' {
             if in_entity {
-                e.model = asset_model_key(e.model)   // normalize to the interned asset key
+                entity_intern_keys(&e)   // normalize to the interned asset keys
                 entity_make_name_unique(world, &e)   // names are unique per world (pasting "car" again gives "car_1")
                 h := hm.add(&world.entities, e)            // flush the entity we just finished reading
                 if out_handles != nil do append(out_handles, h)
@@ -112,7 +112,7 @@ scene_load_from_text :: proc(world: ^World, text: string, out_handles: ^[dynamic
         deserialize_field(&e, key, val, vmem.arena_allocator(&world.arena), skip_tags)
     }
     if in_entity {
-        e.model = asset_model_key(e.model)
+        entity_intern_keys(&e)
         entity_make_name_unique(world, &e)
         h := hm.add(&world.entities, e)
         if out_handles != nil do append(out_handles, h)

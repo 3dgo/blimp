@@ -51,13 +51,22 @@ ui_view_toolbar :: proc(view: ^Render_View) {
     if toggle_button(fmt.ctprintf("%s##settings", ICON_SETTINGS), ui_world_settings_open_for(w)) do ui_world_settings_toggle(w)
     im.SetItemTooltip("%s", tr(.Win_World_Settings))
     im.SameLine()
+    im.BeginDisabled(sbuf_str(&w.settings.script) == "")
+    if im.Button(fmt.ctprintf("%s##script", ICON_SCRIPT)) do world_settings_edit_script(w)
+    im.EndDisabled()
+    im.SetItemTooltip("%s", tr(.Tool_Edit_Script))
+    im.SameLine()
     game_view := editor_view(view).game_view
     if toggle_button(fmt.ctprintf("%s##gameview", ICON_GAME_VIEW), game_view) do ui_game_view_toggle(view)
     im.SetItemTooltip("%s  (G)", tr(.Tool_Game_View))
     im.SameLine()
     // Render mode: the target rebuilds at its new scene scale next frame (render_view_needs_rebuild).
-    if toggle_button(fmt.ctprintf("%s##ps1", ICON_PS1), view.mode == .PS1) do view.mode = view.mode == .PS1 ? .Clean : .PS1
-    im.SetItemTooltip("%s", tr(.Tool_PS1_Look))
+    if toggle_button(fmt.ctprintf("%s##retro", ICON_RETRO), view.mode == .Retro) do view.mode = view.mode == .Retro ? .Clean : .Retro
+    im.SetItemTooltip("%s", tr(.Tool_Retro_Look))
+    im.SameLine()
+    // What the retro look does, effect by effect (ui_retro.odin): the level's, like the bake.
+    if toggle_button(fmt.ctprintf("%s##retro_settings", ICON_RETRO_SETTINGS), ui_retro_open_for(level)) do ui_retro_toggle(level)
+    im.SetItemTooltip("%s", tr(.Win_Retro))
     im.SameLine()
     ui_view_lighting_menu(view)
     im.SameLine()

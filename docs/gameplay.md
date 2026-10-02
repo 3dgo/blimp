@@ -71,6 +71,32 @@ for AI, not for sound. Odin is authoritative so script reload can't corrupt anyt
 - Lock-free command queue to the audio thread. Never touch mixer state from the game thread.
 - `miniaudio`, not a custom mixer.
 
+Built (`world_sound.odin`):
+- miniaudio's `ma_engine` is the mixer and its thread. The lock-free queue is miniaudio's own: every
+  `ma_sound_*` call from the game thread is an atomic post its node graph picks up.
+- Clips decode at startup (docs/assets.md). A voice is an `ma_sound_init_copy` of a clip, sharing its data.
+  `MAX_VOICES` (32). Stealing takes the quietest at the listener (volume × linear falloff), oldest on a tie.
+  A new sound quieter than all of them is dropped. Coalescing is `SOUND_COALESCE_SEC` (0.05) per clip; loops are exempt.
+- **On entities**: `sound` (a clip key, `widget:sound` picker), `volume`, `sound_flags` (Play On Start, Loop,
+  Positional), and `range`: full volume inside x, linear to silent at y. Play starts every enabled entity's
+  Play On Start sound. A voice attached to an entity follows it and stops when it goes.
+- A voice belongs to a world. A play world's voices pause while it doesn't tick, and stop on Stop or close.
+  Edited levels make no sound.
+- Lua gets no handles: the entity is the handle. `Entity.play_sound(e)` / `stop_sound(e)` (its own fields),
+  `World.play_sound(key [, volume])` (2D), `World.play_sound_at(key, pos [, volume])` (positional,
+  `SOUND_DEFAULT_RANGE`).
+- Listener: the camera of the view showing a playing world (its game camera in game mode). miniaudio is
+  right-handed, so z is negated at the boundary. Doppler is off.
+
+### Input
+
+`input.odin`: keyboard, mouse and the first gamepad, read from SDL's state once a frame before the game runs.
+It's live only in game mode with the window focused; otherwise everything reads up/zero, so editor typing never
+reaches the game. Lua `Input.down / pressed / released(key)` (SDL scancode names: `"W"`, `"Space"`,
+`"Left Shift"`), `mouse_down / mouse_pressed(1–5)`, `mouse_delta()`, `lock_mouse(bool)` (relative mode,
+released whenever the editor has the window), `gamepad_axis(name)` (deadzoned), `gamepad_down / pressed(name)`
+(SDL's gamepad names).
+
 ## Physics — Box3D
 
 Erin Catto's 3D engine. C17, MIT, in Odin's vendor collection. Alpha — expect rough edges
@@ -83,7 +109,32 @@ and incomplete documentation.
   asset cook time and cache it.
 - Baked compound collision exists for the many-instances case — relevant for kitbashed levels.
 - **Trimesh for static only.** Convex hulls and capsules for anything dynamic.
-- Collision geometry authored separately in Max (`_col` suffix or a dedicated layer), not
-  derived from render meshes.
+- Collision geometry authored separately in Max (`_col` suffix or a dedicated layer) is the
+  default. An entity can opt into its render mesh, or its bounds, instead (`collision`, below).
 - Give Box3D the general heap allocator rather than fighting it into an arena.
+
+Built so far (`world_physics.odin`): **queries only**. Nothing is simulated and the world is never stepped.
+- Per entity, `collision` (enum) picks the shape, cheapest first; it needs a model:
+  - None.
+  - Box: the model's bounds × scale, a box hull. The cheapest real collider.
+  - Collision_Mesh (default): the kit's `<model>_col` mesh, cooked at asset load (docs/assets.md). Authored, so as
+    simple as the artist made it. Play logs one warning counting entities whose model has no `_col`.
+  - Render_Mesh: every triangle of the model, cooked on first use and cached until the next asset reload
+    (`asset_render_collision`). The most expensive; fine for low-poly levels.
+- Play builds a Box3D world for the play world: a body per enabled entity with a shape, at its position, rotation
+  and scale (shape user data = the entity handle). **Static** entities are static bodies. Anything else is
+  **kinematic** and follows its entity every frame (`physics_update`, after the game systems, only when it moved),
+  so a scripted drawbridge blocks. Mesh shapes on kinematic bodies are fine for queries; contacts would need hulls.
+  Its scale is the one at Play. Freed on Stop; an asset reload rebuilds it. Nothing spawned during play collides yet.
+- Box3D's lib is built with its asserts on: `physics_assert` logs one before breaking. It wants unit quaternions to
+  tighter precision than a level file's 5 decimals, so body rotations are normalized first.
+- Box3D gets the engine's left-handed coordinates as they are. Its CCW rule is "cross(v1 − v0, v2 − v0)
+  points out", the engine's own.
+- Lua (Odin answers, Lua holds nothing):
+  - `World.raycast(origin, dir, dist)` → hit, point, normal, entity.
+  - `Entity.move(e, delta, radius, height)` → grounded. It's the character mover: a capsule standing on the
+    entity's position, collide → `SolvePlanes` → `CastMover`, up to 5 times. Ground is a plane with normal.y ≥ 0.7.
+    The entity's own collision is skipped (both callbacks filter on the shape's user data).
+    Gravity is part of `delta`; velocity, if a game wants it, is an entity field (schema editor).
+- Next when needed: kinematic bodies for moving colliders, dynamic convex/capsule bodies, stepping.
 

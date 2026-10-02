@@ -46,6 +46,8 @@ world_play :: proc(w: ^World) {
 
     for v in views do if v.world == level do v.world = p
     ui_retarget_world(level, p)
+    physics_world_start(p)
+    sound_world_start(p)
     log.infof("Play: %s", level.title)
 }
 
@@ -59,6 +61,8 @@ world_stop :: proc(w: ^World) {
     for v in views do if v.world == p { v.world = level; v.game_camera = {} }   // the handle was the play world's
     ui_retarget_world(p, level)
     lua_world_script_unload(p)   // its script stops now, not when it closes
+    sound_world_stop(p)          // and its sounds
+    physics_world_stop(p)
     level.play_world = nil
     p.play_source    = nil       // a closing leftover now, not a play world
     world_request_close(p)
@@ -84,11 +88,12 @@ world_step :: proc(w: ^World) {
 }
 
 // Once per frame, before any game system runs: decides whether each play world advances this frame
-// (`ticks`), consuming a pending step. Game systems check `w.ticks`, never `paused` directly, so a step
-// moves all of them by the same one frame.
-world_play_tick :: proc() {
+// (`ticks`), consuming a pending step, and advances its game clock (`time`) by `dt` if so. Game systems
+// check `w.ticks`, never `paused` directly, so a step moves all of them by the same one frame.
+world_play_tick :: proc(dt: f64) {
     for w in worlds {
         w.ticks = w.play_source != nil && (!w.paused || w.step)
         w.step  = false
+        if w.ticks do w.time += dt
     }
 }

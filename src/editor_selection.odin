@@ -211,6 +211,7 @@ pick_view_debug_lines :: proc(v: ^Render_View) {
         g := &world_level(v.world).probes   // a play world shows its level's, lit by its own group scales
         probe_grid_debug_lines(g, probe_layer_scales(g, light_group_scales(v.world, timer_sec_since_start())), math.pow(2, v.world.settings.exposure))
     }
+    editor_bake_bounds_lines(world_level(v.world))   // the manual bake box while the Bake window is open (ui_bake.odin)
 
     it := hm.iterator_make(&v.world.entities)
     for e, h in hm.iterate(&it) {

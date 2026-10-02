@@ -36,25 +36,21 @@ Shadow_View :: struct {
 #assert(size_of(Shadow_View) == 256)
 
 Render_Shadows :: struct {
-    shader: dx.Compiled_Shader,
-    pso:    dx.Pipeline_State,
+    pipeline: Shader_Pipeline,
 }
 render_shadows: Render_Shadows
 
 render_shadows_init :: proc() {
-    render_shadows.shader = dx.slang_compiler_compile_shader(renderer_dx.slang_compiler, "shadow", "vert_main", "")
-
     opts := dx.PIPELINE_OPTIONS_DEFAULT
     opts.cull_mode  = .NONE      // single-sided walls must still block light from behind
     opts.rtv_format = .UNKNOWN   // depth only
     opts.depth_bias = SHADOW_DEPTH_BIAS
     opts.slope_bias = SHADOW_SLOPE_BIAS
-    render_shadows.pso = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, render_shadows.shader, opts)
+    render_shadows.pipeline = shader_pipeline_create("shadow", "vert_main", "", opts)
 }
 
 render_shadows_shutdown :: proc() {
-    dx.pipeline_destroy_pso(render_shadows.pso)
-    dx.slang_compiler_destroy_shader(render_shadows.shader)
+    shader_pipeline_destroy(render_shadows.pipeline)
 }
 
 // ============================ Per world ============================
@@ -175,7 +171,7 @@ render_shadows_draw :: proc(w: ^World, frame_slot: u64) {
 
         dx.descriptor_heap_bind(cmd, {renderer_dx.resource_heap, renderer_dx.sampler_heap})
         cmd.handle->SetGraphicsRootSignature(renderer_dx.root_signature.handle)
-        cmd.handle->SetPipelineState(render_shadows.pso.handle)
+        cmd.handle->SetPipelineState(render_shadows.pipeline.pso.handle)
         dx_viewport := d3d12.VIEWPORT{Width = SHADOW_MAP_SIZE, Height = SHADOW_MAP_SIZE, MaxDepth = 1.0}
         scissor     := d3d12.RECT{right = SHADOW_MAP_SIZE, bottom = SHADOW_MAP_SIZE}
         cmd.handle->RSSetViewports(1, &dx_viewport)
@@ -184,12 +180,16 @@ render_shadows_draw :: proc(w: ^World, frame_slot: u64) {
         cmd.handle->IASetIndexBuffer(&d3d12.INDEX_BUFFER_VIEW{BufferLocation = dx.resource_get_gpu_address(asset_buffers.index_buffer.resource), SizeInBytes = u32(len(asset_system.vertex_indices) * size_of(u32)), Format = .R32_UINT})
 
         views_va := dx.resource_get_gpu_address(r.shadow_views[frame_slot])
+        // Opaque and Cutout cast (the first two ranges; a cutout casts its whole quad, this pass has no pixel
+        // shader to cut it), Alpha and Additive don't.
+        #assert(EntityBlend.Opaque == EntityBlend(0) && EntityBlend.Cutout == EntityBlend(1))
+        casters := r.draw_count[.Opaque] + r.draw_count[.Cutout]
         for i in 0..<len(r.shadow_cameras) {
             dsv := r.shadow_dsv[i].cpu_handle
             cmd.handle->OMSetRenderTargets(0, nil, false, &dsv)
             cmd.handle->ClearDepthStencilView(dsv, {.DEPTH}, 0.0, 0, 0, nil)   // reversed-Z: 0 = far, nothing casts
             cmd.handle->SetGraphicsRootConstantBufferView(0, views_va + d3d12.GPU_VIRTUAL_ADDRESS(i * size_of(Shadow_View)))
-            cmd.handle->ExecuteIndirect(renderer_dx.indirect_sig.handle, u32(len(r.draw_cmd_data)), r.draw_cmd[frame_slot].handle, 0, nil, 0)
+            cmd.handle->ExecuteIndirect(renderer_dx.indirect_sig.handle, casters, r.draw_cmd[frame_slot].handle, 0, nil, 0)
         }
     }
     dx.texture_transition(cmd, &r.shadow_map, {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)

@@ -13,13 +13,18 @@ Render_Context :: struct {
     info_queue: ^d3d12.IInfoQueue1,
 }
 
-render_context_create :: proc() -> Render_Context {
+render_context_create :: proc(gpu_validation: bool) -> Render_Context {
     render_context: Render_Context
     hr: d3d12.HRESULT
     when ODIN_DEBUG {
         hr = d3d12.GetDebugInterface(d3d12.IDebug3_UUID, (^rawptr)(&render_context.debug)); check_dx(hr, "Failed to get debug layer 3")
         render_context.debug->EnableDebugLayer()
-        render_context.debug->SetEnableGPUBasedValidation(true)
+        // GPU-based validation is opt-in: it patches every PSO on first use, which made the first frame
+        // over 2 s slower, and slows every frame after.
+        if gpu_validation {
+            render_context.debug->SetEnableGPUBasedValidation(true)
+            log.info("D3D12 GPU-based validation on")
+        }
     }
 
     flags: dxgi.CREATE_FACTORY

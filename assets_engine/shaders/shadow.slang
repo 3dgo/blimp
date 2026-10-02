@@ -18,6 +18,7 @@ struct MeshInstance {
     uint transformIndex;
     uint mesh;
     uint material;
+    uint shading;
 }
 
 struct Mesh {

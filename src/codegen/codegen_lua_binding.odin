@@ -48,6 +48,7 @@ Proc_Info :: struct {
 Proc_Param :: struct {
     name: string,
     type: string,
+    default: string,   // a number literal default ("1", "0.5"): the Lua argument is optional; "" = required
 }
 
 Proc_Return :: struct {
@@ -217,9 +218,16 @@ parse_proc :: proc(proc_name: ^ast.Ident, proc_type: ^ast.Proc_Type, attributes:
             for fname in field.names {
                 param_name, _ := fname.derived_expr.(^ast.Ident)
                 if param_name == nil do return Proc_Info{}, false
+                default: string
+                if field.default_value != nil {
+                    if lit, is_lit := field.default_value.derived_expr.(^ast.Basic_Lit); is_lit && (lit.tok.kind == .Integer || lit.tok.kind == .Float) {
+                        default = strings.clone(lit.tok.text)
+                    }
+                }
                 append(&proc_info.params, Proc_Param {
                     name = strings.clone(param_name.name),
                     type = strings.clone(param_type.name),
+                    default = default,
                 })
             }
         }
@@ -383,10 +391,12 @@ generate_proc :: proc(sb: ^strings.Builder, info: Proc_Info) {
     for param, i in info.params {
         switch param.type {
             case "f32", "f64": {
-                fmt.sbprintfln(sb, "    %v := %v(lua.L_checknumber(L, %v))", param.name, param.type, i+1)
+                if param.default != "" do fmt.sbprintfln(sb, "    %v := %v(lua.L_optnumber(L, %v, %v))", param.name, param.type, i+1, param.default)
+                else do fmt.sbprintfln(sb, "    %v := %v(lua.L_checknumber(L, %v))", param.name, param.type, i+1)
             }
             case "int", "i32", "i64", "u32", "u64": {
-                fmt.sbprintfln(sb, "    %v := %v(lua.L_checkinteger(L, %v))", param.name, param.type, i+1)
+                if param.default != "" do fmt.sbprintfln(sb, "    %v := %v(lua.L_optinteger(L, %v, %v))", param.name, param.type, i+1, param.default)
+                else do fmt.sbprintfln(sb, "    %v := %v(lua.L_checkinteger(L, %v))", param.name, param.type, i+1)
             }
             case "bool": {
                 fmt.sbprintfln(sb, "    %v := bool(lua.toboolean(L, %v))", param.name, i+1)

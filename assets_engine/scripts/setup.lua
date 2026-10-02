@@ -21,15 +21,16 @@ _G._push_mat4 = mm.mat4.push_mat4
 _G.矩阵3  = _G.Mat3   --[[@as Mat3ZHClass]]
 _G.矩阵4  = _G.Mat4   --[[@as Mat4ZHClass]]
 
-_G.Blimp = require("blimp")
-_G.引擎   = _G.Blimp
-
--- Binding tables for @(lua, table=Entity/World) procs. Created empty here so the Chinese
+-- Binding tables for @(lua, table=Blimp/Entity/World/Input) procs. Created empty here so the Chinese
 -- aliases reference the same table object; _lua_register_all_bindings (run after this file)
 -- fills these existing tables rather than replacing them.
+_G.Blimp  = {}   -- also where main.lua defines the engine hooks (lua.odin)
+_G.引擎   = _G.Blimp
 _G.Entity = {}
 _G.实体   = _G.Entity
 _G.World  = {}
 _G.世界   = _G.World
+_G.Input  = {}   -- input.odin: keys, mouse, gamepad (live in game mode)
+_G.输入   = _G.Input
 
 require("stdlib_aliases")

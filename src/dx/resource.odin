@@ -163,9 +163,8 @@ resource_get_gpu_address :: proc(resource: Resource) -> d3d12.GPU_VIRTUAL_ADDRES
     return resource.handle->GetGPUVirtualAddress()
 }
 
+// Named in release builds too: it's once per resource, and a capture of the shipped game reads the same.
 resource_set_debug_name :: proc(resource: Resource, name: string) {
-    when ODIN_DEBUG {
-        wide := win32.utf8_to_wstring(name)
-        resource.handle->SetName(wide)
-    }
+    wide := win32.utf8_to_wstring(name, context.temp_allocator)
+    resource.handle->SetName(wide)
 }

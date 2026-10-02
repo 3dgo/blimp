@@ -5,6 +5,28 @@ Everything loads at init and never changes at runtime. No streaming, no eviction
 manifests, no per-asset meta files. This is deliberate — a prior, more complex asset
 system was cut for exceeding current needs.
 
+**Hot reload** (debug builds, `asset_hot_reload.odin`) doesn't change that: it reloads *everything*
+of a kind, as init would. A `ReadDirectoryChangesW` watcher on `assets/` and `assets_engine/`, polled at
+the top of each frame, waits 0.3 s after the last change (Max writes `.bin` then `.gltf`), then:
+- `.gltf .glb .bin .png` → `asset_system_reload`: GPU idle, the asset arena and GPU asset buffers
+  thrown away and rebuilt. Entities keep working because the keys they hold are interned in their own
+  arena, `asset_keys` (`asset_intern`), which outlives every reload — so do undo snapshots and the
+  clipboard. Anything that keeps an asset key must intern it (`entity_intern_keys` after reading
+  fields from text). Play worlds' physics are rebuilt with it.
+- `.slang` → every pipeline recompiled, all or nothing (`render_shaders_reload`, a fresh Slang session).
+- `.wav .ogg .mp3 .flac` → every sound clip (`sound_reload`).
+- `.luacn` → transpiled to its `.lua` (`common.luacn_convert`, shared with the build's codegen); `.lua` →
+  play worlds running it rerun it from the top, start included; `main.lua` reruns (`lua_reload_script`).
+
+**Collision models.** A mesh named `<model>_col` in a kit is `<model>`'s static collision (docs/gameplay.md →
+Physics): imported like any model, cooked at load into Box3D mesh data (`asset_system.collision`, keyed by the
+*render* model), offset by where its node sits relative to the model's node, and left out of the kit's
+layout. It's never drawn. Authored in Max next to the visible mesh. It's what an entity with `collision = Collision_Mesh` (the
+default) collides as; an entity can use its render mesh or bounds instead (docs/gameplay.md → Physics).
+
+**Sound clips** (`world_sound.odin`): every `.wav .ogg .mp3 .flac` under `assets/` and `assets_engine/`,
+decoded at startup by miniaudio, keyed by project path like a texture (`assets/sounds/door.wav`).
+
 **A glTF file is a kit** — a set of related models plus their textures, authored as one
 file and (later) openable as a scene to copy models from into the game scene. Placing
 content is copying models out of a kit, not importing one mesh per asset. This is
@@ -36,7 +58,8 @@ under `assets/` too and the Max scene references them there. The scan imports on
 and textures load only when a glTF references them, so `.max`, `.psd` and autobackups in `assets/`
 cost nothing. Export `.gltf`, not `.glb`, so textures stay external and are shared by path. Setting
 the Max project folder to the repo root keeps bitmap paths relative, but it isn't required (absolute
-URIs are re-rooted, see below). Shipping will have to exclude source files; there is no cook step yet.
+URIs are re-rooted, see below). The game build (`odin run build.odin -file -- game`) copies `assets/` and
+`assets_engine/` without the DCC sources (`.max .psd .blend .bak .luacn …`, `GAME_SKIP_EXTS`); there is no cook step.
 
 - Scan for glTF files, parse each, load all meshes and textures into RAM and VRAM.
   Textures are **not** scanned up front — each glTF pulls in the images it references.

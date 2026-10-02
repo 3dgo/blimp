@@ -13,6 +13,8 @@ Entity :: struct {
     rotation: quat `placement`,
     scale: vec3 `placement`,
     model: string `widget:model`,
+    shading: EntityShading,
+    blend: EntityBlend,
     camera_type: EntityCameraType,
     light_type: EntityLightType,
     color: vec3 `widget:linear_color`,
@@ -26,6 +28,19 @@ Entity :: struct {
     range: vec2,
     shadow: bool,
     light_group: i32,
+    indirect: f32,
+    sound: string `widget:sound`,
+    volume: f32,
+    sound_flags: EntitySoundFlags,
+    collision: EntityCollision,
+    velocity: vec3 `noserialize`,
+}
+
+EntityCollision :: enum u64 {
+    None,
+    Box,
+    Collision_Mesh,
+    Render_Mesh,
 }
 
 EntityCameraType :: enum u64 {
@@ -48,6 +63,30 @@ EntityLightFalloff :: enum u64 {
     Smooth,
 }
 
+ShadingModel :: enum u64 {
+    Unlit,
+    Gouraud,
+    Lambert,
+    Flat,
+    Phong,
+}
+
+EntityShading :: enum u64 {
+    Default,
+    Unlit,
+    Gouraud,
+    Lambert,
+    Flat,
+    Phong,
+}
+
+EntityBlend :: enum u64 {
+    Opaque,
+    Cutout,
+    Alpha,
+    Additive,
+}
+
 EntityBasicStaticFlag :: enum u64 {
     Static,
     Renderable,
@@ -61,6 +100,13 @@ EntityBasicFlag :: enum u64 {
 }
 EntityBasicFlags :: bit_set[EntityBasicFlag; u64]
 
+EntitySoundFlag :: enum u64 {
+    Play_On_Start,
+    Loop,
+    Positional,
+}
+EntitySoundFlags :: bit_set[EntitySoundFlag; u64]
+
 // Applies each schema `default` to a fresh entity (fields with no default keep zero).
 entity_apply_defaults :: proc(e: ^Entity) {
     e.basic_static_flags = {.Static, .Renderable, .Cast_Indirect}
@@ -68,6 +114,8 @@ entity_apply_defaults :: proc(e: ^Entity) {
     e.position = {0, 0, 0}
     e.rotation = transmute(quat)[4]f32{0, 0, 0, 1}
     e.scale = {1, 1, 1}
+    e.shading = .Default
+    e.blend = .Opaque
     e.camera_type = .None
     e.light_type = .None
     e.color = {1, 1, 1}
@@ -81,6 +129,11 @@ entity_apply_defaults :: proc(e: ^Entity) {
     e.range = {0.1, 20}
     e.shadow = false
     e.light_group = 0
+    e.indirect = 1
+    e.volume = 1
+    e.sound_flags = {.Positional}
+    e.collision = .Collision_Mesh
+    e.velocity = {0, 0, 0}
 }
 
 // Localized field label for the current language; ok=false if none.
@@ -95,6 +148,8 @@ entity_field_label :: proc(name: string) -> (string, bool) {
     case "rotation": l = {.EN = "Rotation", .ZH = "旋转"}
     case "scale": l = {.EN = "Scale", .ZH = "缩放"}
     case "model": l = {.EN = "Model", .ZH = "模型"}
+    case "shading": l = {.EN = "Shading", .ZH = "着色"}
+    case "blend": l = {.EN = "Blend", .ZH = "混合"}
     case "camera_type": l = {.EN = "Camera", .ZH = "相机"}
     case "light_type": l = {.EN = "Light", .ZH = "灯光"}
     case "color": l = {.EN = "Color", .ZH = "颜色"}
@@ -108,6 +163,12 @@ entity_field_label :: proc(name: string) -> (string, bool) {
     case "range": l = {.EN = "Range", .ZH = "范围"}
     case "shadow": l = {.EN = "Cast Shadow", .ZH = "投射阴影"}
     case "light_group": l = {.EN = "Light Group", .ZH = "光源组"}
+    case "indirect": l = {.EN = "Indirect Intensity", .ZH = "间接光强度"}
+    case "sound": l = {.EN = "Sound", .ZH = "声音"}
+    case "volume": l = {.EN = "Volume", .ZH = "音量"}
+    case "sound_flags": l = {.EN = "Sound Flags", .ZH = "声音标志"}
+    case "collision": l = {.EN = "Collision", .ZH = "碰撞"}
+    case "velocity": l = {.EN = "Velocity", .ZH = "速度"}
     }
     s := l[loc_lang]
     return s, s != ""
@@ -117,6 +178,13 @@ entity_field_label :: proc(name: string) -> (string, bool) {
 entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bool) {
     l: [Lang]string
     switch enum_type {
+    case "EntityCollision":
+        switch member {
+        case "None": l = {.EN = "None", .ZH = "无"}
+        case "Box": l = {.EN = "Box", .ZH = "包围盒"}
+        case "Collision_Mesh": l = {.EN = "Collision Mesh (_col)", .ZH = "碰撞网格（_col）"}
+        case "Render_Mesh": l = {.EN = "Render Mesh", .ZH = "渲染网格"}
+        }
     case "EntityCameraType":
         switch member {
         case "None": l = {.EN = "None", .ZH = "无"}
@@ -137,6 +205,30 @@ entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bo
         case "Linear": l = {.EN = "Linear", .ZH = "线性"}
         case "Smooth": l = {.EN = "Smooth", .ZH = "平滑"}
         }
+    case "ShadingModel":
+        switch member {
+        case "Unlit": l = {.EN = "Unlit", .ZH = "无光照"}
+        case "Gouraud": l = {.EN = "Gouraud", .ZH = "高洛德"}
+        case "Lambert": l = {.EN = "Lambert", .ZH = "兰伯特"}
+        case "Flat": l = {.EN = "Flat", .ZH = "平面"}
+        case "Phong": l = {.EN = "Phong", .ZH = "冯氏"}
+        }
+    case "EntityShading":
+        switch member {
+        case "Default": l = {.EN = "Default", .ZH = "默认"}
+        case "Unlit": l = {.EN = "Unlit", .ZH = "无光照"}
+        case "Gouraud": l = {.EN = "Gouraud", .ZH = "高洛德"}
+        case "Lambert": l = {.EN = "Lambert", .ZH = "兰伯特"}
+        case "Flat": l = {.EN = "Flat", .ZH = "平面"}
+        case "Phong": l = {.EN = "Phong", .ZH = "冯氏"}
+        }
+    case "EntityBlend":
+        switch member {
+        case "Opaque": l = {.EN = "Opaque", .ZH = "不透明"}
+        case "Cutout": l = {.EN = "Cutout", .ZH = "镂空"}
+        case "Alpha": l = {.EN = "Alpha", .ZH = "半透明"}
+        case "Additive": l = {.EN = "Additive", .ZH = "叠加"}
+        }
     case "EntityBasicStaticFlag":
         switch member {
         case "Static": l = {.EN = "Static", .ZH = "静态"}
@@ -147,6 +239,12 @@ entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bo
         switch member {
         case "Enabled": l = {.EN = "Enabled", .ZH = "启用"}
         case "Hidden": l = {.EN = "Hidden", .ZH = "隐藏"}
+        }
+    case "EntitySoundFlag":
+        switch member {
+        case "Play_On_Start": l = {.EN = "Play On Start", .ZH = "开始时播放"}
+        case "Loop": l = {.EN = "Loop", .ZH = "循环"}
+        case "Positional": l = {.EN = "Positional", .ZH = "空间定位"}
         }
     }
     s := l[loc_lang]

@@ -1,4 +1,4 @@
-package codegen
+package common
 
 import "core:log"
 import "core:os"
@@ -6,9 +6,27 @@ import "core:strings"
 import "core:path/filepath"
 import "core:unicode/utf8"
 
-scan_folder_luacn :: proc(root: string) {
-	keywords := make(map[string]string)
+// LuaCN: Lua with Chinese keywords. A .luacn file transpiles to the .lua beside it, which is what
+// gets loaded. The build converts every one (codegen); the engine converts one when it changes
+// (asset_hot_reload.odin).
+
+// Transpiles every .luacn under root.
+luacn_scan_folder :: proc(root: string) {
+	keywords := luacn_keywords()
 	defer delete(keywords)
+	_scan_dir_luacn(root, &keywords)
+}
+
+// Transpiles one .luacn file to the .lua beside it. False if it couldn't be read or written.
+luacn_convert :: proc(path: string) -> bool {
+	keywords := luacn_keywords()
+	defer delete(keywords)
+	return luacn_convert_file(path, &keywords)
+}
+
+@(private = "file")
+luacn_keywords :: proc() -> (keywords: map[string]string) {
+	keywords = make(map[string]string)
 	keywords["否则如果"] = "elseif"
 	keywords["如果"]     = "if"
 	keywords["那么"]     = "then"
@@ -30,8 +48,7 @@ scan_folder_luacn :: proc(root: string) {
 	keywords["或"]       = "or"
 	keywords["非"]       = "not"
 	keywords["中断"]     = "break"
-
-	_scan_dir_luacn(root, &keywords)
+	return
 }
 
 @(private = "file")
@@ -47,17 +64,17 @@ _scan_dir_luacn :: proc(path: string, keywords: ^map[string]string) {
 		if info.type == .Directory {
 			_scan_dir_luacn(info.fullpath, keywords)
 		} else if filepath.ext(info.name) == ".luacn" {
-			_convert_luacn_file(info.fullpath, keywords)
+			luacn_convert_file(info.fullpath, keywords)
 		}
 	}
 }
 
 @(private = "file")
-_convert_luacn_file :: proc(path: string, keywords: ^map[string]string) {
+luacn_convert_file :: proc(path: string, keywords: ^map[string]string) -> bool {
 	src, err := os.read_entire_file(path, context.allocator)
 	if err != nil {
 		log.errorf("LuaCN: failed to read %v", path)
-		return
+		return false
 	}
 	defer delete(src)
 
@@ -69,11 +86,12 @@ _convert_luacn_file :: proc(path: string, keywords: ^map[string]string) {
 	defer delete(out_path)
 
 	write_err := os.write_entire_file(out_path, transmute([]byte)result)
-	if write_err == nil {
-		log.infof("LuaCN: %v -> %v", path, out_path)
-	} else {
+	if write_err != nil {
 		log.errorf("LuaCN: write error: %v", write_err)
+		return false
 	}
+	log.infof("LuaCN: %v -> %v", path, out_path)
+	return true
 }
 
 @(private = "file")

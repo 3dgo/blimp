@@ -1,7 +1,10 @@
 package blimp
 
 import "core:fmt"
+import "core:log"
 import "core:mem"
+import "core:os"
+import "core:strings"
 import im "lib:odin-imgui"
 
 // World Settings window: the [world] section of one world (World_Settings), opened from the gear
@@ -30,6 +33,23 @@ ui_world_settings_retarget :: proc(from, to: ^World) {
 // The world is closing.
 ui_world_settings_forget :: proc(w: ^World) {
     if settings_ui.world == w do settings_ui = {}
+}
+
+// VS Code's command-line launcher ("code" for the stable build). It's a .cmd, which CreateProcess
+// can't start directly, so it goes through cmd.
+CODE_EDITOR :: "code-insiders"
+
+// Opens the world's Lua script in VS Code, in a window on the whole project: an existing window on
+// the project is reused, else a new one opens. The script path is project-relative, as is the cwd.
+// A .lua built from a .luacn (codegen_luacn.odin) opens the .luacn: that's the one to edit.
+world_settings_edit_script :: proc(w: ^World) {
+    script := sbuf_str(&w.settings.script)
+    if script == "" do return
+    if luacn := fmt.tprintf("%scn", script); strings.has_suffix(script, ".lua") && os.exists(luacn) do script = luacn
+    root, _ := os.get_working_directory(context.temp_allocator)
+    if _, err := os.process_start({command = {"cmd", "/c", CODE_EDITOR, root, "-g", script}}); err != nil {
+        log.errorf("Couldn't start %s for %s: %v", CODE_EDITOR, script, err)
+    }
 }
 
 ui_draw_world_settings :: proc() {

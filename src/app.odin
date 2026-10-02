@@ -103,12 +103,14 @@ app_init :: proc() {
     create_entites(&game_world)
 
     lua_init()
+    sound_init()
 
     renderdoc_init()   // before the D3D12 device exists, so RenderDoc can hook it
     renderer_dx_init()
     game_settings_load()
     ui_init()
     remote_init()   // debug builds: blimpctl / tool access on 127.0.0.1
+    when ODIN_DEBUG do hot_reload_init()   // assets, shaders and scripts reload when their files change
     ui_game_start()   // Game Settings' start level; a release build plays it
 }
 
@@ -121,6 +123,7 @@ app_run :: proc() {
         timer_frame_begin()
         free_all(context.temp_allocator)
         free_all(app.allocators.frame)
+        when ODIN_DEBUG do hot_reload_update()   // first: an asset reload waits for the GPU and rebuilds the asset arena
 
         app.resized = false
         event: sdl.Event
@@ -148,7 +151,7 @@ app_run :: proc() {
                 case .KEY_DOWN: {
                     if event.key.key == sdl.K_F9 && !event.key.repeat && ui_request_restart() {
                         log.info("F9: restarting (nothing unsaved)")
-                        app_spawn_self()
+                        app_spawn_self(os.args[1:])
                         break main_loop
                     }
                 }
@@ -156,11 +159,12 @@ app_run :: proc() {
             ui_process_event(&event)
         }
 
-        asset_system_update()
-
+        input_update()   // before anything the game runs reads it
         lua_update(timer_delta_sec())
-        world_play_tick()                      // which play worlds advance this frame (pause / F10 step)
+        world_play_tick(timer_delta_sec())     // which play worlds advance this frame (pause / F10 step), and their clocks
         lua_worlds_update(timer_delta_sec())   // each open world's script (lua_world_script.odin)
+        physics_update()                       // after the game systems moved things: kinematic bodies follow
+        sound_update()                         // after the game systems moved things: voices follow, pause, finish
 
         remote_poll()   // tool commands run between frames, before the UI sees this frame
         ui_update()
@@ -180,12 +184,16 @@ app_run :: proc() {
 EXE_PATH     :: "bin/blimp.exe"
 EXE_OLD_PATH :: "bin/blimp_old.exe"
 
-// Relaunches the engine, passing the std handles through so the new process keeps the
-// console. Without this the child (and any build.exe it later spawns) gets dead std handles
-// — output vanishes and the next Apply's build fails on its children's invalid handles.
-app_spawn_self :: proc() {
+// Relaunches the engine with `flags` (launch options such as --renderdoc; pass os.args[1:] to keep this
+// run's), passing the std handles through so the new process keeps the console. Without this the child
+// (and any build.exe it later spawns) gets dead std handles — output vanishes and the next Apply's build
+// fails on its children's invalid handles.
+app_spawn_self :: proc(flags: []string) {
+    command := make([dynamic]string, context.temp_allocator)
+    append(&command, "./" + EXE_PATH)
+    append(&command, ..flags)
     _, _ = os.process_start(os.Process_Desc{
-        command = {"./" + EXE_PATH},
+        command = command[:],
         stdin   = os.stdin,
         stdout  = os.stdout,
         stderr  = os.stderr,
@@ -222,7 +230,7 @@ app_rebuild_and_restart :: proc() -> bool {
         return false
     }
 
-    app_spawn_self()
+    app_spawn_self(os.args[1:])
     app.should_restart = true
     return true
 }
@@ -232,7 +240,10 @@ app_shutdown :: proc() {
 
     renderer_dx_wait_idle()   // GPU must be idle before tearing down any resources it may still reference
     remote_shutdown()
+    when ODIN_DEBUG do hot_reload_shutdown()
     world_registry_shutdown() // opened worlds/views go before the heaps they live in
+    sound_shutdown()
+    input_shutdown()
     undo_shutdown()
 
     lua_finish()

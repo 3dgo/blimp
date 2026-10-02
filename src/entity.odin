@@ -35,6 +35,14 @@ entity_drawn :: proc(e: ^Entity) -> bool {
     return .Renderable in e.basic_static_flags && .Enabled in e.basic_flags && .Hidden not_in e.basic_flags
 }
 
+// An entity's asset references as interned keys (asset_intern), so they outlive whatever arena they were
+// read into (a level, the clipboard, a remote command) and survive an asset reload. Call after reading
+// fields from text.
+entity_intern_keys :: proc(e: ^Entity) {
+    e.model = asset_model_key(e.model)
+    e.sound = asset_intern(e.sound)
+}
+
 entity_transform :: proc(e: ^Entity) -> mat4 {
     return linalg.matrix4_from_trs_f32(e.position, e.rotation, e.scale)
 }

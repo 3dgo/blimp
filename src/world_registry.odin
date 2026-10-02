@@ -154,6 +154,8 @@ world_registry_process_pending :: proc() {
     for w in pending_close_worlds {
         if i, found := slice.linear_search(worlds[:], w); found do ordered_remove(&worlds, i)
         lua_world_script_unload(w)
+        sound_world_stop(w)
+        physics_world_stop(w)
         undo_forget_world(w)       // no undo entry or pinned panel may outlive its world
         ui_forget_world(w)
         world_render_destroy(w)

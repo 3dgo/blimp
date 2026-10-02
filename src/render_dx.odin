@@ -3,6 +3,8 @@ package blimp
 import "dx"
 import "core:fmt"
 import "core:log"
+import "core:os"
+import "core:slice"
 import "vendor:directx/d3d12"
 import im_dx12 "lib:odin-imgui/imgui_impl_dx12"
 
@@ -27,8 +29,7 @@ Renderer_DX :: struct {
     indirect_sig: dx.Command_Signature,
 
     slang_compiler: dx.Slang_Compiler,
-    scene_shader: dx.Compiled_Shader,
-    scene_pso: dx.Pipeline_State,
+    scene: [EntityBlend]Shader_Pipeline,   // scene.slang's vert_main with each blend's fragment entry point
 
     frame_fence_copy: dx.Fence,
     frame_fence_gfx: dx.Fence,
@@ -67,7 +68,7 @@ Frame_Constants :: struct {
     exposure: f32,           // 2^world.settings.exposure
     depth_texture_slot: u32, // the view's scene depth (R32_FLOAT), read by passes at the display size
     scene_scale: u32,        // display pixels per scene pixel, each way (render_view_scene_scale)
-    dither: u32,             // nonzero: the post pass quantizes + dithers (render mode .PS1)
+    color_levels: f32,       // the post chain quantizes each channel to 0..color_levels (2^bits - 1); 0 = off
     scene_cover: vec2,       // the part of the scene target the display covers: display / (scene_scale * scene size)
     vertex_snap: vec2,       // the scene VS rounds NDC xy to steps of 1 / vertex_snap (half the scene size); 0 = off
     affine: f32,             // 0 = perspective-correct UVs, 1 = affine; in between blends
@@ -80,17 +81,36 @@ Frame_Constants :: struct {
     lighting_view:  u32,   // Lighting_View
     indirect_scale: f32,   // × indirect light (Render_View.indirect_scale)
     probe_layers:   u32,   // layers in the probe buffer (render_probes.odin): static, then one per lit light group
-    _pad_layers:    [2]u32,
+    probe_depth_slot: u32,   // their depth maps (Probe_Depth), for the visibility test
+    _pad_layers:    u32,
     probe_layer_scale: [2]vec4,   // each layer's light-group scale this frame, layer k at [k / 4][k % 4]
 
     // The world's shadow maps (render_shadows.odin): the slice array and its Shadow_View per slice.
     shadow_map_slot:         u32,
     shadow_view_buffer_slot: u32,
-    _pad_shadow:             [2]u32,
 
-    _padding: [512 - 336]byte,   // CBVs come in 256-byte steps
+    // The retro post chain (render_post.odin, post.slang): its scene-size intermediates, and the effects'
+    // amounts from Retro_Settings, each 0 when its effect is off (render_view_update_constants).
+    signal_texture_slot:    u32,   // the signal: tonemapped, quantized, display-space
+    bloom_texture_slot:     u32,   // the bloom blurred across
+    bloom_out_texture_slot: u32,   // then down: what the upscale adds
+    crt:          u32,   // nonzero: the upscale is a CRT's (else point-sampled)
+    dither:       f32,   // Bayer threshold spread, 0..1
+    luma_blur:    f32,
+    chroma_blur:  f32,
+    scanlines:    f32,   // beam profile strength
+    beam_dark:    f32,
+    beam_bright:  f32,
+    mask:         f32,
+    bloom:        f32,
+    bloom_radius: f32,
+    gamma:        f32,
+    brightness:   f32,
+
+    _padding: [512 - 388]byte,   // CBVs come in 256-byte steps
 }
-#assert(offset_of(Frame_Constants, _padding) == 336)
+#assert(offset_of(Frame_Constants, signal_texture_slot) == 328)
+#assert(offset_of(Frame_Constants, _padding) == 388)
 #assert(offset_of(Frame_Constants, probe_layer_scale) % 16 == 0)
 #assert(MAX_PROBE_LAYERS <= 8)
 #assert(size_of(Frame_Constants) == 512)
@@ -106,7 +126,8 @@ Frame_Constants :: struct {
 #assert(offset_of(Frame_Constants, probe_dims) % 16 + size_of(uvec3) <= 16)
 
 renderer_dx_init :: proc() {
-    renderer_dx.render_context = dx.render_context_create()
+    // --gpu-validation (debug builds): D3D12 GPU-based validation, for a bad descriptor index or resource state.
+    renderer_dx.render_context = dx.render_context_create(slice.contains(os.args, "--gpu-validation"))
     when ODIN_DEBUG {
         dx.render_context_register_debug_callback(renderer_dx.render_context, renderer_dx_debug_callback)
     }
@@ -139,7 +160,6 @@ renderer_dx_init :: proc() {
     renderer_dx.indirect_sig = dx.command_signature_create(renderer_dx.render_context)
 
     // Fence
-    init_fence := dx.fence_create(renderer_dx.render_context, 0)
     renderer_dx.frame_fence_gfx = dx.fence_create(renderer_dx.render_context, 0)
     renderer_dx.frame_fence_copy = dx.fence_create(renderer_dx.render_context, 0)
 
@@ -150,13 +170,21 @@ renderer_dx_init :: proc() {
         app.allocators.perm,
     )
 
-    // Scene pipeline (opaque)
+    // Scene pipelines, one per entity blend (drawn in that order, render_view.odin). Blended ones test depth
+    // but don't write it, so what's behind them still draws.
     renderer_dx.slang_compiler  = dx.slang_compiler_create("./assets_engine/shaders/", app.allocators.perm)
-    renderer_dx.scene_shader = dx.slang_compiler_compile_shader(renderer_dx.slang_compiler, "scene", "vert_main", "frag_main")
-    
-    scene_opts := dx.PIPELINE_OPTIONS_DEFAULT
-    scene_opts.rtv_format = VIEW_HDR_FORMAT
-    renderer_dx.scene_pso    = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, renderer_dx.scene_shader, scene_opts)
+    for blend in EntityBlend {
+        opts := dx.PIPELINE_OPTIONS_DEFAULT
+        opts.rtv_format = VIEW_HDR_FORMAT
+        frag: string
+        switch blend {
+        case .Opaque:   frag = "frag_main"
+        case .Cutout:   frag = "frag_cutout"
+        case .Alpha:    frag = "frag_blend"; opts.blend = .Alpha;    opts.depth_write = false
+        case .Additive: frag = "frag_blend"; opts.blend = .Additive; opts.depth_write = false
+        }
+        renderer_dx.scene[blend] = shader_pipeline_create("scene", "vert_main", frag, opts)
+    }
     render_post_init()   // post chain: HDR scene target → display target (render_post.odin)
     render_shadows_init()   // depth-only shadow map pass (render_shadows.odin)
     
@@ -166,18 +194,12 @@ renderer_dx_init :: proc() {
 
     // Shared asset buffers (geometry, materials, textures). Worlds and their views are created when
     // the user opens them (world_registry.odin); nothing is open at startup.
+    asset_samplers_create()
     asset_buffers_create()
-    buffers_upload_static(renderer_dx.cmd_copy)
+    asset_buffers_upload()
 
+    // Finish: the frame loop resets both lists before recording
     dx.command_list_close(renderer_dx.cmd_copy)
-    dx.command_list_execute(renderer_dx.cmd_queue_copy, {renderer_dx.cmd_copy})
-    
-    dx.command_queue_signal(renderer_dx.cmd_queue_copy, init_fence, 1)
-
-    dx.fence_wait(init_fence, 1)
-
-    // Finish
-    dx.fence_destroy(init_fence)
     dx.command_list_close(renderer_dx.cmd_gfx)
 }
 
@@ -282,9 +304,8 @@ renderer_dx_shutdown :: proc() {
     render_shadows_shutdown()
     gpu_timer_shutdown()
 
-    dx.pipeline_destroy_pso(renderer_dx.scene_pso)
-    dx.slang_compiler_destroy_shader(renderer_dx.scene_shader)
-    dx.slang_compiler_destroy(renderer_dx.slang_compiler)
+    for p in renderer_dx.scene do shader_pipeline_destroy(p)
+    dx.slang_compiler_destroy(&renderer_dx.slang_compiler)
 
     dx.swapchain_destroy(&renderer_dx.swapchain)
 
@@ -292,6 +313,7 @@ renderer_dx_shutdown :: proc() {
     dx.fence_destroy(renderer_dx.frame_fence_gfx)
 
     asset_buffers_destroy()
+    asset_samplers_destroy()
 
     dx.command_signature_destroy(renderer_dx.indirect_sig)
 
@@ -311,6 +333,64 @@ renderer_dx_shutdown :: proc() {
     dx.command_queue_destroy(renderer_dx.cmd_queue_gfx)
 
     dx.render_context_destroy(renderer_dx.render_context)
+}
+
+// A graphics pipeline plus the recipe it was built from, so shader hot reload can rebuild it
+// (render_shaders_reload).
+Shader_Pipeline :: struct {
+    module, vs, ps: string,   // slang module and entry points; ps "" = depth only
+    options: dx.Pipeline_Options,
+    shader:  dx.Compiled_Shader,
+    pso:     dx.Pipeline_State,
+}
+
+// Builds a pipeline at init, where a shader that doesn't compile is fatal.
+shader_pipeline_create :: proc(module, vs, ps: string, options: dx.Pipeline_Options) -> (p: Shader_Pipeline) {
+    p = {module = module, vs = vs, ps = ps, options = options}
+    ok: bool
+    p.shader, ok = dx.slang_compiler_compile_shader(&renderer_dx.slang_compiler, module, vs, ps)
+    if !ok do log.panicf("Shader %v (%v, %v) failed to compile", module, vs, ps)
+    p.pso = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, p.shader, options)
+    return
+}
+
+shader_pipeline_destroy :: proc(p: Shader_Pipeline) {
+    dx.pipeline_destroy_pso(p.pso)
+    dx.slang_compiler_destroy_shader(p.shader)
+}
+
+// Every pipeline the renderer draws with: what shader hot reload rebuilds.
+renderer_dx_pipelines :: proc() -> []^Shader_Pipeline {
+    list := make([dynamic]^Shader_Pipeline, context.temp_allocator)
+    for &p in renderer_dx.scene do append(&list, &p)
+    append(&list, &render_post.signal, &render_post.bloom_h, &render_post.bloom_v, &render_post.upscale)
+    append(&list, &render_shadows.pipeline, &debug_draw.pipeline)
+    return list[:]
+}
+
+// Recompiles every pipeline's shaders from disk (asset_hot_reload.odin). All or nothing: shaders share
+// structs through common.slang, so if any fails to compile, its errors are logged and every pipeline
+// keeps what it had.
+render_shaders_reload :: proc() {
+    dx.slang_compiler_new_session(&renderer_dx.slang_compiler)
+    pipelines := renderer_dx_pipelines()
+    shaders := make([]dx.Compiled_Shader, len(pipelines), context.temp_allocator)
+    for p, i in pipelines {
+        ok: bool
+        shaders[i], ok = dx.slang_compiler_compile_shader(&renderer_dx.slang_compiler, p.module, p.vs, p.ps)
+        if !ok {
+            for s in shaders[:i] do dx.slang_compiler_destroy_shader(s)
+            log.errorf("Shader reload: %v (%v, %v) failed; keeping the previous shaders", p.module, p.vs, p.ps)
+            return
+        }
+    }
+    renderer_dx_wait_idle()
+    for p, i in pipelines {
+        shader_pipeline_destroy(p^)
+        p.shader = shaders[i]
+        p.pso = dx.pipeline_create_graphics_pso(renderer_dx.render_context, renderer_dx.root_signature, p.shader, p.options)
+    }
+    log.infof("Shader reload: %v pipelines rebuilt", len(pipelines))
 }
 
 renderer_dx_wait_idle :: proc() {

@@ -8,18 +8,11 @@ import lua "vendor:lua/5.1"
 Lua_System :: struct {
     L: ^lua.State,
 
-    wire_hook: Lua_Hook,
-    start_hook: Lua_Hook,
-    update_hook: Lua_Hook,
-    end_hook: Lua_Hook,
+    // Engine hooks (引擎.开始/更新/完结 = Blimp.start/update/finish): registry refs, resolved once
+    // main.lua has run; <= 0 = none.
+    start, update, finish: c.int,
 }
 lua_system: Lua_System
-
-Lua_Hook :: struct {
-    ref: c.int,
-    table: cstring,
-    field: cstring,
-}
 
 lua_init :: proc() {
     lua_system.L = lua.L_newstate()
@@ -27,16 +20,47 @@ lua_init :: proc() {
         log.error("Failed to create Lua state")
         return
     }
+    L := lua_system.L
 
-    lua.L_openlibs(lua_system.L)
-    
-    lr := lua.L_dofile(lua_system.L, "assets_engine/scripts/setup.lua"); check_luar(lr, "Failed to load setup lua file", lua_system.L)
-    _lua_register_all_bindings(lua_system.L)
-    lr = lua.L_dofile(lua_system.L, "assets/scripts/main.lua"); check_luar(lr, "Failed to load main lua file", lua_system.L)
-    
-    lua_hook_call_direct(lua_system.L, "Blimp", "_wire")
-    
-    lua_system.update_hook = lua_hook_get(lua_system.L, "Blimp", "_update")
+    lua.L_openlibs(L)
+
+    lr := lua.L_dofile(L, "assets_engine/scripts/setup.lua"); check_luar(lr, "Failed to load setup lua file", L)
+    _lua_register_all_bindings(L)
+    lua_main_load()
+}
+
+LUA_MAIN_SCRIPT :: "assets/scripts/main.lua"
+
+// Runs main.lua and resolves the engine hooks it defines. At init, and again when it changes on disk
+// (asset_hot_reload.odin), which also reruns its start hook.
+lua_main_load :: proc() {
+    L := lua_system.L
+    for ref in ([]c.int{lua_system.start, lua_system.update, lua_system.finish}) do if ref > 0 do lua.L_unref(L, lua.REGISTRYINDEX, ref)
+    lua_system.start, lua_system.update, lua_system.finish = lua.NOREF, lua.NOREF, lua.NOREF
+
+    lr := lua.L_dofile(L, LUA_MAIN_SCRIPT); check_luar(lr, "Failed to load main lua file", L)
+
+    lua.getglobal(L, "Blimp")
+    lua_system.start  = lua_hook_ref(L, "start", "开始")
+    lua_system.update = lua_hook_ref(L, "update", "更新")
+    lua_system.finish = lua_hook_ref(L, "finish", "完结")
+    lua.pop(L, 1)
+}
+
+// Hot reload: the .lua at `path` (project-relative) changed on disk. Lua holds no state (CLAUDE.md), so
+// rerunning a script from the top is safe: every play world running it reloads it next frame, start
+// included, even one stopped by an error; main.lua reruns now.
+lua_reload_script :: proc(path: string) {
+    if lua_system.L == nil do return
+    for w in worlds do if w.play_source != nil && sbuf_str(&w.script.loaded) == path {
+        lua_world_script_unload(w)   // clears `loaded` and `failed`, so the next sync loads it again
+        log.infof("Hot reload: %v (%v)", path, w.title)
+    }
+    if path == LUA_MAIN_SCRIPT {
+        log.infof("Hot reload: %v", path)
+        lua_main_load()
+        lua_start()
+    }
 }
 
 lua_shutdown :: proc() {
@@ -47,15 +71,15 @@ lua_shutdown :: proc() {
 }
 
 lua_start :: proc() {
-    lua_hook_call_direct(lua_system.L, "Blimp", "_start")
+    if lua_system.start > 0 do lua_hook_call(lua_system.L, lua_system.start, "engine start")
 }
 
 lua_update :: proc(delta_sec: f64) {
-    lua_hook_call_f64(lua_system.L, lua_system.update_hook, delta_sec)
+    if lua_system.update > 0 do lua_hook_call(lua_system.L, lua_system.update, "engine update", delta_sec)
 }
 
 lua_finish :: proc() {
-    lua_hook_call_direct(lua_system.L, "Blimp", "_finish")
+    if lua_system.finish > 0 do lua_hook_call(lua_system.L, lua_system.finish, "engine finish")
 }
 
 //================================ Lua Functions =================================
@@ -75,56 +99,30 @@ lua_vec3_dot :: proc "c" (L: ^lua.State) -> c.int {
 }
 
 //================================ Helpers ====================================
-lua_hook_get :: proc(L: ^lua.State, table: cstring, field: cstring) -> Lua_Hook {
-    hook := Lua_Hook {
-        ref = lua.NOREF,
-        table = table,
-        field = field,
-    }
-
-    lua.getglobal(L, table)
-    lua.getfield(L, -1, field)
-    lua.remove(L, -2)
-
-    if lua.type(L, -1) != .FUNCTION {
-        lua.pop(L, 1)
-        return hook
-    }
-    hook.ref = lua.L_ref(L, lua.REGISTRYINDEX)
-    return hook
-}
-
-lua_hook_free :: proc(L: ^lua.State, hook: ^Lua_Hook) {
-    if hook.ref != lua.NOREF {
-        lua.L_unref(L, lua.REGISTRYINDEX, hook.ref)
-        hook.ref = lua.NOREF
-    }
-}
-
-lua_hook_call_direct :: proc(L: ^lua.State, table: cstring, field: cstring) {
-    lua.getglobal(L, table)
-    lua.getfield(L, -1, field)
-    lua.remove(L, -2)
-    if lua.isfunction(L, -1) {
-        rc := lua.pcall(L, 0, 0, 0); check_luar(rc, "Failed to call hook function", L)
-    } else {
+// A registry ref to the function `name_zh` or `name` in the table on top of the stack (lua.NOREF if
+// neither is one); the stack is left as it was. Raw lookups, so a field the table only inherits is
+// never a hook. Engine hooks (引擎.开始) and world hooks (世界.开始) both resolve this way.
+lua_hook_ref :: proc(L: ^lua.State, name, name_zh: cstring) -> c.int {
+    if !lua.istable(L, -1) do return lua.NOREF
+    for n in ([]cstring{name_zh, name}) {
+        lua.pushstring(L, n)
+        lua.rawget(L, -2)
+        if lua.isfunction(L, -1) do return lua.L_ref(L, lua.REGISTRYINDEX)
         lua.pop(L, 1)
     }
+    return lua.NOREF
 }
 
-lua_hook_call :: proc(L: ^lua.State, hook: Lua_Hook) {
-    if hook.ref == lua.NOREF do return
-
-    lua.rawgeti(L, lua.REGISTRYINDEX, lua.Integer(hook.ref))
-    rc := lua.pcall(L, 0, 0, 0); check_luar(rc, "Failed to call hook function", L)
-}
-
-lua_hook_call_f64 :: proc(L: ^lua.State, hook: Lua_Hook, param1: f64) {
-    if hook.ref == lua.NOREF do return
-
-    lua.rawgeti(L, lua.REGISTRYINDEX, lua.Integer(hook.ref))
-    lua.pushnumber(L, lua.Number(param1))
-    rc := lua.pcall(L, 1, 0, 0); check_luar(rc, "Failed to call hook function", L)
+// Calls a hook ref with its args. False (error logged, naming `what`) on a Lua error.
+lua_hook_call :: proc(L: ^lua.State, ref: c.int, what: string, args: ..f64) -> bool {
+    lua.rawgeti(L, lua.REGISTRYINDEX, lua.Integer(ref))
+    for a in args do lua.pushnumber(L, lua.Number(a))
+    if lua.pcall(L, c.int(len(args)), 0, 0) != 0 {
+        log.errorf("Lua error in %s: %s", what, lua.tostring(L, -1))
+        lua.pop(L, 1)
+        return false
+    }
+    return true
 }
 
 lua_arg_vec3 :: #force_inline proc "c"(L: ^lua.State, idx: c.int) -> ^vec3 {

@@ -59,6 +59,7 @@ ui_retarget_world :: proc(from, to: ^World) {
 ui_forget_world :: proc(w: ^World) {
     ui_world_settings_forget(w)
     ui_bake_forget(w)
+    ui_retro_forget(w)
     ui_context_menu_forget(w, nil)
     for &p in ui.panels do if p.pinned == w do p.pinned = nil
     if rename.world == w do rename = {}
@@ -279,7 +280,7 @@ ui_paste_over :: proc(w: ^World) {
     for h in selection_handles(w) {                             // every selected entity
         e := entity_get(w, h) or_continue
         entity_apply_text(e, clip, vmem.arena_allocator(&w.arena), {"identity", "placement"})
-        e.model = asset_model_key(e.model)                      // re-intern the pasted model key
+        entity_intern_keys(e)                                   // re-intern the pasted asset keys
     }
 }
 

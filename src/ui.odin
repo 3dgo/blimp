@@ -175,6 +175,7 @@ ui_update :: proc() {
     ui_draw_entity_panels()
     ui_draw_world_settings()
     ui_draw_bake()
+    ui_draw_retro()
     ui_draw_game_settings()
     ui_draw_templates()
     ui_draw_unsaved_prompt()   // the modal, if a close or quit is waiting on Save / Don't Save / Cancel

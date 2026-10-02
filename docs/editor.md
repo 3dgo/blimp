@@ -79,14 +79,19 @@
 - **Lua has two tiers** (`lua_world_script.odin`).
   - Engine hooks (`引擎.开始/更新/完结`) run for the whole session.
   - World scripts belong to a world and run only while it's open. The script is the world's
-    `[world] script` path; it defines `init()`/`初始化()` and `update(dt)`/`更新(时间差)`.
+    `[world] script` path; it defines `世界.开始()`/`World.start()` and `世界.更新(时间差)`/`World.update(dt)`,
+    like the engine's `引擎.开始`.
   - Each world script runs in its own environment (falls back to `_G`), so open worlds can't clobber
-    each other. Its hooks are plain functions in that environment, not fields of the shared `世界` table.
+    each other. Its `世界`/`World` is its own table falling back to the shared bindings, so the hooks
+    never land in the shared table.
   - `@(lua)` world/entity procs take no `^World`, since a world pointer can't be marshalled. They act
     on `lua_world()`: the world whose script is running, else `game_world`. That world is unrendered,
     isn't in `worlds`, and is what engine hooks act on.
   - World scripts run only in play worlds (next bullet). Init runs at Play, or when the script path
     changes. A script error logs once and stops that world's script.
+  - `World.time()` / `世界.时间()` is the play world's game clock (`World.time`, seconds since Play), advanced by
+    `world_play_tick` only on frames that tick, so pause and F10 step hold it. Scripts animate from it rather
+    than keep a clock of their own.
 - **Play mode runs a copy** (`world_play.odin`). Play builds a play world from the level (same entities
   and settings), and every view of the level switches to it. Stop switches them back and closes the copy.
   - The level is never touched while playing, so nothing from play can leak into it. This was chosen over
@@ -114,7 +119,8 @@
 - **Editor function keys** (`ui_handle_shortcuts`): F2 renames the active entity in place in the entity list,
   F3 toggles the stats overlay (FPS, GPU time per pass, on the foreground draw list), F11 maximizes the
   hovered viewport over the main window (its host keeps running underneath, so docking survives), and F9
-  relaunches the engine through the unsaved prompt. F12 is left to RenderDoc's capture key.
+  relaunches the engine through the unsaved prompt, with the same launch options. F12 is left to
+  RenderDoc's capture key.
     While playing, the viewport has a border (amber when paused) and the title shows ▶.
 - **World settings** (`World_Settings`) are the scene file's `[world]` section, written before the
   entities: background colour, exposure, script path, the light groups' starting values (docs/rendering.md → Light groups),
@@ -123,8 +129,13 @@
   - Only fields something reads; adding one is one line (reflection inspector + serializer).
   - Edited in the World Settings window (gear button on the viewport toolbar). Undo and unsaved
     tracking cover them.
-- **PS1 toggle** (grain icon on the viewport toolbar) flips that view's `Render_Mode` between the
-  PS1 look and a clean full-res render (`docs/rendering.md`). Per view, not saved, not undoable.
+  - The code button beside the gear opens the script in VS Code (`CODE_EDITOR`, `cmd /c <cli> <project> -g <script>`):
+    the project's window if one is open, else a new one on the project folder. A `.lua` built from a
+    `.luacn` opens the `.luacn`.
+- **Retro toggle** (grain icon on the viewport toolbar) flips that view's `Render_Mode` between the
+  retro look and a clean full-res render (`docs/rendering.md` → Retro look). Per view, not saved,
+  not undoable. Beside it, the tune icon opens the Retro Look window: the level's effect settings,
+  saved and undoable like World Settings.
   - Pasted text never touches them: only `scene_load` reads `[world]`.
 - **Lighting menu** (lightbulb on the viewport toolbar): that view's lighting debug view, probes on/off,
   indirect multiplier and the probe overlay, plus the world's light-group scales (runtime overrides like
@@ -196,7 +207,10 @@ built by `build.odin`) sends one text command and prints the reply. `blimpctl he
 worlds, open/save/close, entities/get/set/paste/delete/select, play/stop/pause, game, undo/redo, views/camera/frame/pick/menu, tool,
 timings (GPU time per pass, `render_gpu_timer.odin`), resources (every GPU resource by owner — assets, worlds,
 views, engine — the data behind the GPU Resources treemap window, `ui_resources.odin`), bake / probe (docs/rendering.md → Baker),
-screenshot (writes a PNG, replies with its path), and lua.
+screenshot (writes a PNG, replies with its path), sounds (clips and live voices), and lua.
+
+- `lua <code>` runs against `game_world`. `lua <world> -` (code on stdin) points the World / Entity calls at
+  that world: give a play world's index (`worlds`; it shares the level's title) to test collision and sound.
 
 - `screenshot <view>` is the view's render target: the 3D scene only. Icons, the gizmo and panels are ImGui,
   drawn later, so they need `screenshot ui`: the whole main window as shown, copied from the swapchain
@@ -206,6 +220,11 @@ screenshot (writes a PNG, replies with its path), and lua.
 - The reply's first line is `ok` or `error`. Entity text uses the scene `[entity]` format.
 - Use it to verify engine changes yourself, cheapest check first (the ladder in CLAUDE.md): text
   replies before screenshots. Don't hand back an unverified build when the engine can be driven.
+- **Launch options** are for what has to be decided before the D3D12 device exists: `--renderdoc`, and
+  `--gpu-validation` (D3D12 GPU-based validation, for a bad descriptor index or resource state; off by
+  default because it slows the first frame by seconds). `blimpctl restart [options...]` relaunches a running
+  engine with exactly those options (none = plain), and refuses while anything is unsaved. Remote sockets
+  aren't inherited, so the relaunched engine gets the port.
 - **RenderDoc** (`src/editor_renderdoc.odin`): it's active only when the engine is started with
   `--renderdoc`, or launched from RenderDoc, because it has to hook D3D12 before the device exists.
   - `blimpctl capture` captures the next frame (one `renderer_dx_update`) to `out/captures/*.rdc`

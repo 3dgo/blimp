@@ -11,6 +11,7 @@ import "core:net"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import win32 "core:sys/windows"
 import lua "vendor:lua/5.1"
 import stbi "vendor:stb/image"
 import "dx"
@@ -69,8 +70,16 @@ remote_init :: proc() {
         return
     }
     net.set_blocking(sock, false)
+    remote_no_inherit(sock)
     remote.listener, remote.running = sock, true
     log.infof("Remote control listening on 127.0.0.1:%v", REMOTE_PORT)
+}
+
+// Sockets are inheritable by default, and app_spawn_self inherits handles (for the console): a relaunched
+// engine would hold this one's port, and a client would never see its connection close.
+@(private="file")
+remote_no_inherit :: proc(sock: net.TCP_Socket) {
+    win32.SetHandleInformation(win32.HANDLE(uintptr(sock)), win32.HANDLE_FLAG_INHERIT, 0)
 }
 
 remote_shutdown :: proc() {
@@ -87,6 +96,7 @@ remote_poll :: proc() {
         sock, _, err := net.accept_tcp(remote.listener)
         if err != nil do break   // .Would_Block: nobody waiting
         net.set_blocking(sock, false)
+        remote_no_inherit(sock)
         append(&remote.clients, Remote_Client{socket = sock, opened = timer_sec_since_init()})
     }
 
@@ -224,13 +234,19 @@ Views  (<view> = view id, see 'views')
   game <view>                             game mode on a playing view (the window is the game, through its camera entity), or back (F8)
   stats [on|off]                          the FPS / GPU-per-pass overlay (F3)
   gameview <view>                         hide / show icons, outlines and the gizmo in the view (G)
+  retro <view> [on|off]                   get or set the view's render mode: the retro look, or clean (off);
+                                          the effects are the level's settings: settings <world> retro.crt.on true
   screenshot <view> [path.png]            save the view's last frame (the 3D scene only); replies with the file path
   screenshot ui [path.png]                save the whole main window as shown: views, icons, gizmo, every docked or
                                           floating panel (not panels dragged out into their own OS window)
   timings                                 CPU frame time + GPU time per pass (latest frame)
+  sounds                                  loaded sound clips, then each playing voice: clip, world, entity, volume, state
   tool [select|move|...] [global|local] [center|pivots]   get or set the viewport tool, gizmo space and pivot
   resources [show|hide]                   GPU resources by owner (assets, worlds, views, engine), largest first;
                                           shows/hides the GPU Resources window
+Engine
+  restart [--gpu-validation] [--renderdoc]   relaunch with exactly these launch options (none = plain);
+                                          refuses while anything is unsaved
 RenderDoc  (engine started with --renderdoc, or launched from RenderDoc)
   capture                                 capture the next frame; replies with the .rdc path
   captures                                list this session's captures
@@ -238,6 +254,8 @@ RenderDoc  (engine started with --renderdoc, or launched from RenderDoc)
 Lua
   lua <code...>                           run Lua (targets game_world); replies with its print()
                                           output, then return values as "=> value"
+  lua <world> -                           run the Lua on stdin with World / Entity acting on that world
+                                          (a playing level's play world, for collision and sound queries)
 `
 
 @(private="file")
@@ -311,7 +329,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         before := entity_to_text(e, context.temp_allocator)
         snapshot := e^
         deserialize_field(e, args[2], strings.join(args[3:], " ", context.temp_allocator), vmem.arena_allocator(&w.arena))
-        if args[2] == "model" do e.model = asset_model_key(e.model)
+        entity_intern_keys(e)
         world_fix_duplicate_name(w, e.handle)
         after := entity_to_text(e, context.temp_allocator)
         if after == before do return fmt.tprintf("nothing changed (unknown field '%s', or same value)", args[2])
@@ -477,6 +495,12 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         ui_game_view_toggle(v)
         fmt.sbprintf(out, "%s\n", editor_view(v).game_view ? "on" : "off")
 
+    case "retro":
+        // The toolbar's retro toggle; the target rebuilds next frame.
+        v := remote_view(args) or_return
+        if len(args) > 1 do v.mode = args[1] == "on" ? .Retro : .Clean
+        fmt.sbprintf(out, "%s\n", v.mode == .Retro ? "on" : "off")
+
     case "stats":
         // F3: the stats overlay.
         ui.show_stats = len(args) > 0 ? args[0] == "on" : !ui.show_stats
@@ -560,6 +584,29 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
             fmt.sbprintf(out, "gpu %-28s %.3f ms\n", label, t.ms)
         }
 
+    case "sounds":
+        if !sound_system.ok do return "no audio device"
+        fmt.sbprintf(out, "%v clips:", len(sound_system.clips))
+        for c in sound_system.clips do fmt.sbprintf(out, " %s", c.key)
+        strings.write_byte(out, '\n')
+        for &v, i in sound_system.voices {
+            if v.clip < 0 do continue
+            name := "-"
+            if e, ok := entity_get(v.world, v.entity); ok && v.entity != {} do name = sbuf_str(&e.name)
+            fmt.sbprintf(out, "voice %v  %s  world=%s  entity=%s  volume=%.2f  %s%s%s\n", i, sound_system.clips[v.clip].key, v.world.title, name, v.volume,
+                v.positional ? "positional " : "", v.looping ? "loop " : "", v.paused ? "paused" : "playing")
+        }
+
+    case "restart":
+        for a in args do switch a {
+        case "--gpu-validation", "--renderdoc":   // every launch option the engine reads
+        case: return fmt.tprintf("unknown launch option '%s' (known: --gpu-validation --renderdoc)", a)
+        }
+        for w in worlds do if world_dirty(w) do return fmt.tprintf("'%s' has unsaved changes: save it first", w.title)
+        log.infof("Remote: restarting with %v", args)
+        app_spawn_self(args)
+        app.quit_requested = true   // the main loop exits after this frame's UI; the reply goes out first
+
     case "capture":
         if !renderdoc_active() do return "RenderDoc isn't active: start the engine with --renderdoc (or launch it from RenderDoc)"
         renderdoc_request_capture()
@@ -587,7 +634,15 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
     case "lua":
         // print() output is captured into the reply while the code runs (and still echoed to the
         // console); return values follow, each as "=> value". The original print is restored after.
+        // With a body (blimpctl lua <world> -), the one argument names the world the World / Entity calls act on.
         code := len(args) > 0 ? strings.join(args, " ", context.temp_allocator) : body
+        target := &game_world
+        if body != "" && len(args) == 1 {
+            target = remote_world(args) or_return
+            code = body
+        }
+        prev := lua_world_target(target)
+        defer lua_world_target(prev)
         L := lua_system.L
         top := lua.gettop(L)
         defer lua.settop(L, top)

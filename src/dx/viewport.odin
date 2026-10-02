@@ -7,6 +7,7 @@ import "vendor:directx/dxgi"
 // A view's targets: the scene renders into `hdr_tex` + `depth_tex` at the scene size, the post chain
 // resolves that into `tex` at the display size, which ImGui samples. The scene size is the display
 // size divided by `scene_scale`, rounded up — the low-res look upscales by a whole number.
+// A retro view also has scene-size intermediates for its post chain (post_targets).
 Viewport_Options :: struct {
     init_width: u32,
     init_height: u32,
@@ -16,6 +17,7 @@ Viewport_Options :: struct {
     hdr_format: dxgi.FORMAT,   // the scene target the scene renders into (post chain input)
     depth_format: dxgi.FORMAT, // D32_FLOAT only: the depth buffer is also read as R32_FLOAT (depth_srv)
     clear_color: [4]f32,   // what the scene target clears to — also its optimized clear value, so the two can't drift
+    post_targets: bool,    // the retro post chain's scene-size intermediates (signal_tex, bloom_tex); a clean view has none
 
     ui_heap_srv: ^Descriptor_Heap,         // the display target's SRV, for ImGui
     resource_heap_srv: ^Descriptor_Heap,   // the scene target's and depth's SRVs, for the post chain (bindless)
@@ -28,7 +30,7 @@ Viewport :: struct {
     scene_height: u32,
 
     tex: Resource,
-    heap_rtv: Descriptor_Heap,   // [0] tex, [1] hdr_tex
+    heap_rtv: Descriptor_Heap,   // [0] tex, [1] hdr_tex, then signal_tex and bloom_tex
     rtv: Resource_View,
     srv: Resource_View,
 
@@ -40,6 +42,15 @@ Viewport :: struct {
     heap_dsv: Descriptor_Heap,
     dsv: Resource_View,
     depth_srv: Resource_View,   // for passes at the display size, which can't bind the scene-sized depth as a DSV
+
+    // The retro post chain's intermediates at the scene size (post_targets): the signal (display-space, the
+    // display format) and the bloom's two blur passes (the scene format).
+    signal_tex: Resource,
+    signal_rtv: Resource_View,
+    signal_srv: Resource_View,
+    bloom_tex: [2]Resource,
+    bloom_rtv: [2]Resource_View,
+    bloom_srv: [2]Resource_View,
 
     allocator: runtime.Allocator,
 
@@ -62,7 +73,7 @@ viewport_create :: proc(render_context: Render_Context, options: Viewport_Option
     viewport.height = options.init_height
     viewport.allocator = allocator
 
-    viewport.heap_rtv = descriptor_heap_create(render_context, {type = .RTV, cap = 2}, allocator)
+    viewport.heap_rtv = descriptor_heap_create(render_context, {type = .RTV, cap = 5}, allocator)
     viewport.heap_dsv = descriptor_heap_create(render_context, {type = .DSV, cap = 1}, allocator)
     viewport_targets_create(render_context, &viewport)
 
@@ -76,7 +87,7 @@ viewport_destroy :: proc(viewport: Viewport) {
 }
 
 // Recreates the targets at a new display size and scene scale. The GPU must be done with the old ones.
-viewport_resize :: proc(render_context: Render_Context, viewport: ^Viewport, width: u32, height: u32, scene_scale: u32) {
+viewport_resize :: proc(render_context: Render_Context, viewport: ^Viewport, width: u32, height: u32, scene_scale: u32, post_targets: bool) {
     viewport_targets_destroy(viewport^)
     descriptor_heap_reset(&viewport.heap_dsv)
     descriptor_heap_reset(&viewport.heap_rtv)
@@ -84,6 +95,7 @@ viewport_resize :: proc(render_context: Render_Context, viewport: ^Viewport, wid
     viewport.width = width
     viewport.height = height
     viewport.scene_scale = scene_scale
+    viewport.post_targets = post_targets
 
     viewport_targets_create(render_context, viewport)
 }
@@ -113,10 +125,32 @@ viewport_targets_create :: proc(render_context: Render_Context, viewport: ^Viewp
     viewport.srv       = descriptor_heap_register_srv(render_context, viewport.ui_heap_srv, viewport.tex)
     viewport.hdr_srv   = descriptor_heap_register_srv(render_context, viewport.resource_heap_srv, viewport.hdr_tex)
     viewport.depth_srv = descriptor_heap_register_srv(render_context, viewport.resource_heap_srv, viewport.depth_tex, .R32_FLOAT)
+
+    if !viewport.post_targets do return
+    viewport.signal_tex = texture2d_create(render_context, {format = viewport.format,
+        width = viewport.scene_width, height = viewport.scene_height, mip_levels = 1, heap_type = .DEFAULT,
+        flags = {.ALLOW_RENDER_TARGET}})
+    viewport.signal_rtv = descriptor_heap_register_rtv(render_context, &viewport.heap_rtv, viewport.signal_tex)
+    viewport.signal_srv = descriptor_heap_register_srv(render_context, viewport.resource_heap_srv, viewport.signal_tex)
+    for &t, i in viewport.bloom_tex {
+        t = texture2d_create(render_context, {format = viewport.hdr_format,
+            width = viewport.scene_width, height = viewport.scene_height, mip_levels = 1, heap_type = .DEFAULT,
+            flags = {.ALLOW_RENDER_TARGET}})
+        viewport.bloom_rtv[i] = descriptor_heap_register_rtv(render_context, &viewport.heap_rtv, t)
+        viewport.bloom_srv[i] = descriptor_heap_register_srv(render_context, viewport.resource_heap_srv, t)
+    }
 }
 
 @(private="file")
 viewport_targets_destroy :: proc(viewport: Viewport) {
+    if viewport.post_targets {
+        descriptor_heap_free(viewport.resource_heap_srv, viewport.signal_srv.heap_slot)
+        texture2d_destroy(viewport.signal_tex)
+        for t, i in viewport.bloom_tex {
+            descriptor_heap_free(viewport.resource_heap_srv, viewport.bloom_srv[i].heap_slot)
+            texture2d_destroy(t)
+        }
+    }
     descriptor_heap_free(viewport.ui_heap_srv, viewport.srv.heap_slot)
     descriptor_heap_free(viewport.resource_heap_srv, viewport.hdr_srv.heap_slot)
     descriptor_heap_free(viewport.resource_heap_srv, viewport.depth_srv.heap_slot)

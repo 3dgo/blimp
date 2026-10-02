@@ -2,6 +2,7 @@ package blimp
 
 import "core:fmt"
 import "core:log"
+import "core:os"
 import im "lib:odin-imgui"
 
 // Unsaved-changes guard. Closing a dirty scene world (its last view's window, or Close in the Worlds
@@ -132,7 +133,7 @@ unsaved_proceed :: proc() {
     case .Quit:        app.quit_requested = true
     case .Restart:
         log.info("Restarting after the unsaved-changes prompt")
-        app_spawn_self()
+        app_spawn_self(os.args[1:])
         app.quit_requested = true
     }
 }

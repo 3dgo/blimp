@@ -1,6 +1,7 @@
 package blimp
 
 import "core:fmt"
+import "core:math"
 import "core:mem"
 import im "lib:odin-imgui"
 import "dx"
@@ -55,9 +56,7 @@ ui_draw_bake :: proc() {
 
     // Settings: undo detected after the fact, as in the World Settings window.
     before := w.settings
-    opts := DEFAULT_PARAM_UI_OPTIONS
-    opts.headerless = true
-    ui_param_struct("bake", Bake_Settings, w.settings.bake, opts)
+    ui_bake_settings(w)
     if mem.compare_ptrs(&before, &w.settings, size_of(World_Settings)) != 0 && !bake_ui.editing {
         undo_push_settings_edited(w, before)
         bake_ui.editing = true
@@ -93,6 +92,87 @@ ui_draw_bake :: proc() {
         im.EndTooltip()
     }
     ui_probe_atlas_image(w, im.GetContentRegionAvail().x)
+}
+
+BAKE_QUALITY_LABELS := [Bake_Quality]Loc_ID{.Draft = .Bake_Quality_Draft, .Medium = .Bake_Quality_Medium, .High = .Bake_Quality_High, .Custom = .Bake_Quality_Custom}
+BAKE_BOUNDS_LABELS  := [Bake_Bounds]Loc_ID{.Auto = .Bake_Bounds_Auto, .Manual = .Bake_Bounds_Manual}
+BAKE_BOUNDS_COLOR   :: vec4{1, 0.85, 0.1, 1}   // the manual grid box in the level's views while this window is open
+
+// Bake_Settings as a form, drawn by hand: a quality preset fills rays and bounces (editing either makes it
+// Custom), rows that do nothing in the current mode are disabled or hidden.
+@(private="file")
+ui_bake_settings :: proc(w: ^World) {
+    b := &w.settings.bake
+    labels := [?]Loc_ID{.Bake_Quality, .Bake_Rays, .Bake_Bounces, .Bake_Sky, .World_Sky_Color, .World_Sky_Intensity,
+        .World_Probe_Spacing, .Bake_Bounds, .Bake_Bounds_Min, .Bake_Bounds_Max}
+    o := DEFAULT_PARAM_UI_OPTIONS
+    for id in labels do o.label_w = max(o.label_w, im.CalcTextSize(tr(id)).x)
+    o.label_w += 16 * app.dispaly_scale
+
+    im.SeparatorText(tr(.Bake_Section_Quality))
+    ui_param_label(string(tr(.Bake_Quality)), o)
+    if im.BeginCombo("##quality", tr(BAKE_QUALITY_LABELS[b.quality])) {
+        for q in Bake_Quality {
+            if !im.Selectable(tr(BAKE_QUALITY_LABELS[q]), q == b.quality) do continue
+            b.quality = q
+            if q != .Custom do b.rays, b.bounces = BAKE_QUALITY_PRESETS[q][0], BAKE_QUALITY_PRESETS[q][1]
+        }
+        im.EndCombo()
+    }
+    ui_param_label(string(tr(.Bake_Rays)), o)
+    if im.SliderInt("##rays", &b.rays, BAKE_RAYS_MIN, BAKE_RAYS_MAX, "%d", {.Logarithmic, .ClampOnInput}) do b.quality = .Custom
+    ui_param_label(string(tr(.Bake_Bounces)), o)
+    if im.SliderInt("##bounces", &b.bounces, 1, BAKE_BOUNCES_MAX, "%d", {.ClampOnInput}) do b.quality = .Custom
+
+    im.SeparatorText(tr(.Bake_Section_Sky))
+    ui_param_bool(string(tr(.Bake_Sky)), &b.sky, o)
+    im.BeginDisabled(!b.sky)
+    ui_param_color(string(tr(.World_Sky_Color)), &b.sky_color, true, o)
+    oi := o
+    oi.max = 1000
+    ui_param_f32(string(tr(.World_Sky_Intensity)), &b.sky_intensity, oi)
+    im.EndDisabled()
+
+    im.SeparatorText(tr(.Bake_Section_Grid))
+    os := o
+    os.min, os.max, os.format = 0.05, 100, "%.2f"
+    ui_param_f32(string(tr(.World_Probe_Spacing)), &b.probe_spacing, os)
+    ui_param_label(string(tr(.Bake_Bounds)), o)
+    if im.BeginCombo("##bounds", tr(BAKE_BOUNDS_LABELS[b.bounds])) {
+        for m in Bake_Bounds {
+            if !im.Selectable(tr(BAKE_BOUNDS_LABELS[m]), m == b.bounds) do continue
+            b.bounds = m
+            // A box that was never set starts as the one Auto would fill.
+            if m == .Manual && b.bounds_min == b.bounds_max {
+                if lo, hi, ok := bake_auto_bounds(w); ok do b.bounds_min, b.bounds_max = lo, hi
+            }
+        }
+        im.EndCombo()
+    }
+    if b.bounds != .Manual do return
+    ob := o
+    ob.speed, ob.format = 0.1, "%.2f"
+    ui_param_vec3(string(tr(.Bake_Bounds_Min)), &b.bounds_min, ob)
+    ui_param_vec3(string(tr(.Bake_Bounds_Max)), &b.bounds_max, ob)
+    if im.Button(tr(.Btn_Bake_Fit)) {
+        if lo, hi, ok := bake_auto_bounds(w); ok do b.bounds_min, b.bounds_max = lo, hi
+    }
+    // The probe count this box gives, as bake_probes sizes the grid; red over MAX_PROBES.
+    im.SameLine()
+    spacing := max(b.probe_spacing, 0.05)
+    count := 1
+    for a in 0..<3 do count *= int(math.ceil(max(b.bounds_max[a] - b.bounds_min[a], 0) / spacing)) + 1
+    text := fmt.ctprintf(string(tr(.Bake_Estimate)), count, MAX_PROBES)
+    if count > MAX_PROBES do im.TextColored({1, 0.35, 0.3, 1}, "%s", text)
+    else do im.TextDisabled("%s", text)
+}
+
+// The manual grid box as scene lines in the level's views (pick_view_debug_lines), while the Bake window
+// shows that level.
+editor_bake_bounds_lines :: proc(level: ^World) {
+    if bake_ui.world != level || level.settings.bake.bounds != .Manual do return
+    lo, hi := level.settings.bake.bounds_min, level.settings.bake.bounds_max
+    debug_box((lo + hi) * 0.5, (hi - lo) * 0.5, BAKE_BOUNDS_COLOR)
 }
 
 // The probe atlas at `width` (at most BAKE_ATLAS_MAX_SCALE× its pixels). The probe under the mouse gets a
