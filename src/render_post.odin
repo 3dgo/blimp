@@ -4,7 +4,7 @@ import "vendor:directx/d3d12"
 import "vendor:directx/dxgi"
 import "dx"
 
-// The post chain (docs/rendering.md: tonemap → LUT → quantize + dither → upscale), fullscreen passes
+// The post chain (claude/rendering.md: tonemap → LUT → quantize + dither → upscale), fullscreen passes
 // (post.slang): each view's linear HDR scene target → its display target, which ImGui samples as-is.
 //   .Retro  signal (scene size) → [bloom across → bloom down, scene size, CRT bloom on] → upscale (display size)
 //   .Clean  signal, straight into the display target (the scene is display-sized, nothing is quantized)

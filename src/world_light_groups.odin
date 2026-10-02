@@ -3,7 +3,7 @@ package blimp
 import "core:math"
 import "core:strings"
 
-// Light groups (docs/rendering.md → Lighting): every light belongs to one (Entity.light_group). Group 0 is
+// Light groups (claude/rendering.md → Lighting): every light belongs to one (Entity.light_group). Group 0 is
 // static and always at full strength. Groups 1–MAX_LIGHT_GROUPS can be scaled at runtime — the power goes
 // out, a candle flickers — and the scale applies to everything the light gives: its realtime direct light
 // (the light buffer) and its baked bounce (its own probe layer, editor_bake.odin). World_Settings saves

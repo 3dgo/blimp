@@ -208,7 +208,7 @@ asset_system_shutdown :: proc() {
     asset_keys = {}
 }
 
-// The light baker's surface colour per material (docs/rendering.md → Lighting): its colour times the average
+// The light baker's surface colour per material (claude/rendering.md → Lighting): its colour times the average
 // of its colour texture, averaged in linear, clamped to MAX_BAKE_ALBEDO so bounces converge.
 MAX_BAKE_ALBEDO :: 0.9
 
@@ -561,7 +561,7 @@ asset_system_import_gltf_models :: proc(path: string) {
     }
 }
 
-// Authored collision (docs/gameplay.md → Physics): a mesh named <model>_col in the same kit is <model>'s collision
+// Authored collision (claude/gameplay.md → Physics): a mesh named <model>_col in the same kit is <model>'s collision
 // (an entity's `collision = Collision_Mesh`, the default). Its vertices hold only its node's rotation and scale, like any model's, so
 // `offset` moves them from its own pivot to the model's (where the two nodes sit).
 COLLISION_SUFFIX :: "_col"

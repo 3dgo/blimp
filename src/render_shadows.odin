@@ -6,7 +6,7 @@ import "core:math/linalg"
 import "vendor:directx/d3d12"
 import "dx"
 
-// Realtime shadow maps (docs/rendering.md, Shadows): hard, point sampled, one depth texture array per world.
+// Realtime shadow maps (claude/rendering.md, Shadows): hard, point sampled, one depth texture array per world.
 // Every shadow is a slice with its own camera: a directional, spot or cylinder light takes one, a point
 // light six (a cube's faces, +X −X +Y −Y +Z −Z; the scene shader picks the face). Each frame the shadow
 // pass draws the world's drawn geometry into every slice in use; the scene pass then compares against

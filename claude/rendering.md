@@ -172,7 +172,7 @@ Start CPU-side into a dynamic vertex buffer.
 Debug builds enable the D3D12 debug layer and break on errors. GPU-based validation is off by
 default: it patches every PSO on first use (over 2 s on the first frame of the castle map) and
 slows every frame after. Launch with `--gpu-validation` (or `blimpctl restart --gpu-validation`)
-when chasing a bad descriptor index or resource state; docs/editor.md has the launch options.
+when chasing a bad descriptor index or resource state; claude/editor.md has the launch options.
 
 Slang caches each entry point's DXIL per session (`Slang_Compiler.entry_code`), so pipelines
 that share an entry point (every scene blend uses `vert_main`) compile it once. Shader hot

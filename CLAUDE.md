@@ -5,7 +5,7 @@ learning. Target art style is PS1-era "without the hardware limitations."
 
 ## Working agreement
 
-- Decisions in this file and in `docs/` are settled. Don't relitigate them or propose the
+- Decisions in this file and in `claude/` are settled. Don't relitigate them or propose the
   "standard" alternative unless something concrete has changed.
 - Prefer the simplest thing that solves the actual problem. Speculative generality is a
   bug. If a system isn't needed yet, don't build scaffolding for it.
@@ -18,15 +18,18 @@ learning. Target art style is PS1-era "without the hardware limitations."
 
 | File | Read when working on |
 |---|---|
-| `docs/editor.md` | editor UI, worlds, selection, clipboard, undo, play mode, function keys, icons and viewport drawing, remote commands, RenderDoc |
-| `docs/gameplay.md` | entities (camera/light fields), state rules, Lua boundary, sound, physics (Box3D) |
-| `docs/rendering.md` | buffers, indirect draws, skinning, particles, alignment, lighting/baker/shadows, PS1 post chain |
-| `docs/assets.md` | glTF import, kits, asset keys, texture sharing |
-| `docs/animation.md` | animation tree, events, procedural layer |
-| `docs/memory.md` | arenas and allocators in detail |
-| `docs/localization.md` | the loc table in detail |
+| `claude/editor.md` | editor UI, worlds, selection, clipboard, undo, play mode, function keys, icons and viewport drawing, remote commands, RenderDoc |
+| `claude/gameplay.md` | entities (camera/light fields), state rules, Lua boundary, sound, physics (Box3D) |
+| `claude/rendering.md` | buffers, indirect draws, skinning, particles, alignment, lighting/baker/shadows, PS1 post chain |
+| `claude/assets.md` | glTF import, kits, asset keys, texture sharing |
+| `claude/animation.md` | animation tree, events, procedural layer |
+| `claude/memory.md` | arenas and allocators in detail |
+| `claude/localization.md` | the loc table in detail |
+| `docs/lua.md` | the Lua/LuaCN scripting API as game scripters see it (Chinese guide, castle walkthrough); update it when an `@(lua)` proc changes |
 
 When a decision changes, update the doc that owns it. Only rules that apply everywhere live here.
+`claude/` holds these design docs (written for Claude); `docs/` is for human readers only — don't put
+design notes there.
 
 ## Language and style
 
@@ -77,7 +80,7 @@ When a decision changes, update the doc that owns it. Only rules that apply ever
   `game.ini`'s start level) with the DLLs and assets beside it.
 - Type-check only (faster): `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib -custom-attribute:lua,lua_zh,table,method,lua_ffi,as,lua_int`
 - A debug build serves `bin/blimpctl.exe` on `127.0.0.1:47800` (`blimpctl help`). Commands and the
-  RenderDoc workflow are in `docs/editor.md`.
+  RenderDoc workflow are in `claude/editor.md`.
 - **Verify with the cheapest check that proves the change**, in this order:
   1. type-check / build clean;
   2. blimpctl text replies (`get`, `pick`, `entities`, `views`, `timings`, `resources`);

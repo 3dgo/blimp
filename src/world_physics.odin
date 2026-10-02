@@ -6,7 +6,7 @@ import "core:math/linalg"
 import hm "core:container/handle_map"
 import b3 "vendor:box3d"
 
-// Collision (docs/gameplay.md → Physics — Box3D). Queries only so far: nothing is simulated, there are no
+// Collision (claude/gameplay.md → Physics — Box3D). Queries only so far: nothing is simulated, there are no
 // dynamic bodies, and Box3D's world is never stepped.
 //
 // A play world gets a Box3D world when Play starts, with a body for every enabled entity whose `collision` gives it

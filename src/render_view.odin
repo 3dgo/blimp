@@ -35,7 +35,7 @@ Render_View :: struct {
 // The scene target: linear, float, unclamped. Quantized only at the end of the post chain.
 VIEW_HDR_FORMAT :: dxgi.FORMAT.R16G16B16A16_FLOAT
 
-// How a view renders (docs/rendering.md, Retro look). Both run the same scene shaders and passes; the
+// How a view renders (claude/rendering.md, Retro look). Both run the same scene shaders and passes; the
 // mode picks the frame constants (sampler, snap, affine, quantize, CRT), the target's scene scale, and
 // whether the post chain runs its retro passes (render_post.odin).
 //   Retro — the PS1 and CRT effects of its level's Retro_Settings (each switchable, with its amounts)

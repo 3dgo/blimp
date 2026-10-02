@@ -11,6 +11,9 @@
     layout, the UI language and which project-wide windows are open (`ui_saved_state.odin`); world windows, views and entity
     panels belong to a world and aren't reopened. Worlds lists open worlds, scenes (`.level`
     files under `assets/` and `assets_engine/` only: the extension decides) and kits.
+  - **Show in Explorer** (`app_show_in_explorer`, Explorer with the file selected) is how a level or kit
+    gets edited outside the engine and resaved: right-click a row in Worlds, the folder button beside Save
+    on a viewport toolbar, or right-click a block in GPU Resources.
   - Closing a world or view is deferred to `world_registry_process_pending`, after
     `renderer_dx_wait_idle`.
 - **A kit is just a world built from a glTF.** There is no kit or preview world type.
@@ -123,9 +126,9 @@
   RenderDoc's capture key.
     While playing, the viewport has a border (amber when paused) and the title shows ▶.
 - **World settings** (`World_Settings`) are the scene file's `[world]` section, written before the
-  entities: background colour, exposure, script path, the light groups' starting values (docs/rendering.md → Light groups),
+  entities: background colour, exposure, script path, the light groups' starting values (claude/rendering.md → Light groups),
   and the probe bake's settings (`bake.*`, hidden here: they're
-  edited in the Probe Bake window, docs/rendering.md → Baker; baking isn't an edit — no undo, not unsaved).
+  edited in the Probe Bake window, claude/rendering.md → Baker; baking isn't an edit — no undo, not unsaved).
   - Only fields something reads; adding one is one line (reflection inspector + serializer).
   - Edited in the World Settings window (gear button on the viewport toolbar). Undo and unsaved
     tracking cover them.
@@ -133,15 +136,17 @@
     the project's window if one is open, else a new one on the project folder. A `.lua` built from a
     `.luacn` opens the `.luacn`.
 - **Retro toggle** (grain icon on the viewport toolbar) flips that view's `Render_Mode` between the
-  retro look and a clean full-res render (`docs/rendering.md` → Retro look). Per view, not saved,
+  retro look and a clean full-res render (`claude/rendering.md` → Retro look). Per view, not saved,
   not undoable. Beside it, the tune icon opens the Retro Look window: the level's effect settings,
   saved and undoable like World Settings.
   - Pasted text never touches them: only `scene_load` reads `[world]`.
 - **Lighting menu** (lightbulb on the viewport toolbar): that view's lighting debug view, probes on/off,
   indirect multiplier and the probe overlay, plus the world's light-group scales (runtime overrides like
-  Lua's, shared by its views, never saved; "Back to saved" clears them) (docs/rendering.md → Baker). Per view, not saved, not undoable;
+  Lua's, shared by its views, never saved; "Back to saved" clears them) (claude/rendering.md → Baker). Per view, not saved, not undoable;
   the button lights while anything differs from plain Lit. **GPU Resources** (Show menu, `ui_resources.odin`):
-  treemap of every GPU resource by owner — assets, each world, each view, engine.
+  treemap of every GPU resource by owner — assets, each world, each view, engine. Click a group to show
+  only it (Back / Backspace returns); texture tooltips show the picture (an ImGui-heap SRV per asset
+  texture, `asset_buffers.texture_ui`).
 - **The clipboard is the scene `[entity]` text format** (`entity_to_text` / `entity_apply_text` over
   the generic codec in `serialize.odin`).
   - One format backs save, duplicate, instantiate-from-kit and apply-settings. There is no drag
@@ -206,7 +211,7 @@ A debug build listens on `127.0.0.1:47800` (`src/editor_remote.odin`). `bin/blim
 built by `build.odin`) sends one text command and prints the reply. `blimpctl help` lists the commands:
 worlds, open/save/close, entities/get/set/paste/delete/select, play/stop/pause, game, undo/redo, views/camera/frame/pick/menu, tool,
 timings (GPU time per pass, `render_gpu_timer.odin`), resources (every GPU resource by owner — assets, worlds,
-views, engine — the data behind the GPU Resources treemap window, `ui_resources.odin`), bake / probe (docs/rendering.md → Baker),
+views, engine — the data behind the GPU Resources treemap window, `ui_resources.odin`), bake / probe (claude/rendering.md → Baker),
 screenshot (writes a PNG, replies with its path), sounds (clips and live voices), and lua.
 
 - `lua <code>` runs against `game_world`. `lua <world> -` (code on stdin) points the World / Entity calls at

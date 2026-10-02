@@ -6,7 +6,7 @@ import "core:math/linalg"
 import "core:time"
 import hm "core:container/handle_map"
 
-// The probe baker (docs/rendering.md → Lighting, Baker). A CPU ray tracer over the level's static
+// The probe baker (claude/rendering.md → Lighting, Baker). A CPU ray tracer over the level's static
 // geometry (a Scene_BVH of the entities that pass entity_bakes) fills a uniform grid of L2 SH irradiance
 // probes (render_probes.odin). Probes hold indirect light only — sky and bounces. Direct light stays
 // realtime, so each light reaches a probe only off a surface it lit.

@@ -18,11 +18,11 @@ the top of each frame, waits 0.3 s after the last change (Max writes `.bin` then
 - `.luacn` → transpiled to its `.lua` (`common.luacn_convert`, shared with the build's codegen); `.lua` →
   play worlds running it rerun it from the top, start included; `main.lua` reruns (`lua_reload_script`).
 
-**Collision models.** A mesh named `<model>_col` in a kit is `<model>`'s static collision (docs/gameplay.md →
+**Collision models.** A mesh named `<model>_col` in a kit is `<model>`'s static collision (claude/gameplay.md →
 Physics): imported like any model, cooked at load into Box3D mesh data (`asset_system.collision`, keyed by the
 *render* model), offset by where its node sits relative to the model's node, and left out of the kit's
 layout. It's never drawn. Authored in Max next to the visible mesh. It's what an entity with `collision = Collision_Mesh` (the
-default) collides as; an entity can use its render mesh or bounds instead (docs/gameplay.md → Physics).
+default) collides as; an entity can use its render mesh or bounds instead (claude/gameplay.md → Physics).
 
 **Sound clips** (`world_sound.odin`): every `.wav .ogg .mp3 .flac` under `assets/` and `assets_engine/`,
 decoded at startup by miniaudio, keyed by project path like a texture (`assets/sounds/door.wav`).

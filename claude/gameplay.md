@@ -74,7 +74,7 @@ for AI, not for sound. Odin is authoritative so script reload can't corrupt anyt
 Built (`world_sound.odin`):
 - miniaudio's `ma_engine` is the mixer and its thread. The lock-free queue is miniaudio's own: every
   `ma_sound_*` call from the game thread is an atomic post its node graph picks up.
-- Clips decode at startup (docs/assets.md). A voice is an `ma_sound_init_copy` of a clip, sharing its data.
+- Clips decode at startup (claude/assets.md). A voice is an `ma_sound_init_copy` of a clip, sharing its data.
   `MAX_VOICES` (32). Stealing takes the quietest at the listener (volume × linear falloff), oldest on a tie.
   A new sound quieter than all of them is dropped. Coalescing is `SOUND_COALESCE_SEC` (0.05) per clip; loops are exempt.
 - **On entities**: `sound` (a clip key, `widget:sound` picker), `volume`, `sound_flags` (Play On Start, Loop,
@@ -117,7 +117,7 @@ Built so far (`world_physics.odin`): **queries only**. Nothing is simulated and 
 - Per entity, `collision` (enum) picks the shape, cheapest first; it needs a model:
   - None.
   - Box: the model's bounds × scale, a box hull. The cheapest real collider.
-  - Collision_Mesh (default): the kit's `<model>_col` mesh, cooked at asset load (docs/assets.md). Authored, so as
+  - Collision_Mesh (default): the kit's `<model>_col` mesh, cooked at asset load (claude/assets.md). Authored, so as
     simple as the artist made it. Play logs one warning counting entities whose model has no `_col`.
   - Render_Mesh: every triangle of the model, cooked on first use and cached until the next asset reload
     (`asset_render_collision`). The most expensive; fine for low-poly levels.

@@ -9,7 +9,7 @@ import "core:strings"
 import "core:path/filepath"
 import vmem "core:mem/virtual"
 
-// Baked irradiance probes on a uniform grid (docs/rendering.md → Lighting). The baker (editor_bake.odin)
+// Baked irradiance probes on a uniform grid (claude/rendering.md → Lighting). The baker (editor_bake.odin)
 // fills a world's grid, the level's .probes sidecar stores it, and the scene shader samples it for
 // indirect light. A play world reads its level's grid (world_level), it never has its own.
 
@@ -26,7 +26,7 @@ Probe_Layer_Scales :: [MAX_PROBE_LAYERS]f32
 
 // One probe: L2 spherical harmonics of irradiance / π, 9 linear RGB coefficients. Divided by π so
 // albedo × sh_eval(N) is the bounced light leaving a surface, matching direct light's no-1/π convention
-// (docs/rendering.md → Lighting). Mirrors Probe in scene.slang (27 floats + pad: float arrays pack tightly).
+// (claude/rendering.md → Lighting). Mirrors Probe in scene.slang (27 floats + pad: float arrays pack tightly).
 Probe_SH :: struct {
     c:    [9]vec3,
     _pad: f32,

@@ -52,7 +52,7 @@ World_Settings :: struct {
     retro:      Retro_Settings `hidden`,  // saved as retro.* keys; edited in the Retro Look window (ui_retro.odin)
 }
 
-// The retro look (docs/rendering.md → Retro look): what a view in render mode .Retro does, effect by
+// The retro look (claude/rendering.md → Retro look): what a view in render mode .Retro does, effect by
 // effect. Views read their level's settings, so edits show live, in play too. Each effect has its switch
 // and its amounts; a group's `on` switches all of its effects. Drawn by hand in the Retro Look window.
 Retro_Settings :: struct {
@@ -104,7 +104,7 @@ RETRO_SETTINGS_DEFAULT :: Retro_Settings{
            gamma = 2.3, brightness = 1},
 }
 
-// The probe bake's inputs (editor_bake.odin, docs/rendering.md → Baker). Read by the baker only: a change
+// The probe bake's inputs (editor_bake.odin, claude/rendering.md → Baker). Read by the baker only: a change
 // shows after the next bake. Drawn by hand in the Bake window (ui_bake.odin), not by the reflection inspector.
 Bake_Settings :: struct {
     quality:       Bake_Quality,   // a preset sets rays and bounces; editing either makes it Custom

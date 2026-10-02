@@ -153,7 +153,7 @@ struct ShadowView {
 static const float SHADOW_NORMAL_OFFSET = 1.5;   // receivers move this many shadow texels along their normal: no acne
 
 // 1 where `light` reaches pos (facing N), 0 where something in its shadow map is in the way. Hard: one
-// point-sampled texel, no filtering (docs/rendering.md, Shadows). Unshadowed outside the light's map.
+// point-sampled texel, no filtering (claude/rendering.md, Shadows). Unshadowed outside the light's map.
 float shadow_visibility(Light light, float3 pos, float3 N) {
     if (light.shadowSlice == SHADOW_NONE) return 1;
     StructuredBuffer<ShadowView> views = DescriptorHandle<StructuredBuffer<ShadowView>>(gFrame.shadowViewBufferSlot);

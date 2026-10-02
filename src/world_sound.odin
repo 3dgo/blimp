@@ -9,7 +9,7 @@ import hm "core:container/handle_map"
 import ma "vendor:miniaudio"
 import "common"
 
-// Sound (docs/gameplay.md → Sound). miniaudio's engine mixes on its own audio thread; the game side is
+// Sound (claude/gameplay.md → Sound). miniaudio's engine mixes on its own audio thread; the game side is
 // fire-and-forget commands into a fixed pool of voices. A voice is a copy of a clip's ma.sound: every
 // ma_sound_* call is a lock-free post (atomics) to the mixer, so the game thread never touches mixer state.
 //

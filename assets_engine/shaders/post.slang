@@ -3,7 +3,7 @@ module post;
 import "utils";
 import "common";
 
-// The post chain (docs/rendering.md: tonemap → LUT → quantize + dither → upscale), fullscreen triangles
+// The post chain (claude/rendering.md: tonemap → LUT → quantize + dither → upscale), fullscreen triangles
 // (render_post.odin). A retro view:
 //   frag_signal   scene size: the HDR scene target → the signal (tonemapped, quantized + dithered,
 //                 display-space): what the PS1 sent the TV
