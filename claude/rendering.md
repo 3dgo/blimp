@@ -365,8 +365,8 @@ gives almost no levels.
 Art-directed per level: `World_Settings.retro` (`Retro_Settings`, saved as `retro.*` keys, undoable),
 edited in the Retro Look window (`ui_retro.odin`, the tune button beside the retro toggle, which
 flips the view between `.Retro` and `.Clean`). Two groups, each with its own `on`; every effect has
-its switch and its amounts. Views read the *level's* settings (`render_view_retro`), so edits show
-live, in play too. An effect that's off goes to the shader as 0 and is skipped.
+its switch and its amounts. A view reads the settings of the world it shows (`render_view_retro`): during
+play that's the play copy, whose edits go with it at Stop, like every other setting. An effect that's off goes to the shader as 0 and is skipped.
 
 - **PS1**: low resolution (`lines`: the whole-number scale closest to it), vertex jitter (grid in
   scene pixels), affine textures (warp), point sampling, colour depth (bits per channel + Bayer
