@@ -41,13 +41,13 @@ ui_handle_shortcuts :: proc() {
     if im.IsKeyPressed(.F2, false)  do ui_entity_rename_begin(w)        // inline in the entity list
     if im.IsKeyPressed(.F5, false)  do ui_play(target)                  // and shows it as the game
     if im.IsKeyPressed(.F6, false)  do world_pause_toggle(w)
-    if im.IsKeyPressed(.F7, false)  do world_stop(w)
+    if im.IsKeyPressed(.F7, false)  do app_stop(w)
     if im.IsKeyPressed(.F8, false)  do ui_game_enter(target)            // while playing: back to the game
     if im.IsKeyPressed(.F10, false) do world_step(w)                    // one frame, while paused
     if im.IsKeyPressed(.F11, false) do ui_maximize_toggle(target)
 
     if ctrl {
-        if im.IsKeyPressed(.S, false) do world_save(w)   // a play world has no save path: nothing is saved from play
+        if im.IsKeyPressed(.S, false) do world_save(world_level(w))   // during play, the level (as the toolbar's Save)
         return
     }
     if im.IsKeyPressed(.F, false) do editor_frame_selection(target_ev)

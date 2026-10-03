@@ -1,5 +1,6 @@
 package blimp
 
+import "core:mem"
 import hm "core:container/handle_map"
 
 // Undo is whole-world snapshots: before any edit, copy the world's entity map. The map is a fixed-size
@@ -53,6 +54,17 @@ undo_push_settings_edited :: proc(w: ^World, before: World_Settings) {
     undo_stack[len(undo_stack) - 1].settings = before
 }
 
+// Drops the latest snapshot of `w` if nothing changed since it was taken (entities and settings), putting
+// the state id back so the world isn't dirtied: for an edit that may turn out not to be one (blimpctl lua).
+undo_drop_if_unchanged :: proc(w: ^World) {
+    if len(undo_stack) == 0 do return
+    top := undo_stack[len(undo_stack) - 1]
+    if top.world != w || mem.compare_ptrs(top.entities, &w.entities, size_of(w.entities)) != 0 do return
+    if mem.compare_ptrs(&top.settings, &w.settings, size_of(w.settings)) != 0 do return
+    editor_world(w).state_id = top.state_id
+    undo_entry_free(pop(&undo_stack))
+}
+
 undo :: proc() {
     if len(undo_stack) == 0 || undo_locked(undo_stack[len(undo_stack) - 1]) do return
     entry := pop(&undo_stack)
@@ -78,7 +90,8 @@ undo_revert_last :: proc() {
 undo_capture :: proc(w: ^World) -> Undo_Entry {
     snapshot := new(Entity_Handle_Map)
     snapshot^ = w.entities
-    return {world = w, entities = snapshot, active = w.active, state_id = w.state_id, settings = w.settings}
+    ew := editor_world(w)
+    return {world = w, entities = snapshot, active = ew.active, state_id = ew.state_id, settings = w.settings}
 }
 
 // A level's steps wait while it's playing: its views show the play world, so undoing into the level
@@ -92,8 +105,9 @@ undo_locked :: proc(entry: Undo_Entry) -> bool {
 @(private="file")
 undo_restore :: proc(entry: Undo_Entry) {
     entry.world.entities = entry.entities^
-    entry.world.active = entry.active
-    entry.world.state_id = entry.state_id
+    ew := editor_world(entry.world)
+    ew.active   = entry.active
+    ew.state_id = entry.state_id
     entry.world.settings = entry.settings
     undo_entry_free(entry)
 }

@@ -67,7 +67,7 @@ worlds_browse :: proc(filter: string) {
             open := world_find_open(path)
             if worlds_row(ICON_SCENE, filepath.base(path), filepath.dir(path), open != nil ? tr(.Worlds_Opened_Tag) : nil) {
                 if open != nil do ui_world_focus(open)
-                else do world_open_scene(path)
+                else do app_open_scene(path)
             }
             worlds_row_menu(path)
             im.PopID()
@@ -87,7 +87,7 @@ worlds_browse :: proc(filter: string) {
             open := world_find_open(kit.path)
             if worlds_row(ICON_KIT, filepath.base(kit.path), filepath.dir(kit.path), open != nil ? tr(.Worlds_Opened_Tag) : nil) {
                 if open != nil do ui_world_focus(open)
-                else do world_open_kit(&kit)
+                else do app_open_kit(&kit)
             }
             worlds_row_menu(kit.path)
             im.PopID()
@@ -163,7 +163,7 @@ worlds_open_row :: proc(w: ^World) {
     by := mn.y + (mx.y - mn.y - im.GetFrameHeight()) * 0.5
     im.SameLine()
     im.SetCursorScreenPos({mx.x - close_w - style.ItemSpacing.x - add_w, by})
-    if im.Button(add_label) do view_open(w.play_world != nil ? w.play_world : w)   // while playing, another view of the game
+    if im.Button(add_label) do app_view_open(w.play_world != nil ? w.play_world : w)   // while playing, another view of the game
     im.SetItemTooltip("%s", tr(.Btn_New_Viewport))
     im.SameLine()
     im.SetCursorScreenPos({mx.x - close_w, by})
@@ -175,7 +175,7 @@ worlds_open_row :: proc(w: ^World) {
 ui_world_focus :: proc(w: ^World) {
     for v in views {
         if world_level(v.world) != w do continue   // its views show its play world while it plays
-        active_view = v
+        view_activate(v)
         im.SetWindowFocusStr(fmt.ctprintf("###host%d", v.id))   // its world window ("###view<id>" are extra viewports)
         return
     }

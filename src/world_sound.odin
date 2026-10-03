@@ -242,22 +242,21 @@ sound_world_stop :: proc(w: ^World) {
 
 // ============================ Per frame ============================
 
+// Where the ears are: the camera the player hears through (app_listener picks it).
+Sound_Listener :: struct {
+    position, forward: vec3,
+}
+
 // After the game systems: the listener, attached voices following their entities, pausing with their
 // world, and finished voices freed.
-sound_update :: proc() {
+sound_update :: proc(listener: Maybe(Sound_Listener)) {
     s := &sound_system
     if !s.ok do return
 
-    // The listener: the camera of the view showing a playing world, the game view's first.
-    listener_view: ^Render_View
-    for v in views do if v.world.play_source != nil && (listener_view == nil || v == ui.game) do listener_view = v
-    if listener_view == nil do listener_view = active_view
-    if lv := listener_view; lv != nil {
-        eye, fwd := camera_eye(lv.camera), camera_forward(lv.camera)
-        if e, ok := render_view_game_camera(lv); ok do eye, fwd = e.position, entity_forward(e)
-        s.listener = eye
-        ma.engine_listener_set_position(&s.engine, 0, eye.x, eye.y, -eye.z)
-        ma.engine_listener_set_direction(&s.engine, 0, fwd.x, fwd.y, -fwd.z)
+    if l, ok := listener.?; ok {
+        s.listener = l.position
+        ma.engine_listener_set_position(&s.engine, 0, l.position.x, l.position.y, -l.position.z)
+        ma.engine_listener_set_direction(&s.engine, 0, l.forward.x, l.forward.y, -l.forward.z)
     }
 
     for &v in s.voices {
@@ -302,29 +301,3 @@ voice_loudness :: proc(volume: f32, positional: bool, position: vec3, range: vec
     return volume * (1 - clamp((d - range.x) / max(range.y - range.x, 0.01), 0, 1))
 }
 
-// ============================ Lua ============================
-
-// Plays the entity's own sound (its Sound, Volume, Range and Sound Flags), following it. False if it
-// didn't start.
-@(lua=play_sound, table=Entity, lua_zh="播放声音")
-entity_play_sound_lua :: proc(handle: Entity_Handle) -> bool {
-    return entity_sound_play(lua_world(), handle) != {}
-}
-
-@(lua=stop_sound, table=Entity, lua_zh="停止声音")
-entity_stop_sound_lua :: proc(handle: Entity_Handle) {
-    entity_sound_stop(lua_world(), handle)
-}
-
-// A sound file (its project path) that isn't anywhere: music, UI, the same volume everywhere.
-@(lua=play_sound, table=World, lua_zh="播放声音")
-world_play_sound_lua :: proc(key: string, volume: f32 = 1) -> bool {
-    return sound_play(lua_world(), key, {volume = volume}) != {}
-}
-
-// A sound file at a point, fading out over SOUND_DEFAULT_RANGE. For something that moves, or a range of
-// its own, give an entity the sound and use Entity.play_sound.
-@(lua=play_sound_at, table=World, lua_zh="在位置播放声音")
-world_play_sound_at_lua :: proc(key: string, position: vec3, volume: f32 = 1) -> bool {
-    return sound_play(lua_world(), key, {position = position, positional = true, volume = volume, range = SOUND_DEFAULT_RANGE}) != {}
-}

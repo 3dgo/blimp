@@ -6,16 +6,60 @@ import "core:strconv"
 import "core:strings"
 import "core:reflect"
 
-// Generic, reflection-driven struct <-> INI-line serialization. No scene/Entity knowledge:
-// it operates on any struct via `any`, so the scene loader (world_scene.odin), the clipboard/undo
-// entity text round-trip (world_entity.odin), and future consumers all share one codec. Handles the
-// field types entities use (string, sbuf, bool, f32, float vectors, quaternion, bit_set flags,
-// integers, enums); extend the switches for more.
+// Every text format the engine reads and writes is INI: levels and the clipboard (world_scene.odin,
+// entity.odin), entity templates, game.ini, the entity schema (editor_schema.odin), blimpctl bodies.
+// This file is the one place that knows the syntax:
 //
-// Format: flat `key = value` lines; nested struct fields become dotted keys
-// ("transform.position"). Vectors and quaternions are comma-separated floats.
+// - ini_next reads lines: [section] headers and `key = value` pairs, skipping blanks and # ; comments.
+// - serialize_struct / deserialize_value convert any struct <-> those lines by reflection, with no
+//   knowledge of what the struct is. Nested struct fields become dotted keys ("light_groups.group_1.scale");
+//   vectors and quaternions are comma-separated floats. Handles the field types entities and settings use
+//   (string, sbuf, bool, f32, float vectors, quaternion, bit_set flags, integers, enums).
+//
+// Strings decoded from text are temp: a `string` field is an asset key everywhere it appears, and whoever
+// keeps one interns it (entity_intern_keys), so nothing is cloned into an arena that later strands it.
 
-// Recurses into nested struct fields, emitting their leaves as dotted keys ("transform.position")
+// One line of INI text that means something: a [section] header (header = true, `section` its name)
+// or a `key = value` pair.
+Ini_Line :: struct {
+    header:  bool,
+    section: string,
+    key:     string,
+    value:   string,
+}
+
+// Parses one raw line. ok = false for a blank line, a # or ; comment, or anything else.
+ini_line :: proc(raw: string) -> (line: Ini_Line, ok: bool) {
+    t := strings.trim_space(raw)
+    if len(t) == 0 || t[0] == '#' || t[0] == ';' do return
+    if t[0] == '[' && t[len(t) - 1] == ']' do return {header = true, section = strings.trim_space(t[1:len(t) - 1])}, true
+    eq := strings.index_byte(t, '=')
+    if eq < 0 do return
+    return {key = strings.trim_space(t[:eq]), value = strings.trim_space(t[eq + 1:])}, true
+}
+
+// Reads INI text line by line: `for line in ini_next(&r)`. r.section is the section the line is in
+// ("" before the first header); a header line sets it and is returned too, so block formats can flush.
+// Strings slice the text.
+Ini_Reader :: struct {
+    text:    string,
+    section: string,
+}
+
+ini_next :: proc(r: ^Ini_Reader) -> (line: Ini_Line, ok: bool) {
+    for raw in strings.split_lines_iterator(&r.text) {
+        line = ini_line(raw) or_continue
+        if line.header {
+            r.section = line.section
+        } else {
+            line.section = r.section
+        }
+        return line, true
+    }
+    return {}, false
+}
+
+// Recurses into nested struct fields, emitting their leaves as dotted keys ("light_groups.group_1.scale")
 // so the flat INI can round-trip composite types. Non-struct aggregates (vectors, quaternions,
 // sbuf, bit_sets) are leaves, written by serialize_value. A field tagged `noserialize` is skipped.
 serialize_struct :: proc(b: ^strings.Builder, value: any, prefix := "") {
@@ -42,7 +86,7 @@ type_is_struct :: proc(id: typeid) -> bool {
     return ok
 }
 
-// Resolves a dotted field path ("transform.position") within struct `root`, descending through
+// Resolves a dotted field path ("light_groups.group_1.scale") within struct `root`, descending through
 // nested struct fields. Returns an `any` aliasing the live leaf slot (so writes through it hit
 // `root`), or ok=false if any segment doesn't name a field. Shared by scene load and the Lua
 // entity accessors.
@@ -113,13 +157,11 @@ serialize_value :: proc(b: ^strings.Builder, v: any) {
 }
 
 // Parses a text value into a typed field (via `any`). Vectors/quaternions are comma-separated.
-// String fields are cloned with `allocator` — the arena of the world the value lands in — so they
-// outlive the temp read buffer and are freed with that world.
-deserialize_value :: proc(dst: any, text: string, allocator: runtime.Allocator) {
+// A string field gets a temp copy: the caller interns what it keeps (see the top of this file).
+deserialize_value :: proc(dst: any, text: string) {
     #partial switch info in type_info_of(dst.id).variant {
     case runtime.Type_Info_String:
-        // (Entity.model is additionally re-interned into the asset arena after load; see scene_load.)
-        (^string)(dst.data)^ = strings.clone(text, allocator)
+        (^string)(dst.data)^ = strings.clone(text, context.temp_allocator)
     case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:   // sbuf: inline, copies the bytes in (any size)
         sbuf_any_set(dst, text)
     case runtime.Type_Info_Boolean:
@@ -178,22 +220,11 @@ write_int_bits :: proc(dst: any, n: i64) {
 
 // Reads the `key = value` lines of the `[section]` sections in INI `text` into the struct `root`
 // (dotted keys reach nested fields). Unknown keys are skipped, so missing fields keep their values.
-ini_read_section :: proc(text: string, section: string, root: any, allocator: runtime.Allocator) {
-    in_section := false
-    txt := text
-    for line in strings.split_lines_iterator(&txt) {
-        t := strings.trim_space(line)
-        if len(t) == 0 || t[0] == '#' || t[0] == ';' do continue
-        if t[0] == '[' && t[len(t) - 1] == ']' {
-            in_section = strings.trim_space(t[1:len(t) - 1]) == section
-            continue
-        }
-        if !in_section do continue
-        eq := strings.index_byte(t, '=')
-        if eq < 0 do continue
-        if v, ok := struct_field_by_path(root, strings.trim_space(t[:eq])); ok {
-            deserialize_value(v, strings.trim_space(t[eq + 1:]), allocator)
-        }
+ini_read_section :: proc(text: string, section: string, root: any) {
+    r := Ini_Reader{text = text}
+    for line in ini_next(&r) {
+        if line.header || line.section != section do continue
+        if v, ok := struct_field_by_path(root, line.key); ok do deserialize_value(v, line.value)
     }
 }
 
@@ -205,13 +236,8 @@ text_field_value :: proc(text: string, key: string) -> (value: string, ok: bool)
     if trimmed == "" do return "", false
     if strings.index_byte(trimmed, '=') < 0 && strings.index_byte(trimmed, '\n') < 0 do return trimmed, true
 
-    txt := trimmed
-    for line in strings.split_lines_iterator(&txt) {
-        l := strings.trim_space(line)
-        eq := strings.index_byte(l, '=')
-        if eq < 0 || len(l) == 0 || l[0] == '#' || l[0] == ';' || l[0] == '[' do continue
-        if strings.trim_space(l[:eq]) == key do return strings.trim_space(l[eq + 1:]), true
-    }
+    r := Ini_Reader{text = trimmed}
+    for line in ini_next(&r) do if !line.header && line.key == key do return line.value, true
     return "", false
 }
 

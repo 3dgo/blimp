@@ -40,12 +40,12 @@
     - `debug_*` (`render_debug_draw.odin`): lines in the scene pass, depth-tested so geometry hides them, 1px.
       It has line, box, axes, circle, sphere, cone, arrow and frustum. Use it for things that live in the
       world, like a light's reach.
-    - `ui_overlay_*` (`ui_overlay.odin`): world-space shapes drawn with ImGui on top of one view, crisp and any
+    - `overlay_*` (`editor_overlay.odin`): world-space shapes drawn with ImGui on top of one view, crisp and any
       thickness. Lines are clipped at the near plane. It has line, polyline, circle, box, arrow, disc, a
       shaded cone and cube, text, and icon (a font-glyph sprite). Use it for tools and markers, such as
       the gizmo and the camera/light icons.
-      - Use it inside the view's window: `o := ui_overlay_begin(ev); defer ui_overlay_end(o)`.
-      - `ui_world_to_screen` lives there too.
+      - Use it inside the view's window: `o := overlay_begin(ev); defer overlay_end(o)`.
+      - `world_to_screen` lives there too.
   - Shared static asset GPU data lives in `Asset_Buffers` / `asset_buffers`.
   - Picking and each view's debug-line range are per view. Selection is per world (next bullet).
 - **Selection** (`editor_selection.odin`): membership is the entity's `selected` field (`hidden, noserialize`).

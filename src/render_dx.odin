@@ -35,6 +35,11 @@ Renderer_DX :: struct {
     frame_fence_gfx: dx.Fence,
 
     frame_val: u64,
+    frame: struct {   // the frame being recorded, between renderer_dx_draw_frame and renderer_dx_present
+        slot:       u64,   // frame_val % FRAMES_IN_FLIGHT: which per-flight resources it uses
+        backbuffer: u32,
+        t_frame, t_ui: int,   // open GPU timer scopes
+    },
 
     // Full-window screenshot (remote `screenshot ui`): set ui_shot_requested and the next frame copies the
     // swapchain image after the UI draws; ui_shot_frame (0 = none) is the frame_val to wait for before reading ui_shot.
@@ -203,96 +208,108 @@ renderer_dx_init :: proc() {
     dx.command_list_close(renderer_dx.cmd_gfx)
 }
 
-renderer_dx_update :: proc() {
+// The frame is three calls, so the app can draw the UI into the backbuffer in between without the
+// renderer knowing about the UI (app_run):
+//
+//   renderer_dx_draw_frame()   worlds' draw data, shadows, every view's scene + post + debug lines, and
+//                              the backbuffer cleared and bound — ready for the UI to draw into
+//   ui_draw(...)               (the app) ImGui's draw data into the backbuffer
+//   renderer_dx_submit()       the UI screenshot, end-of-frame state, submit
+//   ui_render_platform_windows (the app) windows dragged out of the main one
+//   renderer_dx_present()      present and signal
+//
+// Debug lines must be in debug_draw before renderer_dx_draw_frame (ui_view_debug_lines does the editor's).
+renderer_dx_draw_frame :: proc() {
+    f := &renderer_dx.frame
+
     //=== Frame sync: wait out this slot's in-flight frame, then reset its command recording ===
     renderer_dx.frame_val += 1
-    frame_slot := renderer_dx.frame_val % FRAMES_IN_FLIGHT
-    backbuffer_idx := renderer_dx.swapchain.frame_idx
+    f.slot       = renderer_dx.frame_val % FRAMES_IN_FLIGHT
+    f.backbuffer = renderer_dx.swapchain.frame_idx
 
     if renderer_dx.frame_val >= u64(FRAMES_IN_FLIGHT) {
         dx.fence_wait(renderer_dx.frame_fence_gfx, renderer_dx.frame_val - u64(FRAMES_IN_FLIGHT))
     }
-    gpu_timer_frame_begin(frame_slot)   // this slot's previous frame is done: publish its timings
+    gpu_timer_frame_begin(f.slot)   // this slot's previous frame is done: publish its timings
 
-    dx.command_allocator_reset(&renderer_dx.cmd_alloc_gfx[frame_slot])
-    dx.command_list_reset(renderer_dx.cmd_gfx, renderer_dx.cmd_alloc_gfx[frame_slot])
-    t_frame := gpu_timer_begin(renderer_dx.cmd_gfx, "frame")
-    dx.command_allocator_reset(&renderer_dx.cmd_alloc_copy[frame_slot])
-    dx.command_list_reset(renderer_dx.cmd_copy, renderer_dx.cmd_alloc_copy[frame_slot])
+    dx.command_allocator_reset(&renderer_dx.cmd_alloc_gfx[f.slot])
+    dx.command_list_reset(renderer_dx.cmd_gfx, renderer_dx.cmd_alloc_gfx[f.slot])
+    f.t_frame = gpu_timer_begin(renderer_dx.cmd_gfx, "frame")
+    dx.command_allocator_reset(&renderer_dx.cmd_alloc_copy[f.slot])
+    dx.command_list_reset(renderer_dx.cmd_copy, renderer_dx.cmd_alloc_copy[f.slot])
 
     //=== Worlds: rebuild each world's draw mirror once and stage it (copy queue) ===
     // Shared by every view of that world. Runtime spawns/removals appear next frame.
-    for w in worlds do world_render_upload(w, frame_slot)
+    for w in worlds do world_render_upload(w, f.slot)
 
     //=== Views: per-camera frame constants ===
-    for v in views do render_view_update_constants(v, frame_slot)
+    for v in views do render_view_update_constants(v, f.slot)
 
-    // Debug lines: each view's editor overlay (origin axes, pick ray/hit, selection box) as its own
-    // range of one shared list. Uploaded once, drawn per view below.
-    for v in views do pick_view_debug_lines(v)
-    debug_draw_upload(frame_slot)
+    // Debug lines: each view's range of one shared list, filled before the frame. Uploaded once, drawn per view below.
+    debug_draw_upload(f.slot)
 
     //=== gfx: make scene data shader-readable (per world, then shared assets once) ===
     t_barriers := gpu_timer_begin(renderer_dx.cmd_gfx, "barriers")
-    for w in worlds do world_render_begin(w, frame_slot)
+    for w in worlds do world_render_begin(w, f.slot)
     asset_buffers_begin()
     gpu_timer_end(renderer_dx.cmd_gfx, t_barriers)
 
     dx.command_list_close(renderer_dx.cmd_copy)
     dx.command_list_execute(renderer_dx.cmd_queue_copy, {renderer_dx.cmd_copy})
     dx.command_queue_signal(renderer_dx.cmd_queue_copy, renderer_dx.frame_fence_copy, renderer_dx.frame_val)
-    
+
     dx.command_queue_wait(renderer_dx.cmd_queue_gfx, renderer_dx.frame_fence_copy, renderer_dx.frame_val)
 
     //=== Shadow maps (one set per world, shared by its views) ===
     t_shadows := gpu_timer_begin(renderer_dx.cmd_gfx, "shadows")
-    for w in worlds do render_shadows_draw(w, frame_slot)
+    for w in worlds do render_shadows_draw(w, f.slot)
     gpu_timer_end(renderer_dx.cmd_gfx, t_shadows)
 
     //=== Scene passes (one per view → its target) ===
     for v in views {
         t_view := gpu_timer_begin(renderer_dx.cmd_gfx, fmt.tprintf("view %d (%s)", v.id, v.world.title))
-        render_view_draw(v, frame_slot)
+        render_view_draw(v, f.slot)
         render_post_draw(v)
         debug_draw_lines(renderer_dx.cmd_gfx, v.debug_first, v.debug_count)   // display target + constants still bound: after the post chain, so line colours stay exact
         gpu_timer_end(renderer_dx.cmd_gfx, t_view)
     }
     debug_draw_clear()
 
-    //=== UI pass (gfx → swapchain) ===
-    t_ui := gpu_timer_begin(renderer_dx.cmd_gfx, "ui")
+    //=== UI pass (gfx → swapchain): the backbuffer, cleared and bound for the app's ui_draw ===
+    f.t_ui = gpu_timer_begin(renderer_dx.cmd_gfx, "ui")
     for v in views do render_view_end(v)   // view targets become textures ImGui samples into its windows
 
     clear_color := [4]f32{0, 0, 0, 1.0}
-    
-    dx.texture_transition(renderer_dx.cmd_gfx, &renderer_dx.swapchain.back_buffers[backbuffer_idx], {.RENDER_TARGET}, {.RENDER_TARGET}, .RENDER_TARGET)
-    renderer_dx.cmd_gfx.handle->OMSetRenderTargets(1, &renderer_dx.swapchain.back_buffer_views[backbuffer_idx].cpu_handle, false, nil)
-    renderer_dx.cmd_gfx.handle->ClearRenderTargetView(renderer_dx.swapchain.back_buffer_views[backbuffer_idx].cpu_handle, &clear_color, 0, nil)
-    ui_draw()
-    gpu_timer_end(renderer_dx.cmd_gfx, t_ui)
+    dx.texture_transition(renderer_dx.cmd_gfx, &renderer_dx.swapchain.back_buffers[f.backbuffer], {.RENDER_TARGET}, {.RENDER_TARGET}, .RENDER_TARGET)
+    renderer_dx.cmd_gfx.handle->OMSetRenderTargets(1, &renderer_dx.swapchain.back_buffer_views[f.backbuffer].cpu_handle, false, nil)
+    renderer_dx.cmd_gfx.handle->ClearRenderTargetView(renderer_dx.swapchain.back_buffer_views[f.backbuffer].cpu_handle, &clear_color, 0, nil)
+}
+
+// After the UI drew into the backbuffer: closes and submits the frame.
+renderer_dx_submit :: proc() {
+    f := &renderer_dx.frame
+    gpu_timer_end(renderer_dx.cmd_gfx, f.t_ui)
     if renderer_dx.ui_shot_requested {   // the main window as shown: views, overlays and ImGui (not windows dragged out of it)
         renderer_dx.ui_shot_requested = false
-        if rb, ok := dx.texture_readback_record(renderer_dx.render_context, renderer_dx.cmd_gfx, &renderer_dx.swapchain.back_buffers[backbuffer_idx]); ok {
+        if rb, ok := dx.texture_readback_record(renderer_dx.render_context, renderer_dx.cmd_gfx, &renderer_dx.swapchain.back_buffers[f.backbuffer]); ok {
             renderer_dx.ui_shot, renderer_dx.ui_shot_frame = rb, renderer_dx.frame_val
         }
     }
 
-    dx.texture_transition(renderer_dx.cmd_gfx, &renderer_dx.swapchain.back_buffers[backbuffer_idx], {}, {.NO_ACCESS}, .PRESENT)
-    
-    //=== End-of-frame state reset ===
-    for w in worlds do world_render_end(w, frame_slot)
+    dx.texture_transition(renderer_dx.cmd_gfx, &renderer_dx.swapchain.back_buffers[f.backbuffer], {}, {.NO_ACCESS}, .PRESENT)
 
-    gpu_timer_end(renderer_dx.cmd_gfx, t_frame)
+    //=== End-of-frame state reset ===
+    for w in worlds do world_render_end(w, f.slot)
+
+    gpu_timer_end(renderer_dx.cmd_gfx, f.t_frame)
     gpu_timer_frame_resolve(renderer_dx.cmd_gfx)
 
-    //=== Submit & present ===
     dx.command_list_close(renderer_dx.cmd_gfx)
     dx.command_list_execute(renderer_dx.cmd_queue_gfx, {renderer_dx.cmd_gfx})
+}
 
-    ui_render_platform_windows()
-    
+renderer_dx_present :: proc() {
     dx.swapchain_present(&renderer_dx.swapchain)
-
     dx.command_queue_signal(renderer_dx.cmd_queue_gfx, renderer_dx.frame_fence_gfx, renderer_dx.frame_val)
 }
 

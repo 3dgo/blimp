@@ -53,7 +53,7 @@ ui_duplicate_selection :: proc(w: ^World) {
 ui_delete_selection :: proc(w: ^World) {
     if selection_count(w) == 0 do return
     undo_push(w)
-    for h in selection_handles(w) do world_remove(w, h)
+    for h in selection_handles(w) do selection_remove_entity(w, h)
 }
 
 ui_select_all :: proc(w: ^World) {
@@ -150,4 +150,17 @@ ui_context_menu :: proc() {
 ui_first_view_of :: proc(w: ^World) -> ^Render_View {
     for v in views do if v.world == w do return v
     return nil
+}
+
+// Override: make every selected entity look/behave like the clipboard entity WITHOUT becoming it or
+// moving — identity (name) and placement (transform) are always preserved. One undo step.
+ui_paste_over :: proc(w: ^World) {
+    clip := string(im.GetClipboardText())
+    if entity_count_blocks(clip) != 1 || selection_count(w) == 0 do return
+    undo_push(w)                                                // snapshot FIRST
+    for h in selection_handles(w) {                             // every selected entity
+        e := entity_get(w, h) or_continue
+        entity_apply_text(e, clip, {"identity", "placement"})
+        entity_intern_keys(e)                                   // re-intern the pasted asset keys
+    }
 }

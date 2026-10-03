@@ -32,7 +32,7 @@ ui_request_close_view :: proc(v: ^Render_View) {
     others := 0
     for o in views do if o != v && o.world == v.world do others += 1
     if level := world_level(v.world); others == 0 && world_dirty(level) {
-        v.open = true   // keep the window until the user decides
+        editor_view(v).window_open = true   // keep the window until the user decides
         unsaved = {kind = .Close_World, world = level}
         return
     }

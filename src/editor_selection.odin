@@ -1,7 +1,6 @@
 package blimp
 
 import hm "core:container/handle_map"
-import "core:math"
 import "core:math/linalg"
 
 // Editor selection. Membership is a flag on each entity (`selected`, hidden + noserialize): undo
@@ -21,8 +20,8 @@ selection_set :: proc(w: ^World, h: Entity_Handle, on: bool) {
     e, ok := entity_get(w, h)
     if !ok do return
     e.selected = on
-    if on do w.active = h
-    else if w.active == h do w.active = selection_first(w)
+    if on do editor_world(w).active = h
+    else if editor_world(w).active == h do editor_world(w).active = selection_first(w)
 }
 
 selection_toggle :: proc(w: ^World, h: Entity_Handle) {
@@ -32,7 +31,7 @@ selection_toggle :: proc(w: ^World, h: Entity_Handle) {
 selection_clear :: proc(w: ^World) {
     it := hm.iterator_make(&w.entities)
     for e, _ in hm.iterate(&it) do e.selected = false
-    w.active = {}
+    editor_world(w).active = {}
 }
 
 // Just `h` (nothing, if `h` isn't an entity).
@@ -74,7 +73,7 @@ entity_screen_rect :: proc(ev: ^Editor_View, e: ^Entity) -> (lo, hi: vec2, ok: b
     lo, hi = {max(f32), max(f32)}, {min(f32), min(f32)}
     for i in 0 ..< 8 {
         corner := vec3{(i & 1) != 0 ? mhi.x : mlo.x, (i & 2) != 0 ? mhi.y : mlo.y, (i & 4) != 0 ? mhi.z : mlo.z}
-        p, front := ui_world_to_screen(ev, transform_point(M, corner))
+        p, front := world_to_screen(ev, transform_point(M, corner))
         if !front do continue
         lo = linalg.min(lo, p)
         hi = linalg.max(hi, p)
@@ -157,7 +156,7 @@ selection_duplicate :: proc(w: ^World) -> (count: int) {
     for h in selection_handles(w) {
         copy := world_clone(w, h) or_continue   // the copy carries the selected flag
         if src, ok := entity_get(w, h); ok do src.selected = false
-        if w.active == h do w.active = copy
+        if editor_world(w).active == h do editor_world(w).active = copy
         count += 1
     }
     return
@@ -201,28 +200,6 @@ pick_entity :: proc(world: ^World, r: Ray) -> (Pick_Result, bool) {
     return best, found
 }
 
-// Appends `v`'s editor overlay to this frame's debug lines and records its range on the view: the
-// selection boxes, in every view of the world: the active entity pale green, the rest of the selection green.
-pick_view_debug_lines :: proc(v: ^Render_View) {
-    v.debug_first = u32(len(debug_draw.verts))
-    defer v.debug_count = u32(len(debug_draw.verts)) - v.debug_first
-    if editor_view(v).game_view || v == ui.game do return   // G or game mode: none of the editor's lines in this view
-    if editor_view(v).show_probes {
-        g := &world_level(v.world).probes   // a play world shows its level's, lit by its own group scales
-        probe_grid_debug_lines(g, probe_layer_scales(g, light_group_scales(v.world, timer_sec_since_start())), math.pow(2, v.world.settings.exposure))
-    }
-    editor_bake_bounds_lines(world_level(v.world))   // the manual bake box while the Bake window is open (ui_bake.odin)
-
-    it := hm.iterator_make(&v.world.entities)
-    for e, h in hm.iterate(&it) {
-        // Both bright enough to read on dark scenes; the active one paler (whiter), the rest saturated.
-        sel_color := h == v.world.active ? vec4{0.7, 1, 0.7, 1} : vec4{0.15, 0.9, 0.3, 1}
-        editor_entity_shapes(e, e.selected ? sel_color : nil)   // camera frustum / light reach (editor_shapes.odin)
-        if !e.selected || !entity_drawn(e) do continue          // hidden / disabled: no box either
-        pick_draw_entity_bounds(e, sel_color)
-    }
-}
-
 pick_draw_entity_bounds :: proc(e: ^Entity, color := vec4{0.2, 1, 0.3, 1}) {
     model, ok := asset_system.models[e.model]
     if !ok do return
@@ -237,4 +214,11 @@ pick_draw_entity_bounds :: proc(e: ^Entity, color := vec4{0.2, 1, 0.3, 1}) {
     }
     edges := [12][2]int{ {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} }
     for edge in edges do debug_line(c[edge[0]], c[edge[1]], color)
+}
+
+// The editor's delete: moves the active entity off `h` first, then removes it from `w`. (Lua's World.remove
+// goes straight to world_remove; a stale `active` just shows nothing until the next click.)
+selection_remove_entity :: proc(w: ^World, h: Entity_Handle) {
+    selection_set(w, h, false)
+    world_remove(w, h)
 }

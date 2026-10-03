@@ -14,8 +14,8 @@ import lua "vendor:lua/5.1"
 // Each script runs in its own environment — a table that falls back to _G — so two open worlds'
 // scripts can't clobber each other's globals. Its World (= 世界) is its own table too, falling back
 // to the shared World bindings, so World.find etc. work and its hooks never land in the shared table.
-// While a world's script runs, the @(lua) world/entity procs act on that world (lua_world()); engine
-// hooks (引擎.更新 …) still act on game_world.
+// While a world's script runs, the @(lua) world/entity procs (lua_api_*.odin) act on that world
+// (lua_world()). Engine hooks (引擎.更新 …) have no world: World/Entity procs called there log an error and do nothing.
 //
 // Lua never holds state that matters (CLAUDE.md): script edits to entities go straight into the
 // world. A script error is logged once and stops that world's script until it's changed or reopened.
@@ -27,16 +27,23 @@ Lua_World_Script :: struct {
     failed: bool,      // errored: stays stopped until the path changes
 }
 
-// The world the @(lua) world/entity procs act on: the one whose script is running, else game_world.
-lua_world :: proc() -> ^World {
-    return lua_current_world != nil ? lua_current_world : &game_world
+// The world the @(lua) world/entity procs act on: the one whose script is running (or the one blimpctl
+// pointed them at). Outside any, there is none: logs once per frame which proc needed one, and the proc
+// does nothing.
+lua_world :: proc(loc := #caller_location) -> (^World, bool) {
+    if lua_current_world != nil do return lua_current_world, true
+    if lua_no_world_frame != timer_frame_index() {
+        lua_no_world_frame = timer_frame_index()
+        log.errorf("Lua: %s needs a world; call it from a world script (World.start / World.update)", loc.procedure)
+    }
+    return nil, false
 }
 
-@(private="file")
-lua_current_world: ^World
+@(private="file") lua_current_world:  ^World
+@(private="file") lua_no_world_frame: u64 = max(u64)
 
-// Points the @(lua) world/entity procs at `w` (nil = game_world) and returns what they pointed at, to put back.
-// For running Lua from outside a world script (blimpctl lua <world>).
+// Points the @(lua) world/entity procs at `w` and returns what they pointed at, to put back.
+// For running Lua from outside a world script (blimpctl lua).
 lua_world_target :: proc(w: ^World) -> (prev: ^World) {
     prev = lua_current_world
     lua_current_world = w

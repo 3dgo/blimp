@@ -47,6 +47,14 @@ light_group_find :: proc(w: ^World, name: string) -> int {
 }
 
 // The scale before its flicker: the runtime override, else the saved value.
+// Sets group `name`'s runtime scale over the saved one (Lua, the Lighting menu); false if no group has that name.
+light_group_set_override :: proc(w: ^World, name: string, scale: f32) -> bool {
+    g := light_group_find(w, name)
+    if g == 0 do return false
+    w.light_group_override[g] = scale
+    return true
+}
+
 light_group_base_scale :: proc(w: ^World, g: int) -> f32 {
     if g == 0 do return 1
     if s, ok := w.light_group_override[g].?; ok do return s
@@ -71,20 +79,3 @@ light_pattern_value :: proc(pattern: string, time: f64) -> f32 {
     return f32(c - 'a') / f32('m' - 'a')
 }
 
-// Lua: sets a group's scale at runtime (0 = off, 1 = as saved/baked); false if no group has that name.
-@(lua=set_light_group, table=World, lua_zh="设光源组")
-world_set_light_group_lua :: proc(name: string, scale: f32) -> bool {
-    w := lua_world()
-    g := light_group_find(w, name)
-    if g == 0 do return false
-    w.light_group_override[g] = scale
-    return true
-}
-
-// Lua: a group's scale before its flicker (the runtime value if set, else the saved one); 0 if unknown.
-@(lua=light_group, table=World, lua_zh="光源组")
-world_light_group_lua :: proc(name: string) -> f32 {
-    w := lua_world()
-    g := light_group_find(w, name)
-    return g == 0 ? 0 : light_group_base_scale(w, g)
-}

@@ -1,31 +1,21 @@
 package blimp
 
 import "core:fmt"
-import "core:mem"
 import im "lib:odin-imgui"
 
-// Retro Look window: a level's retro settings (World_Settings.retro), effect by effect: what its views in
-// render mode .Retro show. Opened from the button beside the retro toggle in a viewport toolbar. Always the
-// level, never a play world; views read the level's settings, so edits show live, in play too. Edits are
-// undoable like World Settings.
+// Retro Look window: a world's retro settings (World_Settings.retro), effect by effect: what its views in
+// render mode .Retro show. Opened from the button beside the retro toggle in a viewport toolbar. Like World
+// Settings it shows the world the view shows (during play the play copy, whose edits go with it at Stop),
+// and edits are undoable the same way.
 @(private="file")
-retro_ui: struct {
-    world:   ^World,   // whose settings are shown; nil = window closed
-    editing: bool,     // an edit's undo step is open (closed once no widget is active)
-}
+retro_ui: Settings_Window
 
 RETRO_WINDOW_SIZE :: [2]f32{400, 700}   // first-open size (× display scale)
 
-ui_retro_toggle :: proc(level: ^World) {
-    retro_ui.world = retro_ui.world == level ? nil : level
-}
-
-ui_retro_open_for :: proc(level: ^World) -> bool { return retro_ui.world == level }
-
-// The world is closing.
-ui_retro_forget :: proc(w: ^World) {
-    if retro_ui.world == w do retro_ui = {}
-}
+ui_retro_toggle   :: proc(w: ^World) { settings_window_toggle(&retro_ui, w) }
+ui_retro_open_for :: proc(w: ^World) -> bool { return settings_window_open_for(&retro_ui, w) }
+ui_retro_retarget :: proc(from, to: ^World) { settings_window_retarget(&retro_ui, from, to) }
+ui_retro_forget   :: proc(w: ^World) { settings_window_forget(&retro_ui, w) }
 
 ui_draw_retro :: proc() {
     w := retro_ui.world
@@ -38,14 +28,9 @@ ui_draw_retro :: proc() {
     if !im.Begin(fmt.ctprintf("%s — %s###retro", tr(.Win_Retro), w.title), &open) do return
     ui_world_unsaved_note(w)
 
-    // Undo, detected after the fact, as in the World Settings window.
     before := w.settings
     ui_retro_settings(&w.settings.retro)
-    if mem.compare_ptrs(&before, &w.settings, size_of(World_Settings)) != 0 && !retro_ui.editing {
-        undo_push_settings_edited(w, before)
-        retro_ui.editing = true
-    }
-    if !im.IsAnyItemActive() do retro_ui.editing = false
+    settings_window_track_edit(&retro_ui, before)
 }
 
 // Two groups, PS1 and CRT, each with its switch; under it each effect's switch, and under that its amounts,

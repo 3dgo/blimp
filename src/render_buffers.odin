@@ -18,7 +18,7 @@ import "dx"
 // those arrays (buffers_build_scene), and the primitive that stages bytes into a resource
 // (buffers_resource_copy). The renderer owns the *frame timeline* — when each upload
 // happens, on which queue, and the barriers/fences that pair with it — so the per-frame
-// copies are driven from renderer_dx_update using the primitives here, right next to the
+// copies are driven from renderer_dx_draw_frame using the primitives here, right next to the
 // transitions they depend on. The one exception is buffers_upload_static, a one-time init
 // upload with no per-frame barrier pairing, which is cohesive enough to own outright.
 
@@ -97,25 +97,6 @@ Mesh_Instance_Data :: struct {
     tint: vec4,     // entity_tint, alpha 1: multiplies the albedo
 }
 #assert(size_of(Mesh_Instance_Data) == 32)
-
-// An entity's model colour multiplier: its `color` × `intensity` (white × 1 = as authored). A light reads
-// the same two fields as its own colour; one entity doesn't take both roles.
-entity_tint :: proc(entity: ^Entity) -> vec3 {
-    return entity.color * entity.intensity
-}
-
-// What an entity's shading means in `world`: Default is the level's.
-entity_shading :: proc(world: ^World, entity: ^Entity) -> ShadingModel {
-    switch entity.shading {
-    case .Default: return world.settings.shading
-    case .Unlit:   return .Unlit
-    case .Gouraud: return .Gouraud
-    case .Lambert: return .Lambert
-    case .Flat:    return .Flat
-    case .Phong:   return .Phong
-    }
-    return .Lambert
-}
 
 // One light entity, rebuilt each frame. Mirrors the Light struct in the shader.
 GPU_Light :: struct {
@@ -247,42 +228,6 @@ world_render_destroy :: proc(world: ^World) {
     delete(r.lights_data)
 }
 
-// The probe buffer (and the atlas texture, when there is one) for w.probes, staged next frame. Nothing when not baked.
-@(private="file")
-world_render_probes_create :: proc(w: ^World) {
-    if len(w.probes.probes) == 0 do return
-    w.render.probes = buffers_resource_create(size_of(Probe_SH), u32(len(w.probes.probes)), &renderer_dx.resource_heap)
-    w.render.probe_depth = buffers_resource_create(size_of(Probe_Depth), u32(len(w.probes.depth)), &renderer_dx.resource_heap)
-    if a := w.probes.atlas; len(a.pixels) > 0 {
-        w.render.probe_atlas    = buffers_texture_create(a.width, a.height, dx_format(a.format))
-        w.render.probe_atlas_ui = dx.descriptor_heap_register_srv(renderer_dx.render_context, &renderer_dx.ui_heap, w.render.probe_atlas.resource)
-    }
-    w.render.probes_upload = true
-}
-
-@(private="file")
-world_render_probes_destroy :: proc(w: ^World) {
-    if w.render.probes.resource.handle == nil do return
-    dx.descriptor_heap_free(&renderer_dx.resource_heap, w.render.probes.resource_view.heap_slot)
-    buffers_resource_destroy(w.render.probes)
-    dx.descriptor_heap_free(&renderer_dx.resource_heap, w.render.probe_depth.resource_view.heap_slot)
-    buffers_resource_destroy(w.render.probe_depth)
-    if w.render.probe_atlas.resource.handle != nil {
-        dx.descriptor_heap_free(&renderer_dx.resource_heap, w.render.probe_atlas.resource_view.heap_slot)
-        dx.descriptor_heap_free(&renderer_dx.ui_heap, w.render.probe_atlas_ui.heap_slot)
-        buffers_resource_destroy(w.render.probe_atlas)
-    }
-    w.render.probes, w.render.probe_depth, w.render.probe_atlas, w.render.probe_atlas_ui = {}, {}, {}, {}
-}
-
-// After w.probes is replaced on a world already on screen (a bake). Waits for the GPU, so call it
-// outside the frame (UI or remote command), never from renderer_dx_update.
-world_render_probes_recreate :: proc(w: ^World) {
-    renderer_dx_wait_idle()
-    world_render_probes_destroy(w)
-    world_render_probes_create(w)
-}
-
 // ============================ Scene build ============================
 
 // Rebuilds the entity-derived CPU arrays (transforms, mesh instances, draw commands) from
@@ -403,7 +348,7 @@ entity_gpu_light :: proc(entity: ^Entity) -> GPU_Light {
 
 // Uploads the asset buffers through the copy queue and waits for it, on a command list of its own so it
 // works between frames as well as at init. The entity buffers are staged per frame from
-// renderer_dx_update instead.
+// renderer_dx_draw_frame instead.
 asset_buffers_upload :: proc() {
     alloc := dx.command_allocator_create(renderer_dx.render_context, {type = .COPY})
     cmd   := dx.command_list_create(renderer_dx.render_context, alloc, {type = .COPY})
@@ -442,7 +387,7 @@ buffers_resource_copy :: proc(cmd: dx.Command_List, buffer: ^Resource_With_Uploa
 }
 
 // ====================== Frame timeline: per-world and shared stages ======================
-// renderer_dx_update decides *when* these run; they group the uploads and barriers by owner so a
+// renderer_dx_draw_frame decides *when* these run; they group the uploads and barriers by owner so a
 // frame stages each world once and transitions shared assets once, however many views draw them
 // (the per-view share lives in render_view.odin). A new World_Render buffer goes in all three
 // world_render_* procs.
@@ -505,7 +450,6 @@ asset_buffers_begin :: proc() {
 
 // ============================ Resource helpers ============================
 
-@(private="file")
 buffers_resource_create :: proc(element_size: u32, num_elements: u32, heap: ^dx.Descriptor_Heap) -> Resource_With_Upload {
     // D3D12 rejects a 0-byte resource; keep at least one element so an empty scene
     // (no instances/meshes) doesn't crash resource creation.
@@ -518,14 +462,12 @@ buffers_resource_create :: proc(element_size: u32, num_elements: u32, heap: ^dx.
     return r
 }
 
-@(private="file")
 buffers_resource_destroy :: proc(r: Resource_With_Upload) {
     dx.buffer_unmap(r.upload)
     dx.buffer_destroy(r.upload)
     dx.buffer_destroy(r.resource)
 }
 
-@(private="file")
 buffers_texture_create :: proc(width: u32, height: u32, format: dxgi.FORMAT) -> Resource_With_Upload {
     r: Resource_With_Upload
     r.resource = dx.texture2d_create(renderer_dx.render_context,
@@ -562,7 +504,6 @@ buffers_texture_copy :: proc(cmd: dx.Command_List, target: ^Resource_With_Upload
     dx.texture_transition(cmd, &target.resource, {}, {.NO_ACCESS}, .COMMON)
 }
 
-@(private="file")
 dx_format :: proc(format: Image_Format) -> dxgi.FORMAT {
     switch format {
         case .RGBA8: return .R8G8B8A8_UNORM

@@ -4,7 +4,6 @@ import "core:c"
 import hm "core:container/handle_map"
 import "core:fmt"
 import "core:log"
-import vmem "core:mem/virtual"
 import "core:math"
 import "core:math/linalg"
 import "core:net"
@@ -252,7 +251,7 @@ RenderDoc  (engine started with --renderdoc, or launched from RenderDoc)
   captures                                list this session's captures
   rdui [index]                            open a capture in RenderDoc (default: the latest)
 Lua
-  lua <code...>                           run Lua (targets game_world); replies with its print()
+  lua <code...>                           run Lua on the active world; replies with its print()
                                           output, then return values as "=> value"
   lua <world> -                           run the Lua on stdin with World / Entity acting on that world
                                           (a playing level's play world, for collision and sound queries)
@@ -285,11 +284,11 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         if w != nil {
             ui_world_focus(w)
         } else if ext == "gltf" || ext == "glb" {
-            for &kit in asset_system.kits do if kit.path == path { w = world_open_kit(&kit); break }
+            for &kit in asset_system.kits do if kit.path == path { w = app_open_kit(&kit); break }
             if w == nil do return fmt.tprintf("no loaded kit '%s' (kits are loaded at startup)", path)
         } else {
             if !os.exists(path) do return fmt.tprintf("no file '%s'", path)
-            w = world_open_scene(path)
+            w = app_open_scene(path)
         }
         for v in views do if v.world == w do fmt.sbprintf(out, "opened %s  view=%d\n", w.title, v.id)
 
@@ -309,7 +308,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         w := remote_world(args) or_return
         it := hm.iterator_make(&w.entities)
         for e, _ in hm.iterate(&it) {
-            fmt.sbprintf(out, "%s  model=%s  position=%v%s\n", sbuf_str(&e.name), e.model, e.position, w.active == e.handle ? "  [active]" : e.selected ? "  [selected]" : "")
+            fmt.sbprintf(out, "%s  model=%s  position=%v%s\n", sbuf_str(&e.name), e.model, e.position, editor_world(w).active == e.handle ? "  [active]" : e.selected ? "  [selected]" : "")
         }
 
     case "get":
@@ -328,7 +327,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         e := remote_entity(w, args[1]) or_return
         before := entity_to_text(e, context.temp_allocator)
         snapshot := e^
-        deserialize_field(e, args[2], strings.join(args[3:], " ", context.temp_allocator), vmem.arena_allocator(&w.arena))
+        deserialize_field(e, args[2], strings.join(args[3:], " ", context.temp_allocator))
         entity_intern_keys(e)
         world_fix_duplicate_name(w, e.handle)
         after := entity_to_text(e, context.temp_allocator)
@@ -351,7 +350,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         e := remote_entity(w, len(args) > 1 ? args[1] : "") or_return
         h := e.handle
         undo_push(w)
-        world_remove(w, h)
+        selection_remove_entity(w, h)
         fmt.sbprintf(out, "deleted\n")
 
     case "select":
@@ -382,7 +381,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
             before := w.settings
             v, ok := struct_field_by_path(w.settings, args[1])
             if !ok do return fmt.tprintf("no world setting '%s'", args[1])
-            deserialize_value(v, strings.join(args[2:], " ", context.temp_allocator), vmem.arena_allocator(&w.arena))
+            deserialize_value(v, strings.join(args[2:], " ", context.temp_allocator))
             undo_push_settings_edited(w, before)
         }
         serialize_struct(out, w.settings)
@@ -416,8 +415,8 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         // Play mode (world_play.odin) on a world's level: play, stop, or toggle pause.
         w := remote_world(args) or_return
         switch len(args) > 1 ? args[1] : "" {
-        case "":      world_play(w)
-        case "stop":  world_stop(w)
+        case "":      app_play(w)
+        case "stop":  app_stop(w)
         case "pause": world_pause_toggle(w)
         case "step":  world_step(w)
         case:         return "usage: play <world> [stop|pause|step]"
@@ -487,7 +486,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         v := remote_view(args) or_return
         if ui.game == v do ui_game_leave()
         else            do ui_game_enter(v)
-        fmt.sbprintf(out, "%s  camera=%v\n", ui.game == v ? "game" : "editor", v.game_camera)
+        fmt.sbprintf(out, "%s  camera=%v\n", ui.game == v ? "game" : "editor", v.camera_entity)
 
     case "gameview":
         // G: hide everything editor-only in the view, or show it again.
@@ -636,11 +635,15 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         // console); return values follow, each as "=> value". The original print is restored after.
         // With a body (blimpctl lua <world> -), the one argument names the world the World / Entity calls act on.
         code := len(args) > 0 ? strings.join(args, " ", context.temp_allocator) : body
-        target := &game_world
+        target := active_world()
         if body != "" && len(args) == 1 {
             target = remote_world(args) or_return
             code = body
         }
+        // Lua that changes a level is an edit like any other: undoable, and it dirties the level. A query
+        // changes nothing, so its snapshot is dropped again.
+        recorded := target != nil && undo_push(target)
+        defer if recorded do undo_drop_if_unchanged(target)
         prev := lua_world_target(target)
         defer lua_world_target(prev)
         L := lua_system.L

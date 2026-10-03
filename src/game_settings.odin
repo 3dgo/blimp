@@ -19,7 +19,7 @@ game_settings: Game_Settings
 game_settings_load :: proc() {
     data, err := os.read_entire_file(GAME_SETTINGS_PATH, context.temp_allocator)
     if err != nil do return   // no file yet: the defaults
-    ini_read_section(string(data), "game", game_settings, app.allocators.perm)
+    ini_read_section(string(data), "game", game_settings)
 }
 
 game_settings_save :: proc() {

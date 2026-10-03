@@ -66,7 +66,7 @@ design notes there.
   entity points into is replaced, never mutated in place.
 - **Play mode runs a copy** of the level; `world_level(w)` is the world that's edited and saved. Game
   systems check `w.ticks`, never `paused`.
-- **Viewport drawing at a 3D position** uses `debug_*` (depth-tested scene lines) or `ui_overlay_*`
+- **Viewport drawing at a 3D position** uses `debug_*` (depth-tested scene lines) or `overlay_*`
   (ImGui on top of one view), not ad hoc ImGui calls.
 - **Lua issues commands and queries state; it never holds state.**
 - **UI text** goes through `tr(.Key)` with EN and ZH on one row in `loc.odin` (default zh). Logs,

@@ -144,7 +144,7 @@ NAV_FLY_BOOST      :: 2        // Shift
 // Called from the view's window right after its image item (so `ev.hovered` is current).
 editor_navigate :: proc(ev: ^Editor_View) {
     c  := &ev.view.camera
-    io := ui.io
+    io := im.GetIO()
     ev.context_click = false
 
     if ev.nav.drag == .None && ev.hovered {
@@ -156,7 +156,7 @@ editor_navigate :: proc(ev: ^Editor_View) {
         }
         if ev.nav.drag != .None {
             im.SetWindowFocus()   // right/middle clicks don't focus a window on their own
-            active_view = ev.view
+            view_activate(ev.view)
             ev.nav.fly_travel, ev.nav.fly_moved = 0, false
         }
         if ev.nav.drag == .Pan do ev.nav.pan_depth = nav_pan_depth(ev)

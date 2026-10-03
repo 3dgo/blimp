@@ -4,6 +4,7 @@ import "common"
 import "base:runtime"
 import "core:fmt"
 import "core:math"
+import "core:math/linalg"
 import "core:os"
 import "core:sync"
 import "core:thread"
@@ -187,3 +188,25 @@ parallel_worker :: proc(job: ^Parallel_Job) {
         for i in start ..< min(start + PARALLEL_CHUNK, job.count) do job.body(job.data, i)
     }
 }
+
+// The 8 corners of the box lo..hi under transform M (corner i: x from bit 0, y from bit 1, z from bit 2).
+box_corners :: proc(M: mat4, lo, hi: vec3) -> (c: [8]vec3) {
+    for i in 0 ..< 8 {
+        p := vec3{(i & 1) != 0 ? hi.x : lo.x, (i & 2) != 0 ? hi.y : lo.y, (i & 4) != 0 ? hi.z : lo.z}
+        c[i] = transform_point(M, p)
+    }
+    return
+}
+
+// The axis-aligned bounds of the box lo..hi under transform M.
+box_transformed_bounds :: proc(M: mat4, lo, hi: vec3) -> (out_lo, out_hi: vec3) {
+    out_lo, out_hi = vec3(max(f32)), vec3(min(f32))
+    for c in box_corners(M, lo, hi) {
+        out_lo = linalg.min(out_lo, c)
+        out_hi = linalg.max(out_hi, c)
+    }
+    return
+}
+
+// The 12 edges of a box_corners box, as corner index pairs.
+BOX_EDGES :: [12][2]int{{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}}

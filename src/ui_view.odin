@@ -1,7 +1,9 @@
 package blimp
 
 import "core:fmt"
+import "core:math"
 import "core:math/linalg"
+import hm "core:container/handle_map"
 import im "lib:odin-imgui"
 import "dx"
 
@@ -80,9 +82,9 @@ ui_draw_views :: proc() {
             if ui_draw_host(h, title) do ui_draw_view(v, fmt.ctprintf("###view%d", v.id), nil)
         } else {
             ui_next_view_window_placement(v)
-            ui_draw_view(v, fmt.ctprintf("%s###view%d", title, v.id), &v.open)
+            ui_draw_view(v, fmt.ctprintf("%s###view%d", title, v.id), &editor_view(v).window_open)
         }
-        if !v.open do ui_request_close_view(v)   // asks first if it's the last view of an unsaved world
+        if !editor_view(v).window_open do ui_request_close_view(v)   // asks first if it's the last view of an unsaved world
     }
 }
 
@@ -145,7 +147,7 @@ ui_draw_host :: proc(h: ^World_Host, title: cstring) -> bool {
     ui_next_view_window_placement(v)
 
     im.PushStyleVarImVec2(im.StyleVar.WindowPadding, {0, 0})
-    visible := im.Begin(fmt.ctprintf("%s###host%d", title, v.id), &v.open)
+    visible := im.Begin(fmt.ctprintf("%s###host%d", title, v.id), &editor_view(v).window_open)
     im.PopStyleVar()
     ui_view_window_keep_size(editor_view(v))
 
@@ -191,9 +193,9 @@ ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_fl
         ev.screen_size = {f32(view.target.width), f32(view.target.height)}
         ev.hovered     = im.IsItemHovered()
         if !ev.game_view do editor_draw_icons(ev)   // camera / light icons, under the gizmo (editor_shapes.odin)
-        if !ev.game_view do editor_draw_probe_highlight(ev)   // the probe hovered in the Bake window's atlas (ui_bake.odin)
+        if !ev.game_view do ui_bake_probe_highlight(ev)   // the probe hovered in the Bake window's atlas (ui_bake.odin)
 
-        if im.IsWindowFocused() do active_view = view   // focusing a viewport makes its world active
+        if im.IsWindowFocused() do view_activate(view)   // focusing a viewport makes its world active
         editor_navigate(ev)
         gizmo_owns_mouse := !ev.game_view && gizmo_update(ev, ui.tool, ui.space, ui.pivot, ui.snap)   // G hides (and disables) it
 
@@ -298,4 +300,28 @@ ui_view_selection :: proc(ev: ^Editor_View, gizmo_owns_mouse: bool) {
     else          do selection_click(ev, m.start, op)
     // A plain double-click on an entity frames it (the first click already selected it), like F.
     if !m.dragging && m.double && op == .Replace && selection_count(w) > 0 do editor_frame_selection(ev)
+}
+
+// Appends `v`'s editor lines to this frame's debug lines and records its range on the view, which the
+// renderer then draws into that view only (app_run calls this for every view before rendering): baked
+// probes, the manual bake box, camera/light shapes, and the selection boxes — the active entity pale
+// green, the rest of the selection green.
+ui_view_debug_lines :: proc(v: ^Render_View) {
+    v.debug_first = u32(len(debug_draw.verts))
+    defer v.debug_count = u32(len(debug_draw.verts)) - v.debug_first
+    if editor_view(v).game_view || v == ui.game do return   // G or game mode: none of the editor's lines in this view
+    if editor_view(v).show_probes {
+        g := &world_level(v.world).probes   // a play world shows its level's, lit by its own group scales
+        probe_grid_debug_lines(g, probe_layer_scales(g, light_group_scales(v.world, timer_sec_since_start())), math.pow(2, v.world.settings.exposure))
+    }
+    ui_bake_bounds_lines(world_level(v.world))   // the manual bake box while the Bake window is open (ui_bake.odin)
+
+    it := hm.iterator_make(&v.world.entities)
+    for e, h in hm.iterate(&it) {
+        // Both bright enough to read on dark scenes; the active one paler (whiter), the rest saturated.
+        sel_color := h == editor_world(v.world).active ? vec4{0.7, 1, 0.7, 1} : vec4{0.15, 0.9, 0.3, 1}
+        editor_entity_shapes(e, e.selected ? sel_color : nil)   // camera frustum / light reach (editor_shapes.odin)
+        if !e.selected || !entity_drawn(e) do continue          // hidden / disabled: no box either
+        pick_draw_entity_bounds(e, sel_color)
+    }
 }

@@ -43,7 +43,7 @@ ui_draw_templates :: proc() {
 
     if im.SmallButton(fmt.ctprintf("%s %s", ICON_RENAME, tr(.Btn_Edit_Templates))) {
         if open := world_find_open(TEMPLATES_PATH); open != nil do ui_world_focus(open)
-        else do world_open_scene(TEMPLATES_PATH)
+        else do app_open_scene(TEMPLATES_PATH)
     }
     im.SameLine()
     if im.SmallButton(fmt.ctprintf("%s", ICON_REFRESH)) do templates_load()   // after saving edits to the file
@@ -125,7 +125,7 @@ templates_free :: proc() {
 templates_append :: proc(block: string) {
     e: Entity
     entity_apply_defaults(&e)
-    entity_apply_text(&e, block, context.temp_allocator)
+    entity_apply_text(&e, block)
     icon, _ := entity_icon(&e)
     name := sbuf_str(&e.name)
     loc, has_loc := reflect.enum_from_name(Loc_ID, fmt.tprintf("Template_%s", name))

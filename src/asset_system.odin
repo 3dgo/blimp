@@ -126,20 +126,13 @@ asset_system_init :: proc() {
     asset_system_load()
 }
 
-// Throws every asset away and loads them again from disk: the asset arena, and the GPU copies
-// (asset_buffers). Entities keep pointing at the same keys (asset_keys), so they pick up whatever the
-// files hold now; a key that no longer loads draws nothing, with a warning.
+// Throws every asset away and loads them again from disk. Only the asset part: app_reload_assets
+// (app_lifecycle.odin) rebuilds the GPU copies and play worlds' physics around it.
 asset_system_reload :: proc() {
-    renderer_dx_wait_idle()
-    asset_buffers_destroy()
-    physics_worlds_stop()   // their shapes point at the collision data about to go
     asset_collision_destroy()
     vmem.arena_destroy(&asset_system.arena)
     asset_system = {}
     asset_system_load()
-    asset_buffers_create()
-    asset_buffers_upload()
-    physics_worlds_start()
 }
 
 @(private="file")

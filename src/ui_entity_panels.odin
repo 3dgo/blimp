@@ -3,7 +3,6 @@ package blimp
 import "core:fmt"
 import "core:mem"
 import "core:strings"
-import vmem "core:mem/virtual"
 import hm "core:container/handle_map"
 import im "lib:odin-imgui"
 
@@ -43,29 +42,16 @@ ui_world_unsaved_note :: proc(w: ^World) {
     }
 }
 
-// Views switched from one world to another (Play / Stop, world_play.odin). Editor state pinned to the
-// old world follows, and drags in progress on those views end: they were editing the world being left.
-ui_retarget_world :: proc(from, to: ^World) {
+// Play / Stop moved the views from one world to the other: panels pinned to it follow, a rename ends.
+ui_entity_panels_retarget :: proc(from, to: ^World) {
     if rename.world == from do rename = {}
     for &p in ui.panels do if p.pinned == from do p.pinned = to
-    ui_world_settings_retarget(from, to)
-    ui_context_menu_forget(from, nil)
-    for v in views do if v.world == to {
-        ev := editor_view(v)
-        ev.gizmo.drag, ev.gizmo.pushed = .None, false
-        ev.marquee = {}
-    }
 }
 
-// A world is closing: panels pinned to it go back to following.
-ui_forget_world :: proc(w: ^World) {
-    ui_world_settings_forget(w)
-    ui_bake_forget(w)
-    ui_retro_forget(w)
-    ui_context_menu_forget(w, nil)
+// A world is closing: panels pinned to it go back to following, a rename in it ends.
+ui_entity_panels_forget :: proc(w: ^World) {
     for &p in ui.panels do if p.pinned == w do p.pinned = nil
     if rename.world == w do rename = {}
-    ui_unsaved_forget_world(w)
 }
 
 ui_draw_entity_panels :: proc() {
@@ -174,17 +160,17 @@ ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
             ends := 0
             rit := hm.iterator_make(&w.entities)
             for re, rh in hm.iterate(&rit) {
-                if rh == w.select_anchor || rh == h do ends += w.select_anchor == h ? 2 : 1
+                if rh == editor_world(w).select_anchor || rh == h do ends += editor_world(w).select_anchor == h ? 2 : 1
                 if ends > 0 && search_matches(sbuf_str(&re.name), search) do selection_set(w, rh, true)
                 if ends >= 2 do break
             }
             selection_set(w, h, true)   // the clicked one is active
         case ctrl:
             selection_toggle(w, h)
-            w.select_anchor = h
+            editor_world(w).select_anchor = h
         case:
             selection_only(w, h)
-            w.select_anchor = h
+            editor_world(w).select_anchor = h
         }
     }
 
@@ -209,9 +195,9 @@ rename: struct {
 
 // Starts renaming `w`'s active entity (F2, the right-click menu).
 ui_entity_rename_begin :: proc(w: ^World) {
-    e, ok := entity_get(w, w.active)
+    e, ok := entity_get(w, editor_world(w).active)
     if !ok do return
-    rename = {world = w, handle = w.active, focus = true}
+    rename = {world = w, handle = editor_world(w).active, focus = true}
     copy(rename.buf[:len(rename.buf) - 1], sbuf_str(&e.name))
 }
 
@@ -244,7 +230,7 @@ rename_row :: proc(p: ^Entity_Panel, w: ^World, h: Entity_Handle) {
 
 @(private="file")
 selection_has_anchor :: proc(w: ^World) -> bool {
-    _, ok := entity_get(w, w.select_anchor)
+    _, ok := entity_get(w, editor_world(w).select_anchor)
     return ok
 }
 
@@ -253,7 +239,7 @@ selection_has_anchor :: proc(w: ^World) -> bool {
 ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
     ui_world_unsaved_note(w)
 
-    e, ok := entity_get(w, w.active)
+    e, ok := entity_get(w, editor_world(w).active)
     if !ok do return
     if n := selection_count(w); n > 1 do im.TextDisabled("%s", fmt.ctprintf(string(tr(.Inspector_Multi)), n))
 
@@ -271,7 +257,7 @@ ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
     // The rest of the selection: the inspector shows where they differ, and edits apply to them too.
     others := make([dynamic]rawptr, context.temp_allocator)
     for h in selection_handles(w) {
-        if h == w.active do continue
+        if h == editor_world(w).active do continue
         if o, found := entity_get(w, h); found do append(&others, o)
     }
     defaults: Entity
@@ -287,14 +273,14 @@ ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
 
     // Names stay unique per world. Checked once nothing is being edited — not per keystroke, which
     // would rename "car" to "car_1" mid-word while typing "car_12".
-    if !im.IsAnyItemActive() do world_fix_duplicate_name(w, w.active)
+    if !im.IsAnyItemActive() do world_fix_duplicate_name(w, editor_world(w).active)
 
     // Undo for inspector edits, detected after the fact (the reflection widgets don't report edits):
     // the first frame the entity changes opens one step holding its pre-edit state, and the step stays
     // open while a widget is held, so a whole drag or a typed name is one Ctrl+Z.
     if mem.compare_ptrs(&before, e, size_of(Entity)) != 0 {
         if !ui.inspector_editing {
-            undo_push_edited(w, w.active, before)
+            undo_push_edited(w, editor_world(w).active, before)
             ui.inspector_editing = true
         }
         // Multi-edit, after the snapshot that covers it: just what changed on the active entity this frame
@@ -309,19 +295,6 @@ ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
 ui_panel_search_box :: proc(p: ^Entity_Panel, hint: cstring) {
     im.SetNextItemWidth(-1)
     im.InputTextWithHint("##search", fmt.ctprintf("%s  %s", ICON_SEARCH, hint), cstring(&p.search[0]), len(p.search))
-}
-
-// Override: make every selected entity look/behave like the clipboard entity WITHOUT becoming it or
-// moving — identity (name) and placement (transform) are always preserved. One undo step.
-ui_paste_over :: proc(w: ^World) {
-    clip := string(im.GetClipboardText())
-    if entity_count_blocks(clip) != 1 || selection_count(w) == 0 do return
-    undo_push(w)                                                // snapshot FIRST
-    for h in selection_handles(w) {                             // every selected entity
-        e := entity_get(w, h) or_continue
-        entity_apply_text(e, clip, vmem.arena_allocator(&w.arena), {"identity", "placement"})
-        entity_intern_keys(e)                                   // re-intern the pasted asset keys
-    }
 }
 
 // A one-line selectable with an icon column (blank when `icon` is "") and `name` after it, so names

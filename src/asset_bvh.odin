@@ -1,11 +1,10 @@
 package blimp
 
 import "core:math/linalg"
-import hm "core:container/handle_map"
 
 // Two levels, one builder. A Mesh_BVH holds one mesh's triangles in object space and is built once
-// per mesh at asset load. A Scene_BVH is the top level over a world's mesh instances (entity × mesh,
-// world-space bounds); its leaves send the ray into each instance's Mesh_BVH in object space, so
+// per mesh at asset load. A Scene_BVH is the top level over a set of mesh instances (entity × mesh,
+// world-space bounds) the caller picks; its leaves send the ray into each instance's Mesh_BVH in object space, so
 // instancing a mesh costs one leaf, not a copy of its triangles. Both are median-split over
 // primitive bounds (bvh_build_nodes).
 
@@ -67,44 +66,27 @@ bvh_build_for_mesh :: proc(m: Mesh, allocator := context.allocator) -> Mesh_BVH 
     return Mesh_BVH{nodes = nodes, tri_ids = ids, tris = tris}
 }
 
-// The top level over `w`'s mesh instances whose entity passes `include`. A snapshot: nothing keeps it
-// in step with later edits, so build it where it's used (the baker builds one per bake).
-scene_bvh_build :: proc(w: ^World, include: proc(e: ^Entity) -> bool, allocator := context.allocator) -> Scene_BVH {
-    instances := make([dynamic]BVH_Instance, 0, MAX_MESH_INSTANCES, context.temp_allocator)
-    lo := make([dynamic]vec3, 0, MAX_MESH_INSTANCES, context.temp_allocator)
-    hi := make([dynamic]vec3, 0, MAX_MESH_INSTANCES, context.temp_allocator)
-
-    it := hm.iterator_make(&w.entities)
-    for e, h in hm.iterate(&it) {
-        if !include(e) do continue
-        model, ok := asset_system.models[e.model]
-        if !ok do continue
-        M := entity_transform(e)
-        for mesh_idx in model.meshes {
-            bvh := &asset_system.mesh_bvhs[mesh_idx]
-            if len(bvh.nodes) == 0 do continue
-            if len(instances) == MAX_MESH_INSTANCES do break
-
-            // World bounds: the 8 corners of the mesh's object-space root box.
-            root := bvh.nodes[0]
-            wlo := vec3{max(f32), max(f32), max(f32)}
-            whi := vec3{min(f32), min(f32), min(f32)}
-            for i in 0..<8 {
-                c := vec3{(i & 1) != 0 ? root.max.x : root.min.x, (i & 2) != 0 ? root.max.y : root.min.y, (i & 4) != 0 ? root.max.z : root.min.z}
-                p := transform_point(M, c)
-                wlo = linalg.min(wlo, p)
-                whi = linalg.max(whi, p)
-            }
-            append(&instances, BVH_Instance{to_object = linalg.inverse(M), to_world = M, mesh = mesh_idx, entity = h})
-            append(&lo, wlo)
-            append(&hi, whi)
-        }
+// The top level over `instances` (entity × mesh pairs; to_object is filled in here). A snapshot: nothing
+// keeps it in step with later edits, so build it where it's used (the baker builds one per bake, from the
+// entities it wants: bake_scene_bvh). Instances whose mesh has no triangles are dropped.
+scene_bvh_build :: proc(instances: []BVH_Instance, allocator := context.allocator) -> Scene_BVH {
+    kept := make([dynamic]BVH_Instance, 0, len(instances), context.temp_allocator)
+    lo := make([dynamic]vec3, 0, len(instances), context.temp_allocator)
+    hi := make([dynamic]vec3, 0, len(instances), context.temp_allocator)
+    for inst in instances {
+        bvh := &asset_system.mesh_bvhs[inst.mesh]
+        if len(bvh.nodes) == 0 do continue
+        root := bvh.nodes[0]
+        wlo, whi := box_transformed_bounds(inst.to_world, root.min, root.max)   // world bounds of the mesh's root box
+        append(&kept, BVH_Instance{to_object = linalg.inverse(inst.to_world), to_world = inst.to_world, mesh = inst.mesh, entity = inst.entity})
+        append(&lo, wlo)
+        append(&hi, whi)
     }
 
     nodes, ids := bvh_build_nodes(lo[:], hi[:], SCENE_BVH_LEAF_SIZE, allocator)
-    s := Scene_BVH{nodes = nodes, inst_ids = ids, instances = make([]BVH_Instance, len(instances), allocator)}
-    copy(s.instances, instances[:])
-    return s
+    sc := Scene_BVH{nodes = nodes, inst_ids = ids, instances = make([]BVH_Instance, len(kept), allocator)}
+    copy(sc.instances, kept[:])
+    return sc
 }
 
 @(private="file")

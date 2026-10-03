@@ -13,7 +13,7 @@ Render_View :: struct {
     target: dx.Viewport,
     camera: Camera,
     world:  ^World,
-    game_camera: Entity_Handle,   // set (game mode): renders through this camera entity of `world` instead of `camera`
+    camera_entity: Entity_Handle,   // set (game mode): renders through this camera entity of `world` instead of `camera`
     mode: Render_Mode,            // the retro look (default) or a clean full-res render; the editor toggles it per view
     // Lighting debug (the editor's toolbar lighting menu; a game view keeps the defaults). Like `mode`, these only
     // pick frame constants.
@@ -25,7 +25,6 @@ Render_View :: struct {
     frame_constants_ptr: [FRAMES_IN_FLIGHT]rawptr,
 
     id:   u32,    // stable id: its ImGui window ("###view<id>" / "###host<id>") and blimpctl's <view>
-    open: bool,   // its window's open flag — the user closing the window closes the view
 
     // Editor interaction (screen rect, navigation, gizmo, marquee) lives on the matching
     // Editor_View (editor_view.odin), not here.
@@ -50,11 +49,11 @@ Render_Mode :: enum u8 { Retro, Clean }
 //   Lighting_Only — direct + indirect on white
 Lighting_View :: enum u32 { Lit, Probes_Only, Indirect_Only, Direct_Only, Lighting_Only }
 
-// The retro effects this view shows: its level's settings (edited live, in play too), with a group that's
+// The retro effects this view shows: its world's settings, like every other setting, with a group that's
 // off zeroed; all zero in .Clean.
 render_view_retro :: proc(view: ^Render_View) -> (ps1: Retro_PS1, crt: Retro_CRT) {
     if view.mode == .Clean do return
-    r := world_level(view.world).settings.retro
+    r := view.world.settings.retro
     if r.ps1.on do ps1 = r.ps1
     if r.crt.on do crt = r.crt
     return
@@ -96,12 +95,13 @@ render_view_resize :: proc(view: ^Render_View, width, height: u32) {
     dx.viewport_resize(renderer_dx.render_context, &view.target, width, height, render_view_scene_scale(view, {width, height}), view.mode == .Retro)
 }
 
-// The camera entity `view` renders through, if it has one that's still a camera in its world. When it
-// doesn't (none set, or the game deleted it), the view renders through its editor camera.
-render_view_game_camera :: proc(view: ^Render_View) -> (^Entity, bool) {
-    if view.game_camera == {} do return nil, false
-    e, ok := entity_get(view.world, view.game_camera)
-    return e, ok && e.camera_type != .None
+// The camera entity `view` renders through, if it has one that can still be the game camera
+// (entity_is_game_camera). When it doesn't (none set, or the game deleted or disabled it), the view
+// renders through its free `camera`.
+render_view_camera_entity :: proc(view: ^Render_View) -> (^Entity, bool) {
+    if view.camera_entity == {} do return nil, false
+    e, ok := entity_get(view.world, view.camera_entity)
+    return e, ok && entity_is_game_camera(e)
 }
 
 // ============================ Per-frame ============================
@@ -180,7 +180,7 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         scales := probe_layer_scales(g, light_group_scales(world, timer_sec_since_start()))   // this world's: a play world's power cut
         for s, k in scales do frame_constants.probe_layer_scale[k / 4][k % 4] = s
     }
-    if e, ok := render_view_game_camera(view); ok {
+    if e, ok := render_view_camera_entity(view); ok {
         frame_constants.view_mat = entity_camera_view(e)
         frame_constants.proj_mat = entity_camera_proj(e, aspect)
         frame_constants.camera_pos = e.position

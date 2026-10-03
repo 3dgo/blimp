@@ -106,7 +106,7 @@ gizmo_update :: proc(ev: ^Editor_View, tool: Edit_Tool, space: Gizmo_Space, pivo
     w := ev.view.world
     // The gizmo acts on the whole selection. Its axes come from the active entity; it sits on the
     // pivot the mode picks — the selection centre, or the active entity's own pivot.
-    e, ok := entity_get(w, w.active)
+    e, ok := entity_get(w, editor_world(w).active)
     if !ok || tool == .Select {
         g.drag = .None
         if ok do gizmo_draw(ev, .Select, e.position, gizmo_axes(.Select, space, e.rotation), gizmo_world_length(ev, e.position))
@@ -135,7 +135,7 @@ gizmo_update :: proc(ev: ^Editor_View, tool: Edit_Tool, space: Gizmo_Space, pivo
         } else if !im.IsMouseDown(.Left) {
             g.drag = .None
         } else {
-            target, moved := gizmo_drag(ev, g, tool, space, axes, mouse, snap.enabled != ui.io.KeyCtrl, snap)
+            target, moved := gizmo_drag(ev, g, tool, space, axes, mouse, snap.enabled != im.GetIO().KeyCtrl, snap)
             changed := target.position != g.start.position || target.rotation != g.start.rotation || target.scale != g.start.scale
             if moved && (changed || g.pushed) {   // once the drag has changed anything, keep applying (even back to no change)
                 if !g.pushed {
@@ -147,7 +147,7 @@ gizmo_update :: proc(ev: ^Editor_View, tool: Edit_Tool, space: Gizmo_Space, pivo
             }
         }
         g.hot = g.drag
-    } else if ev.hovered && ev.nav.drag == .None && !ui.io.KeyAlt {
+    } else if ev.hovered && ev.nav.drag == .None && !im.GetIO().KeyAlt {
         axes := gizmo_axes(tool, space, e.rotation)
         g.hot = gizmo_hit_test(ev, tool, pivot, axes, gizmo_world_length(ev, pivot), mouse)
         if g.hot != .None && im.IsMouseClicked(.Left) do gizmo_begin(ev, g, tool, e^, pivot, axes, mouse)
@@ -290,8 +290,8 @@ gizmo_project :: proc(ev: ^Editor_View, h: Gizmo_Handle, origin: vec3, axes: [3]
     #partial switch h {
     case .X, .Y, .Z:
         a := axes[gizmo_axis_index(h)]
-        o2 := ui_world_to_screen(ev, origin) or_return
-        t2 := ui_world_to_screen(ev, origin + a * gizmo_world_length(ev, origin)) or_return
+        o2 := world_to_screen(ev, origin) or_return
+        t2 := world_to_screen(ev, origin + a * gizmo_world_length(ev, origin)) or_return
         d2 := t2 - o2
         len2 := linalg.dot(d2, d2)
         if len2 < 4 do return   // under 2 px on screen: seen end-on
@@ -354,7 +354,7 @@ ray_plane :: proc(ray: Ray, origin, n: vec3) -> (vec3, bool) {
 
 @(private="file")
 gizmo_hit_test :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec3, length: f32, mouse: vec2) -> Gizmo_Handle {
-    o, ook := ui_world_to_screen(ev, origin)
+    o, ook := world_to_screen(ev, origin)
     if !ook do return .None
     s := app.dispaly_scale
     best, best_d := Gizmo_Handle.None, f32(GIZMO_HIT_PX) * s
@@ -373,14 +373,14 @@ gizmo_hit_test :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3
         }
         for i in 0 ..< 3 {
             if gizmo_axis_alpha(ev, origin, axes[i], length) < 0.5 do continue
-            tip, tok := ui_world_to_screen(ev, origin + axes[i] * (length * GIZMO_GRAB_REACH))   // a little past the cone's apex
+            tip, tok := world_to_screen(ev, origin + axes[i] * (length * GIZMO_GRAB_REACH))   // a little past the cone's apex
             if !tok do continue
             if d := dist_to_segment(mouse, o, tip); d < best_d do best, best_d = Gizmo_Handle(int(Gizmo_Handle.X) + i), d
         }
     case .Scale:
         if in_center do return .Center
         for i in 0 ..< 3 {
-            tip, tok := ui_world_to_screen(ev, origin + axes[i] * (length * GIZMO_GRAB_REACH))   // a little past the cube
+            tip, tok := world_to_screen(ev, origin + axes[i] * (length * GIZMO_GRAB_REACH))   // a little past the cube
             if !tok do continue
             if d := dist_to_segment(mouse, o, tip); d < best_d do best, best_d = Gizmo_Handle(int(Gizmo_Handle.X) + i), d
         }
@@ -399,10 +399,10 @@ gizmo_hit_test :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3
 
 @(private="file")
 gizmo_draw :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec3, length: f32) {
-    o, ok := ui_world_to_screen(ev, origin)
+    o, ok := world_to_screen(ev, origin)
     if !ok do return
-    ov := ui_overlay_begin(ev)   // ui_overlay.odin
-    defer ui_overlay_end(ov)
+    ov := overlay_begin(ev)   // editor_overlay.odin
+    defer overlay_end(ov)
     dl := ov.dl
 
     g := &ev.gizmo
@@ -438,7 +438,7 @@ gizmo_draw :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec
         for i in 0 ..< 3 {
             axis_len := length
             if tool == .Scale && ev.gizmo.drag != .None do axis_len *= ev.gizmo.stretch[i]
-            tips[i], tip_ok[i] = ui_world_to_screen(ev, origin + axes[i] * axis_len)
+            tips[i], tip_ok[i] = world_to_screen(ev, origin + axes[i] * axis_len)
             if !tip_ok[i] do continue
             col := color(g, &lit, axis_handle(i), AXIS_COLORS[i])
             im.DrawList_AddLine(dl, o, tips[i], col, thickness)
@@ -473,11 +473,11 @@ gizmo_draw :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec
             side := color_v(g, &lit, h, AXIS_COLORS[i], a)
             col  := im.ColorConvertFloat4ToU32(side)
             cone_base := origin + axes[i] * (length * (1 - GIZMO_CONE_LEN))
-            b2 := ui_world_to_screen(ev, cone_base) or_continue
+            b2 := world_to_screen(ev, cone_base) or_continue
             im.DrawList_AddLine(dl, o, b2, col, 2)
             cap := vec4{side.r * 0.55, side.g * 0.55, side.b * 0.55, side.a}   // the base disc: darker, highlighted or not
-            ui_overlay_cone(ov, cone_base, axes[i], length * GIZMO_CONE_LEN, length * GIZMO_CONE_RADIUS, side, cap)
-            tip := ui_world_to_screen(ev, origin + axes[i] * length) or_continue
+            overlay_cone(ov, cone_base, axes[i], length * GIZMO_CONE_LEN, length * GIZMO_CONE_RADIUS, side, cap)
+            tip := world_to_screen(ev, origin + axes[i] * length) or_continue
             if dir := tip - o; linalg.length(dir) > 1 {
                 label_size := im.CalcTextSize(AXIS_NAMES[i])
                 at := tip + linalg.normalize(dir) * GIZMO_LABEL_PX * app.dispaly_scale - label_size * 0.5
@@ -500,9 +500,9 @@ gizmo_draw :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec
         for i in 0 ..< 3 {
             axis_len := length * (g.drag != .None ? g.stretch[i] : 1)
             // Outer face at the axis end, so Scale reaches exactly as far as Move and clears the label.
-            ui_overlay_cube(ov, origin + axes[i] * (axis_len - length * GIZMO_CUBE_HALF), axes, length * GIZMO_CUBE_HALF, color_v(g, &lit, axis_handle(i), AXIS_COLORS[i]))
+            overlay_cube(ov, origin + axes[i] * (axis_len - length * GIZMO_CUBE_HALF), axes, length * GIZMO_CUBE_HALF, color_v(g, &lit, axis_handle(i), AXIS_COLORS[i]))
         }
-        ui_overlay_cube(ov, origin, axes, length * GIZMO_CENTER_CUBE_HALF, color_v(g, &lit, .Center, {0.75, 0.75, 0.75, 1}))
+        overlay_cube(ov, origin, axes, length * GIZMO_CENTER_CUBE_HALF, color_v(g, &lit, .Center, {0.75, 0.75, 0.75, 1}))
     }
 
     // While dragging: what the drag has done so far, on a dark plate below-right of the centre.
@@ -551,7 +551,7 @@ gizmo_ring_points :: proc(ev: ^Editor_View, f: Ring_Frame, origin: vec3, length:
     for s in 0 ..= GIZMO_RING_SEGMENTS {
         t := f32(s) / GIZMO_RING_SEGMENTS * 2 * math.PI
         p := origin + (f.u * math.cos(t) + f.v * math.sin(t)) * radius
-        pts[s], _ = ui_world_to_screen(ev, p)
+        pts[s], _ = world_to_screen(ev, p)
         if s < GIZMO_RING_SEGMENTS {
             mid := t + math.PI / GIZMO_RING_SEGMENTS
             front[s] = linalg.dot(f.u * math.cos(mid) + f.v * math.sin(mid), to_eye) >= -1e-4 * linalg.length(to_eye)
@@ -606,7 +606,7 @@ gizmo_plane_quad :: proc(ev: ^Editor_View, origin: vec3, axes: [3]vec3, length: 
         origin + u * GIZMO_PLANE_HI + v * GIZMO_PLANE_HI,
         origin + u * GIZMO_PLANE_LO + v * GIZMO_PLANE_HI,
     }
-    for c, i in corners do q[i] = ui_world_to_screen(ev, c) or_return
+    for c, i in corners do q[i] = world_to_screen(ev, c) or_return
     return q, true
 }
 
@@ -667,8 +667,8 @@ gizmo_apply :: proc(w: ^World, g: ^Gizmo_State, tool: Edit_Tool, pivot_mode: Giz
 // length shrinks), where Unity hides it — dragging along it there would be all jitter.
 @(private="file")
 gizmo_axis_alpha :: proc(ev: ^Editor_View, origin, axis: vec3, length: f32) -> f32 {
-    o, ook := ui_world_to_screen(ev, origin)
-    t, tok := ui_world_to_screen(ev, origin + axis * length)
+    o, ook := world_to_screen(ev, origin)
+    t, tok := world_to_screen(ev, origin + axis * length)
     if !ook || !tok do return 0
     r := linalg.length(t - o) / (GIZMO_SIZE_PX * app.dispaly_scale)
     return clamp((r - 0.12) / 0.15, 0, 1)

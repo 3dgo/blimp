@@ -17,6 +17,7 @@ Editor_View :: struct {
     remote_context: Maybe(vec2),   // a right-click at this view pixel requested by blimpctl `menu`
     gizmo:   Gizmo_State,   // transform gizmo hover/drag (editor_gizmo.odin)
     marquee: struct { pressing, dragging, double: bool, start: vec2 },   // left-press selection in progress (ui_view_selection); double: the press was a double-click
+    window_open: bool,      // its window's open flag: the user closing the window closes the view
     placed:  bool,          // its window got its first-frame floating placement (ui_next_view_window_placement)
     icon_hidden: [MAX_ENTITIES]bool,   // camera/light icon blocked by geometry, by handle index (editor_icons_update_occlusion)
     icon_cursor: int,                  // where the next frame's icon occlusion rays start
@@ -35,6 +36,7 @@ editor_view :: proc(v: ^Render_View) -> ^Editor_View {
     for ev in editor_views do if ev.view == v do return ev
     ev := new(Editor_View)
     ev.view = v
+    ev.window_open = true
     ev.nav.fly_speed = NAV_FLY_SPEED
     append(&editor_views, ev)
     return ev

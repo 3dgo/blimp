@@ -2,7 +2,6 @@ package blimp
 
 import "core:fmt"
 import "core:math"
-import "core:mem"
 import im "lib:odin-imgui"
 import "dx"
 
@@ -12,8 +11,7 @@ import "dx"
 // World Settings; the bake itself isn't an edit (editor_bake.odin).
 @(private="file")
 bake_ui: struct {
-    world:      ^World,       // whose bake is shown; nil = window closed
-    editing:    bool,         // a settings edit's undo step is open
+    using window: Settings_Window,   // always a level: probes are level data, so it doesn't follow Play
     last:       Bake_Stats,   // the last bake this session, of last_world
     last_world: ^World,
 }
@@ -22,7 +20,7 @@ BAKE_WINDOW_SIZE :: [2]f32{420, 520}   // first-open size (× display scale)
 BAKE_ATLAS_MAX_SCALE :: 4              // the atlas fills the window's width, up to this many screen pixels per atlas pixel
 PROBE_HIGHLIGHT_COLOR :: [4]f32{1, 0.85, 0.1, 1}   // the atlas probe under the mouse: its tile, and a square on it in the views
 
-// The atlas probe under the mouse, shown in its world's views (editor_draw_probe_highlight) while it's fresh:
+// The atlas probe under the mouse, shown in its world's views (ui_bake_probe_highlight) while it's fresh:
 // set this UI frame or the last, since the views can draw before the atlas does.
 @(private="file")
 probe_highlight: struct {
@@ -31,15 +29,12 @@ probe_highlight: struct {
     frame: i32,      // im.GetFrameCount() when set
 }
 
-ui_bake_toggle :: proc(level: ^World) {
-    bake_ui.world = bake_ui.world == level ? nil : level
-}
-
-ui_bake_open_for :: proc(level: ^World) -> bool { return bake_ui.world == level }
+ui_bake_toggle   :: proc(level: ^World) { settings_window_toggle(&bake_ui.window, level) }
+ui_bake_open_for :: proc(level: ^World) -> bool { return settings_window_open_for(&bake_ui.window, level) }
 
 // The world is closing.
 ui_bake_forget :: proc(w: ^World) {
-    if bake_ui.world == w do bake_ui.world = nil
+    settings_window_forget(&bake_ui.window, w)
     if bake_ui.last_world == w do bake_ui.last_world = nil
     if probe_highlight.world == w do probe_highlight = {}
 }
@@ -54,14 +49,9 @@ ui_draw_bake :: proc() {
     defer im.End()
     if !im.Begin(fmt.ctprintf("%s — %s###bake", tr(.Win_Bake), w.title), &open) do return
 
-    // Settings: undo detected after the fact, as in the World Settings window.
     before := w.settings
     ui_bake_settings(w)
-    if mem.compare_ptrs(&before, &w.settings, size_of(World_Settings)) != 0 && !bake_ui.editing {
-        undo_push_settings_edited(w, before)
-        bake_ui.editing = true
-    }
-    if !im.IsAnyItemActive() do bake_ui.editing = false
+    settings_window_track_edit(&bake_ui.window, before)
 
     // Bake before drawing the atlas: a bake replaces the atlas texture, and this frame's draw list must
     // not hold the old one.
@@ -169,7 +159,7 @@ ui_bake_settings :: proc(w: ^World) {
 
 // The manual grid box as scene lines in the level's views (pick_view_debug_lines), while the Bake window
 // shows that level.
-editor_bake_bounds_lines :: proc(level: ^World) {
+ui_bake_bounds_lines :: proc(level: ^World) {
     if bake_ui.world != level || level.settings.bake.bounds != .Manual do return
     lo, hi := level.settings.bake.bounds_min, level.settings.bake.bounds_max
     debug_box((lo + hi) * 0.5, (hi - lo) * 0.5, BAKE_BOUNDS_COLOR)
@@ -210,20 +200,20 @@ ui_probe_atlas_image :: proc(w: ^World, width: f32) {
     im.SetTooltip("%s", fmt.ctprintf("[%d, %d, %d]  (%.2f, %.2f, %.2f)\n+Y  %.4f %.4f %.4f", x, y, z, p.x, p.y, p.z, up.x, up.y, up.z))
 }
 
-// The highlighted atlas probe as a yellow square on top of `ev`'s view (ui_overlay), sized to a fraction of
+// The highlighted atlas probe as a yellow square on top of `ev`'s view (editor_overlay), sized to a fraction of
 // the probe spacing on screen. Nothing unless the atlas is hovered and the view shows that level.
-editor_draw_probe_highlight :: proc(ev: ^Editor_View) {
+ui_bake_probe_highlight :: proc(ev: ^Editor_View) {
     hl := &probe_highlight
     if hl.world == nil || im.GetFrameCount() - hl.frame > 1 || world_level(ev.view.world) != hl.world do return
     g := &hl.world.probes
     if len(g.probes) == 0 do return
     p := probe_position(g, hl.probe.x, hl.probe.y, hl.probe.z)
-    s, ok := ui_world_to_screen(ev, p)
+    s, ok := world_to_screen(ev, p)
     if !ok do return
     scale := app.dispaly_scale
-    half := clamp(ui_overlay_pixels_per_unit(ev, p) * g.spacing * 0.15, 6 * scale, 40 * scale)
-    o := ui_overlay_begin(ev)
-    defer ui_overlay_end(o)
+    half := clamp(overlay_pixels_per_unit(ev, p) * g.spacing * 0.15, 6 * scale, 40 * scale)
+    o := overlay_begin(ev)
+    defer overlay_end(o)
     col := im.GetColorU32ImVec4(PROBE_HIGHLIGHT_COLOR)
     im.DrawList_AddRect(o.dl, s - half, s + half, col, 0, 2 * scale)
     im.DrawList_AddCircleFilled(o.dl, s, 2 * scale, col)

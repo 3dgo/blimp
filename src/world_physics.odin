@@ -145,14 +145,6 @@ physics_update :: proc() {
 }
 
 // Every play world's, around an asset reload (asset_system_reload): their shapes use the collision data.
-physics_worlds_stop :: proc() {
-    for w in worlds do if w.play_source != nil do physics_world_stop(w)
-}
-
-physics_worlds_start :: proc() {
-    for w in worlds do if w.play_source != nil do physics_world_start(w)
-}
-
 // ============================ Queries ============================
 
 Physics_Hit :: struct {
@@ -175,6 +167,17 @@ MOVER_ITERATIONS :: 5
 MOVER_MAX_PLANES :: 16
 MOVER_TOLERANCE  :: 0.001   // metres: an iteration that moves less than this ends the solve
 GROUND_MIN_UP    :: 0.7     // a plane this far toward +Y (cos ≈ 45°) is ground to stand on
+
+// The character mover: moves entity `handle` by `delta` as a capsule of `radius` and total `height` standing on
+// its position, sliding along static collision (walls stop it, slopes and steps it rides). True if it ends
+// standing on ground. Gravity is part of delta: the caller decides how things fall.
+physics_move_character :: proc(w: ^World, handle: Entity_Handle, delta: vec3, radius, height: f32) -> bool {
+    e, ok := entity_get(w, handle)
+    if !ok do return false
+    end, grounded := physics_move_capsule(w, e.position, delta, radius, height, handle)
+    e.position = end
+    return grounded
+}
 
 // Moves a capsule standing on `position` (radius, total height) by `delta`, sliding along collision instead of
 // passing through it: Box3D's character mover (collide → solve planes → cast, a few times over). Returns where it
@@ -228,25 +231,3 @@ physics_shape_entity :: proc(shape: b3.ShapeId) -> Entity_Handle {
     return transmute(Entity_Handle)u32(uintptr(b3.Shape_GetUserData(shape)))
 }
 
-// ============================ Lua ============================
-
-// The first static collision along the ray (direction needn't be unit length), up to `distance`: whether it hit,
-// where, the surface normal there, and the entity it belongs to.
-@(lua=raycast, table=World, lua_zh="射线检测")
-world_raycast_lua :: proc(origin: vec3, direction: vec3, distance: f32) -> (bool, vec3, vec3, Entity_Handle) {
-    hit, ok := physics_raycast(lua_world(), origin, direction, distance)
-    return ok, hit.point, hit.normal, hit.entity
-}
-
-// The character mover: moves the entity by `delta` as a capsule of `radius` and total `height` standing on its
-// position, sliding along static collision (walls stop it, slopes and steps it rides). True if it ends standing on
-// ground. Gravity is part of delta: Lua decides how things fall.
-@(lua=move_character, table=Entity, lua_zh="角色移动")
-entity_move_character_lua :: proc(handle: Entity_Handle, delta: vec3, radius: f32, height: f32) -> bool {
-    w := lua_world()
-    e, ok := entity_get(w, handle)
-    if !ok do return false
-    end, grounded := physics_move_capsule(w, e.position, delta, radius, height, handle)
-    e.position = end
-    return grounded
-}

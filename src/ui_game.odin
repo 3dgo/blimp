@@ -1,7 +1,6 @@
 package blimp
 
 import "core:log"
-import "core:mem"
 import "core:os"
 import im "lib:odin-imgui"
 
@@ -14,8 +13,8 @@ import im "lib:odin-imgui"
 // Shows `v` as the game. `v` must be showing a play world.
 ui_game_enter :: proc(v: ^Render_View) {
     if v.world.play_source == nil do return
-    v.game_camera = world_game_camera(v.world)
-    if v.game_camera == {} do log.warnf("Game mode: no enabled camera entity in '%s', showing the editor camera", v.world.title)
+    v.camera_entity = world_game_camera(v.world)
+    if v.camera_entity == {} do log.warnf("Game mode: no enabled camera entity in '%s', showing the editor camera", v.world.title)
     ui.game = v
 }
 
@@ -23,13 +22,13 @@ ui_game_enter :: proc(v: ^Render_View) {
 ui_game_leave :: proc() {
     when !ODIN_DEBUG do return
     if ui.game == nil do return
-    ui.game.game_camera = {}
+    ui.game.camera_entity = {}
     ui.game = nil
 }
 
 // Play from the editor: run `v`'s level and show it as the game in `v`.
 ui_play :: proc(v: ^Render_View) {
-    world_play(v.world)   // `v` now shows the play world
+    app_play(v.world)   // `v` now shows the play world
     ui_game_enter(v)
 }
 
@@ -38,11 +37,11 @@ ui_game_start :: proc() {
     path := sbuf_str(&game_settings.start_level)
     if path == "" do return
     if !os.exists(path) { log.errorf("Start level '%s' not found (Game Settings)", path); return }
-    w := world_open_scene(path)
+    w := app_open_scene(path)
     when ODIN_DEBUG do _ = w
     else {
-        world_play(w)
-        for v in views do if v.world == w.play_world { ui_game_enter(v); break }
+        p := app_play(w)
+        for v in views do if v.world == p { ui_game_enter(v); break }
     }
 }
 
@@ -76,35 +75,8 @@ ui_game_shortcuts :: proc() {
     when ODIN_DEBUG {
         w := ui.game.world
         if im.IsKeyPressed(.F6, false)  do world_pause_toggle(w)
-        if im.IsKeyPressed(.F7, false)  do world_stop(w)   // ui_update leaves game mode next frame
+        if im.IsKeyPressed(.F7, false)  do app_stop(w)   // ui_update leaves game mode next frame
         if im.IsKeyPressed(.F8, false)  do ui_game_leave()
         if im.IsKeyPressed(.F10, false) do world_step(w)
-    }
-}
-
-/* ------------------------------ Game Settings ------------------------------ */
-// The Game Settings window (Show menu): game.ini, settings that aren't one world's (game_settings.odin).
-// Reflection inspector, like World Settings. Not undoable; the file is written once an edit ends.
-
-GAME_SETTINGS_WINDOW_SIZE :: [2]f32{420, 160}   // first-open size (× display scale)
-
-@(private="file") game_settings_edited: bool   // changed since the last write
-
-ui_draw_game_settings :: proc() {
-    if !ui.show_game_settings do return
-    s := app.dispaly_scale
-    im.SetNextWindowSize({GAME_SETTINGS_WINDOW_SIZE.x * s, GAME_SETTINGS_WINDOW_SIZE.y * s}, .FirstUseEver)
-    if im.Begin(tr(.Win_Game_Settings), &ui.show_game_settings) {
-        before := game_settings
-        opts := DEFAULT_PARAM_UI_OPTIONS
-        opts.headerless = true
-        ui_param_struct("game", Game_Settings, game_settings, opts)
-        if mem.compare_ptrs(&before, &game_settings, size_of(Game_Settings)) != 0 do game_settings_edited = true
-        im.TextDisabled(GAME_SETTINGS_PATH)   // where it's written
-    }
-    im.End()
-    if game_settings_edited && !im.IsAnyItemActive() {
-        game_settings_save()
-        game_settings_edited = false
     }
 }

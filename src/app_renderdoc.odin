@@ -86,7 +86,7 @@ renderdoc_active :: proc() -> bool { return renderdoc.api != nil }
 
 renderdoc_request_capture :: proc() { renderdoc.capture_next = true }
 
-// Around renderer_dx_update: the captured frame is exactly one call of it, submit and present included.
+// Around the renderer's frame (renderer_dx_draw_frame … renderer_dx_present in app_run): the captured frame is exactly one, submit and present included.
 renderdoc_frame_begin :: proc() {
     if renderdoc.api == nil || !renderdoc.capture_next do return
     renderdoc.capture_next = false

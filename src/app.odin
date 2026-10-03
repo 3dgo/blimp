@@ -103,7 +103,6 @@ app_init :: proc() {
     os.remove(EXE_OLD_PATH)   // best effort: clear the exe left behind by a previous Apply & Restart
 
     asset_system_init()
-    world_init(&game_world)
 
     lua_init()
     sound_init()
@@ -162,28 +161,42 @@ app_run :: proc() {
             ui_process_event(&event)
         }
 
-        input_update()   // before anything the game runs reads it
+        app_process_closes()   // closes requested last frame, before anything this frame can reference them
+        input_update(ui.game != nil)   // before anything the game runs reads it; live only in game mode
         lua_update(timer_delta_sec())
         world_play_tick(timer_delta_sec())     // which play worlds advance this frame (pause / F10 step), and their clocks
         lua_worlds_update(timer_delta_sec())   // each open world's script (lua_world_script.odin)
         physics_update()                       // after the game systems moved things: kinematic bodies follow
-        sound_update()                         // after the game systems moved things: voices follow, pause, finish
+        sound_update(app_listener())           // after the game systems moved things: voices follow, pause, finish
 
         remote_poll()   // tool commands run between frames, before the UI sees this frame
         ui_update()
         if app.should_restart do break main_loop   // schema editor Apply already built + spawned the new exe
         if app.quit_requested do break main_loop   // confirmed in the unsaved-changes prompt
 
+        for v in views do ui_view_debug_lines(v)   // each view's editor lines, before the renderer uploads them
         renderdoc_frame_begin()
-        renderer_dx_update()
+        renderer_dx_draw_frame()
+        ui_draw()
+        renderer_dx_submit()
+        ui_render_platform_windows()
+        renderer_dx_present()
         renderdoc_frame_end()
 
     }
 }
 
-// Rebuilds the engine (runs build.exe: regen from entity_schema.ini + recompile) and, on
-// success, launches the freshly built exe and asks the main loop to exit into normal shutdown.
-// Returns false (without restarting) if the build fails, so the caller can surface the error.
+// Who the player hears through: the view showing a playing world (the game view first), else the active
+// view — through its camera entity when it renders through one, else its free camera.
+app_listener :: proc() -> Maybe(Sound_Listener) {
+    lv: ^Render_View
+    for v in views do if v.world.play_source != nil && (lv == nil || v == ui.game) do lv = v
+    if lv == nil do lv = active_view
+    if lv == nil do return nil
+    if e, ok := render_view_camera_entity(lv); ok do return Sound_Listener{e.position, entity_forward(e)}
+    return Sound_Listener{camera_eye(lv.camera), camera_forward(lv.camera)}
+}
+
 EXE_PATH     :: "bin/blimp.exe"
 EXE_OLD_PATH :: "bin/blimp_old.exe"
 
@@ -235,6 +248,9 @@ app_show_in_explorer :: proc(path: string) {
     windows.ShellExecuteW(nil, windows.L("open"), windows.L("explorer.exe"), params, nil, windows.SW_SHOWNORMAL)
 }
 
+// Rebuilds the engine (`odin run build.odin`: codegen from entity_schema.ini + recompile) and, on
+// success, launches the freshly built exe and asks the main loop to exit into normal shutdown.
+// Returns false (without restarting) if the build fails, so the caller can surface the error.
 app_rebuild_and_restart :: proc() -> bool {
     // Windows locks the running .exe, so the linker can't overwrite it in place. Rename the
     // running exe aside (allowed while running) so the build can write a fresh bin/blimp.exe.
@@ -276,7 +292,8 @@ app_shutdown :: proc() {
     renderer_dx_wait_idle()   // GPU must be idle before tearing down any resources it may still reference
     remote_shutdown()
     when ODIN_DEBUG do hot_reload_shutdown()
-    world_registry_shutdown() // opened worlds/views go before the heaps they live in
+    app_close_all()           // opened worlds/views go before the heaps they live in
+    world_registry_shutdown()
     sound_shutdown()
     input_shutdown()
     undo_shutdown()
@@ -286,7 +303,6 @@ app_shutdown :: proc() {
     renderer_dx_shutdown()
     lua_shutdown()
     asset_system_shutdown()
-    world_shutdown(&game_world)
 
     sdl.DestroyWindow(app.window)
     sdl.Quit()

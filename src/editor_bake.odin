@@ -80,7 +80,7 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     set := &w.settings.bake
     b: Bake
 
-    b.scene = scene_bvh_build(w, entity_bakes, context.temp_allocator)
+    b.scene = bake_scene_bvh(w)
     stats.instances = len(b.scene.instances)
     b.tint = make([]vec3, len(b.scene.instances), context.temp_allocator)
     for inst, i in b.scene.instances {
@@ -203,7 +203,7 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
 // The box an Auto bake would fill: the static geometry's bounds plus one spacing all round. Builds a
 // scene BVH in scratch, so it's for a button press, not every frame.
 bake_auto_bounds :: proc(w: ^World) -> (lo, hi: vec3, ok: bool) {
-    scene := scene_bvh_build(w, entity_bakes, context.temp_allocator)
+    scene := bake_scene_bvh(w)
     if len(scene.nodes) == 0 do return
     spacing := max(w.settings.bake.probe_spacing, 0.05)
     return scene.nodes[0].min - spacing, scene.nodes[0].max + spacing, true
@@ -339,4 +339,22 @@ bake_falloff :: proc(light: ^GPU_Light, d2: f32) -> f32 {
         return window * window / max(d2, max(inner * inner, 0.0001))
     }
     return 0
+}
+
+// What bake rays hit: every mesh of every entity that takes part in the bake (entity_bakes), as a temp
+// Scene_BVH.
+@(private="file")
+bake_scene_bvh :: proc(w: ^World) -> Scene_BVH {
+    instances := make([dynamic]BVH_Instance, 0, MAX_MESH_INSTANCES, context.temp_allocator)
+    it := hm.iterator_make(&w.entities)
+    for e, h in hm.iterate(&it) {
+        if !entity_bakes(e) do continue
+        model := asset_system.models[e.model] or_continue
+        M := entity_transform(e)
+        for mesh in model.meshes {
+            if len(instances) == MAX_MESH_INSTANCES do break
+            append(&instances, BVH_Instance{to_world = M, mesh = mesh, entity = h})
+        }
+    }
+    return scene_bvh_build(instances[:], context.temp_allocator)
 }

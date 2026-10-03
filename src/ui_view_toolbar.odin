@@ -35,7 +35,7 @@ ui_view_toolbar :: proc(view: ^Render_View) {
     // Play / Pause / Step (world_play.odin). Play turns into Stop while playing; Stop is also the reset, since
     // the next Play starts from a fresh copy of the level.
     if toggle_button(fmt.ctprintf("%s##play", playing ? ICON_STOP : ICON_PLAY), playing) {
-        if playing do world_stop(w)
+        if playing do app_stop(w)
         else       do ui_play(view)   // and shows it as the game (ui_game.odin)
     }
     im.SetItemTooltip("%s  (%s)", playing ? tr(.Play_Stop) : tr(.Play_Play), playing ? cstring("F7") : cstring("F5"))
@@ -68,8 +68,8 @@ ui_view_toolbar :: proc(view: ^Render_View) {
     if toggle_button(fmt.ctprintf("%s##retro", ICON_RETRO), view.mode == .Retro) do view.mode = view.mode == .Retro ? .Clean : .Retro
     im.SetItemTooltip("%s", tr(.Tool_Retro_Look))
     im.SameLine()
-    // What the retro look does, effect by effect (ui_retro.odin): the level's, like the bake.
-    if toggle_button(fmt.ctprintf("%s##retro_settings", ICON_RETRO_SETTINGS), ui_retro_open_for(level)) do ui_retro_toggle(level)
+    // What the retro look does, effect by effect (ui_retro.odin): the shown world's, like World Settings.
+    if toggle_button(fmt.ctprintf("%s##retro_settings", ICON_RETRO_SETTINGS), ui_retro_open_for(w)) do ui_retro_toggle(w)
     im.SetItemTooltip("%s", tr(.Win_Retro))
     im.SameLine()
     ui_view_lighting_menu(view)

@@ -9,20 +9,11 @@ import hm "core:container/handle_map"
 
 World :: struct {
     entities: Entity_Handle_Map,
-    arena: vmem.Arena,
     render: World_Render,   // GPU draw mirror (transforms/instances/draw-cmds), rebuilt per frame
 
-    active:    Entity_Handle,   // the selected entity the inspector shows and the gizmo pivots on (editor_selection.odin)
-    select_anchor: Entity_Handle,   // entity list: where a Shift+click range starts (the last plain or Ctrl click)
     title:     string,      // shown in the Worlds window and on its viewport tabs
     save_path: string,      // where scene_save writes; "" ⇒ opened from a kit (can't save back to a glTF)
     source:    string,      // the file it was opened from (scene .level or kit glTF), so it isn't opened twice
-
-    // Unsaved-changes tracking. Every edit goes through undo_push, which gives the world a fresh
-    // state id; undo/redo restore the id along with the snapshot. So the world is dirty exactly when
-    // its state isn't the one last saved — undoing back to the saved state makes it clean again.
-    state_id:       u64,
-    saved_state_id: u64,
 
     settings: World_Settings,     // the scene file's [world] section
     script:   Lua_World_Script,   // its Lua script's loaded state (lua_world_script.odin) — runtime, never saved
@@ -136,41 +127,40 @@ WORLD_SETTINGS_DEFAULT :: World_Settings{
     light_groups = {group_1 = {scale = 1}, group_2 = {scale = 1}, group_3 = {scale = 1}, group_4 = {scale = 1}},
     retro        = RETRO_SETTINGS_DEFAULT,
 }
-// Lua's target until world scripts exist (the @(lua) world/entity procs pin to it). Not shown by the
-// editor — worlds the user works on are opened from the Worlds window (world_registry.odin).
-game_world: World
 
 world_init :: proc(world: ^World) {
     world.settings = WORLD_SETTINGS_DEFAULT
-    if err := vmem.arena_init_growing(&world.arena); err != nil {
-        log.panicf("Failed to init world arena: %v", err)
-    }
     if err := vmem.arena_init_growing(&world.probes.arena); err != nil {
         log.panicf("Failed to init probe arena: %v", err)
     }
 }
 
 world_shutdown :: proc(world: ^World) {
-    vmem.arena_destroy(&world.arena)
     vmem.arena_destroy(&world.probes.arena)
 }
 
-world_clear :: proc(world: ^World) {
-    hm.clear(&world.entities)
-    vmem.arena_free_all(&world.arena)
-}
-
-world_add :: proc(world: ^World, name: string, model: string, position: vec3 = {0, 0, 0}) -> Entity_Handle {
-    e: Entity
-    entity_apply_defaults(&e)   // schema defaults (rotation identity, scale 1, user fields…)
-    sbuf_set(&e.name, world_unique_name(world, name))   // explicit args override the defaults
-    e.model = asset_model_key(model)
-    e.position = position
+// The one way an entity enters a world — level load, paste, templates, duplicate, kits, Lua: interns its
+// asset keys (so they outlive whatever text they were read from, and an asset reload), makes its name
+// unique in `world`, and adds it. ok = false if the world is full (MAX_ENTITIES).
+world_add :: proc(world: ^World, e: Entity) -> (Entity_Handle, bool) #optional_ok {
+    e := e
+    e.handle = {}
+    entity_intern_keys(&e)
+    unique := world_unique_name(world, sbuf_str(&e.name))
+    if unique != sbuf_str(&e.name) do sbuf_set(&e.name, unique)   // only write when it changed: `unique` may alias e.name
     return hm.add(&world.entities, e)
 }
 
-// Entity names are unique within a world: every add (world_add, scene load, paste) goes through
-// this. Returns `name` if no entity in `w` has it yet, otherwise <base>_1, <base>_2, … — the first
+// A new default entity, named and placed (kits, Lua's World.add).
+world_add_named :: proc(world: ^World, name: string, model: string, position: vec3 = {0, 0, 0}) -> Entity_Handle {
+    e := entity_default()
+    sbuf_set(&e.name, name)
+    e.model = model
+    e.position = position
+    return world_add(world, e)
+}
+
+// Entity names are unique within a world: world_add goes through this. Returns `name` if no entity in `w` has it yet, otherwise <base>_1, <base>_2, … — the first
 // free one — where <base> is `name` minus any existing _<number> suffix, so copying "car_1" gives
 // "car_2", not "car_1_1". An empty name becomes "entity". The result fits sbuf64 (the base is
 // shortened, on a UTF-8 boundary, to make room for the suffix). Returned string is temp.
@@ -220,21 +210,13 @@ world_fix_duplicate_name :: proc(w: ^World, handle: Entity_Handle) {
     if clash do sbuf_set(&e.name, world_unique_name(w, name))
 }
 
-// Renames `e` (not yet added to `w`) to a name unique in `w`, if needed.
-entity_make_name_unique :: proc(w: ^World, e: ^Entity) {
-    unique := world_unique_name(w, sbuf_str(&e.name))
-    if unique != sbuf_str(&e.name) do sbuf_set(&e.name, unique)   // only write when it changed: `unique` may alias e.name
-}
-
 @(private="file")
 world_name_taken :: proc(w: ^World, name: string) -> bool {
-    it := hm.iterator_make(&w.entities)
-    for e, _ in hm.iterate(&it) do if sbuf_str(&e.name) == name do return true
-    return false
+    _, taken := world_find(w, name)
+    return taken
 }
 
 world_remove :: proc(world: ^World, handle: Entity_Handle) {
-    selection_set(world, handle, false)   // moves `active` off it first
     hm.remove(&world.entities, handle)
 }
 
@@ -246,39 +228,21 @@ world_find :: proc(world: ^World, name: string) -> (Entity_Handle, bool) {
     return {}, false
 }
 
-@(lua=add, table=World, lua_zh="添加")
-world_add_lua :: proc(name: string, model: string, position: vec3 = {0, 0, 0}) -> Entity_Handle {
-    return world_add(lua_world(), name, model, position)
-}
-
-@(lua=remove, table=World, lua_zh="移除")
-world_remove_lua :: proc(handle: Entity_Handle) { world_remove(lua_world(), handle) }
-
-@(lua=find, table=World, lua_zh="查找")
-world_find_lua :: proc(name: string) -> (Entity_Handle, bool) { return world_find(lua_world(), name) }
-
-// Game seconds since Play (World.time): animate from this, not from a clock kept in Lua. Stops while paused.
-@(lua=time, table=World, lua_zh="时间")
-world_time_lua :: proc() -> f64 { return lua_world().time }
-@(private="file") world_state_counter: u64   // state ids are unique across all worlds
-
-// The world is about to change (called by undo_push): it gets a state id it has never had.
-world_new_state :: proc(w: ^World) {
-    world_state_counter += 1
-    w.state_id = world_state_counter
-}
-
-// Unsaved changes. Kits can't be saved, so they're never dirty (closing one never prompts); nor can
-// play worlds (no save_path).
-world_dirty :: proc(w: ^World) -> bool {
-    return w.save_path != "" && w.state_id != w.saved_state_id
+// What an entity's shading means in `world`: Default is the level's.
+entity_shading :: proc(world: ^World, entity: ^Entity) -> ShadingModel {
+    switch entity.shading {
+    case .Default: return world.settings.shading
+    case .Unlit:   return .Unlit
+    case .Gouraud: return .Gouraud
+    case .Lambert: return .Lambert
+    case .Flat:    return .Flat
+    case .Phong:   return .Phong
+    }
+    return .Lambert
 }
 
 // A copy of entity `h` (everything, the selection flag included) under a unique name.
 world_clone :: proc(world: ^World, h: Entity_Handle) -> (copy: Entity_Handle, ok: bool) {
     src := entity_get(world, h) or_return
-    e := src^
-    e.handle = {}
-    entity_make_name_unique(world, &e)
-    return hm.add(&world.entities, e)
+    return world_add(world, src^)
 }

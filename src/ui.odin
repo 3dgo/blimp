@@ -1,5 +1,6 @@
 package blimp
 
+import "core:mem"
 import "core:os"
 import "vendor:sdl3"
 import im "lib:odin-imgui"
@@ -125,13 +126,69 @@ ui_add_font :: proc(fonts: ^im.FontAtlas, latin, cjk: cstring, config: im.FontCo
     return font
 }
 
+// A window showing one world's settings (World Settings, Retro Look, Bake): which world, and whether an
+// edit's undo step is open. Each window keeps one; these procs are the whole protocol.
+Settings_Window :: struct {
+    world:   ^World,   // whose settings are shown; nil = window closed
+    editing: bool,     // an edit's undo step is open (closed once no widget is active)
+}
+
+settings_window_toggle :: proc(win: ^Settings_Window, w: ^World) {
+    win.world = win.world == w ? nil : w
+}
+
+settings_window_open_for :: proc(win: ^Settings_Window, w: ^World) -> bool { return win.world == w }
+
+// The views switched worlds (Play / Stop): a window following the shown world switches with them.
+settings_window_retarget :: proc(win: ^Settings_Window, from, to: ^World) {
+    if win.world == from do win.world = to
+}
+
+settings_window_forget :: proc(win: ^Settings_Window, w: ^World) {
+    if win.world == w do win^ = {}
+}
+
+// Call after drawing the settings widgets, with the settings as they were before them. Undo is detected
+// after the fact (as in the entity inspector): the first changed frame opens one step holding `before`,
+// and it stays open while a widget is held, so a whole drag is one Ctrl+Z. A play world records nothing.
+settings_window_track_edit :: proc(win: ^Settings_Window, before: World_Settings) {
+    before := before
+    if mem.compare_ptrs(&before, &win.world.settings, size_of(World_Settings)) != 0 && !win.editing {
+        undo_push_settings_edited(win.world, before)
+        win.editing = true
+    }
+    if !im.IsAnyItemActive() do win.editing = false
+}
+
+// Views switched from one world to another (Play / Stop, app_lifecycle.odin). UI state pinned to the old
+// world follows, and drags in progress on those views end: they were editing the world being left.
+ui_retarget_world :: proc(from, to: ^World) {
+    ui_entity_panels_retarget(from, to)
+    ui_world_settings_retarget(from, to)
+    ui_retro_retarget(from, to)
+    ui_context_menu_forget(from, nil)
+    for v in views do if v.world == to {
+        ev := editor_view(v)
+        ev.gizmo.drag, ev.gizmo.pushed = .None, false
+        ev.marquee = {}
+    }
+}
+
+// A world is closing (app_process_closes): every window that points at it lets go.
+ui_forget_world :: proc(w: ^World) {
+    ui_entity_panels_forget(w)
+    ui_world_settings_forget(w)
+    ui_bake_forget(w)
+    ui_retro_forget(w)
+    ui_context_menu_forget(w, nil)
+    ui_unsaved_forget_world(w)
+}
+
 ui_process_event :: proc(event: ^sdl3.Event) {
     im_sdl3.ProcessEvent(event)
 }
 
 ui_update :: proc() {
-    // Closes requested last frame happen here, before this frame's draw data can reference them.
-    world_registry_process_pending()
     if ui.game != nil && ui.game.world.play_source == nil do ui.game = nil   // stopped: back to the editor
 
     im_dx12.NewFrame()
@@ -278,6 +335,7 @@ ui_render_platform_windows :: proc() {
     }
 }
 
+// ImGui's draw data into the bound backbuffer (between renderer_dx_draw_frame and renderer_dx_submit).
 ui_draw :: proc() {
     dx.descriptor_heap_bind(renderer_dx.cmd_gfx, {renderer_dx.ui_heap, renderer_dx.sampler_heap})
     im_dx12.RenderDrawData(im.GetDrawData(), renderer_dx.cmd_gfx.handle)
@@ -290,6 +348,7 @@ ui_shutdown :: proc() {
     delete(ui.panels)
     delete(ui.hosts)
     editor_views_shutdown()
+    editor_worlds_shutdown()
 
     im_dx12.Shutdown()
     im_sdl3.Shutdown()

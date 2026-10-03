@@ -74,7 +74,7 @@ hot_reload_update :: proc() {
     if h.assets {
         h.assets = false
         log.info("Hot reload: assets")
-        asset_system_reload()
+        app_reload_assets()
         log.infof("Hot reload: assets done (%v kits, %v meshes)", len(asset_system.kits), len(asset_system.meshes))
     }
     if h.shaders {

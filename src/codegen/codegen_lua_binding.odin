@@ -1,6 +1,7 @@
 package codegen
 import "core:log"
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import "core:path/filepath"
 import "core:os"
@@ -48,7 +49,7 @@ Proc_Info :: struct {
 Proc_Param :: struct {
     name: string,
     type: string,
-    default: string,   // a number literal default ("1", "0.5"): the Lua argument is optional; "" = required
+    default: string,   // the default's source text ("1", "{0, 0, 0}"): the Lua argument is optional; "" = required
 }
 
 Proc_Return :: struct {
@@ -137,7 +138,7 @@ parse_file :: proc(path: string) {
             }
             case ^ast.Proc_Lit: {
                 if proc_type, is_pt := expr.type.derived_expr.(^ast.Proc_Type); is_pt {
-                    if proc_info, proc_ok := parse_proc(name_id, proc_type, attr_map); proc_ok {
+                    if proc_info, proc_ok := parse_proc(name_id, proc_type, attr_map, file.src); proc_ok {
                         codegen.procs[proc_info.odin_proc_name] = proc_info
                     }
                 }
@@ -175,7 +176,7 @@ parse_struct :: proc(struct_name: ^ast.Ident, struct_type: ^ast.Struct_Type, att
     return struct_info, true
 }
 
-parse_proc :: proc(proc_name: ^ast.Ident, proc_type: ^ast.Proc_Type, attributes: map[string]string) -> (Proc_Info, bool) {
+parse_proc :: proc(proc_name: ^ast.Ident, proc_type: ^ast.Proc_Type, attributes: map[string]string, src: string) -> (Proc_Info, bool) {
     proc_info: Proc_Info
     
     cc := proc_type.calling_convention
@@ -219,11 +220,7 @@ parse_proc :: proc(proc_name: ^ast.Ident, proc_type: ^ast.Proc_Type, attributes:
                 param_name, _ := fname.derived_expr.(^ast.Ident)
                 if param_name == nil do return Proc_Info{}, false
                 default: string
-                if field.default_value != nil {
-                    if lit, is_lit := field.default_value.derived_expr.(^ast.Basic_Lit); is_lit && (lit.tok.kind == .Integer || lit.tok.kind == .Float) {
-                        default = strings.clone(lit.tok.text)
-                    }
-                }
+                if d := field.default_value; d != nil do default = strings.clone(src[d.pos.offset:d.end.offset])
                 append(&proc_info.params, Proc_Param {
                     name = strings.clone(param_name.name),
                     type = strings.clone(param_type.name),
@@ -273,7 +270,7 @@ generate_file :: proc(out_path: string) {
     if len(codegen.structs) > 0 {
         fmt.sbprintln(&sb, "//==================== Generate Structs ====================")
         fmt.sbprintln(&sb, "")
-        for _, struct_info in codegen.structs {
+        for struct_info in sorted_values(codegen.structs) {
             generate_struct(&sb, struct_info)
         }
     }
@@ -281,7 +278,7 @@ generate_file :: proc(out_path: string) {
     if len(codegen.procs) > 0 {
         fmt.sbprintln(&sb, "//==================== Generate Procs ====================")
         fmt.sbprintln(&sb, "")
-        for _, proc_info in codegen.procs {
+        for proc_info in sorted_values(codegen.procs) {
             generate_proc(&sb, proc_info)
         }
 
@@ -332,7 +329,7 @@ generate_struct :: proc(sb: ^strings.Builder, info: Struct_Info) {
         fmt.sbprintfln(sb, "    lua.setfield(L, -2, \"%v\")", field.name)
     }
     has_methods := false
-    for _, p in codegen.procs {
+    for p in sorted_values(codegen.procs) {
         if p.is_method && p.lua_table == struct_name { has_methods = true; break }
     }
     if has_methods {
@@ -406,7 +403,16 @@ generate_proc :: proc(sb: ^strings.Builder, info: Proc_Info) {
             }
             case: {
                 if param.type in codegen.ffi_types {
-                    fmt.sbprintfln(sb, "    %v := (cast(^%v)lua.topointer(L, %v))^", param.name, param.type, i+1)
+                    // An FFI cdata argument. Missing (or not cdata): the default if there is one, else a Lua error,
+                    // never a nil dereference.
+                    if param.default != "" {
+                        fmt.sbprintfln(sb, "    %v: %v = %v", param.name, param.type, param.default)
+                        fmt.sbprintfln(sb, "    if p := cast(^%v)lua.topointer(L, %v); p != nil do %v = p^", param.type, i+1, param.name)
+                    } else {
+                        fmt.sbprintfln(sb, "    p%v := cast(^%v)lua.topointer(L, %v)", i+1, param.type, i+1)
+                        fmt.sbprintfln(sb, `    if p%v == nil do lua.L_argerror(L, %v, "expected %v")`, i+1, i+1, codegen.ffi_types[param.type].lua_global)
+                        fmt.sbprintfln(sb, "    %v := p%v^", param.name, i+1)
+                    }
                 } else if param.type in codegen.structs {
                     fmt.sbprintfln(sb, "    %v := _lua_read_table_%v(L, %v)", param.name, param.type, i+1)
                 } else if param.type in codegen.flag_types {
@@ -489,7 +495,7 @@ generate_register :: proc(sb: ^strings.Builder) {
     seen := make(map[string]bool, context.temp_allocator)
 
     // Procs with no table — register as globals
-    for _, info in codegen.procs {
+    for info in sorted_values(codegen.procs) {
         if info.lua_table != "" || info.is_method { continue }
         fmt.sbprintfln(sb, `    lua.pushcfunction(L, %v)`, info.odin_wrapper_name)
         fmt.sbprintfln(sb, `    lua.setglobal(L, "%v")`, info.lua_name)
@@ -500,13 +506,13 @@ generate_register :: proc(sb: ^strings.Builder) {
     }
 
     // Procs grouped into tables — get-or-create each table, fill it, set as global
-    for _, info in codegen.procs {
+    for info in sorted_values(codegen.procs) {
         if info.lua_table == "" || info.is_method || info.lua_table in seen { continue }
         seen[info.lua_table] = true
 
         fmt.sbprintfln(sb, `    lua.getglobal(L, "%v")`, info.lua_table)
         fmt.sbprintfln(sb, `    if lua.type(L, -1) == .NIL {{ lua.pop(L, 1); lua.createtable(L, 0, 0) }}`)
-        for _, p in codegen.procs {
+        for p in sorted_values(codegen.procs) {
             if p.lua_table == info.lua_table && !p.is_method {
                 fmt.sbprintfln(sb, `    lua.pushcfunction(L, %v)`, p.odin_wrapper_name)
                 fmt.sbprintfln(sb, `    lua.setfield(L, -2, "%v")`, p.lua_name)
@@ -523,12 +529,12 @@ generate_register :: proc(sb: ^strings.Builder) {
     // Method procs — build a metatable per table name and store it in the Lua registry.
     // _lua_push_table_<Type> attaches the metatable so colon-call syntax works.
     seen_methods := make(map[string]bool, context.temp_allocator)
-    for _, info in codegen.procs {
+    for info in sorted_values(codegen.procs) {
         if !info.is_method || info.lua_table == "" || info.lua_table in seen_methods { continue }
         seen_methods[info.lua_table] = true
 
         fmt.sbprintfln(sb, `    lua.newtable(L) // __index for %v methods`, info.lua_table)
-        for _, p in codegen.procs {
+        for p in sorted_values(codegen.procs) {
             if p.lua_table == info.lua_table && p.is_method {
                 fmt.sbprintfln(sb, `    lua.pushcfunction(L, %v)`, p.odin_wrapper_name)
                 fmt.sbprintfln(sb, `    lua.setfield(L, -2, "%v")`, p.lua_name)
@@ -571,7 +577,7 @@ generate_ffi_push :: proc(sb: ^strings.Builder) {
     fmt.sbprintln(sb, "}")
     fmt.sbprintln(sb, "")
 
-    for _, info in codegen.ffi_types {
+    for info in sorted_values(codegen.ffi_types) {
         if info.lua_global == "" { continue }
         if info.transmute_as != "" {
             fmt.sbprintfln(sb, `_lua_push_ffi_%v :: proc(L: ^lua.State, v: %v) {{ _lua_push_arr(L, "%v", transmute(%v)v) }}`,
@@ -582,4 +588,15 @@ generate_ffi_push :: proc(sb: ^strings.Builder) {
         }
     }
     fmt.sbprintln(sb, "")
+}
+
+// A map's values in key order. Map iteration order is random; emitting in name order means the generated
+// file only changes when its input does.
+sorted_values :: proc(m: map[string]$T) -> []T {
+    keys := make([dynamic]string, 0, len(m), context.temp_allocator)
+    for k in m do append(&keys, k)
+    slice.sort(keys[:])
+    out := make([]T, len(keys), context.temp_allocator)
+    for k, i in keys do out[i] = m[k]
+    return out
 }
