@@ -7,9 +7,9 @@ import "core:strings"
 
 // Sends one command to a running Blimp editor (debug build) and prints the reply. See src/editor_remote.odin.
 //   blimpctl help
-//   blimpctl entities scene.level
-//   blimpctl set scene.level car position "1, 0, 2"
-//   blimpctl paste scene.level - < blocks.txt      ('-' sends stdin as the request body)
+//   blimpctl entities castle.level
+//   blimpctl set castle.level 吊桥 position "0, 0, -3.15"
+//   blimpctl paste castle.level - < blocks.txt      ('-' sends stdin as the request body)
 // Exit code: 0 ok, 1 the engine reported an error, 2 couldn't reach the engine / bad usage.
 PORT :: 47800   // must match REMOTE_PORT in src/editor_remote.odin
 

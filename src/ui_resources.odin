@@ -347,7 +347,7 @@ resource_label :: proc(dl: ^im.DrawList, p, clip_max: [2]f32, text: cstring, col
     im.DrawList_PopClipRect(dl)
 }
 
-// The key without its directory: "assets/models/cars.gltf:police:0" → "cars.gltf:police:0".
+// The key without its directory: "assets/models/castle.gltf:wall001:0" → "castle.gltf:wall001:0".
 @(private="file")
 short_name :: proc(key: string) -> string {
     if i := strings.last_index_byte(key, '/'); i >= 0 do return key[i + 1:]

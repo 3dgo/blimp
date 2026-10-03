@@ -51,12 +51,6 @@ entity_forward :: proc(e: ^Entity) -> vec3 { return linalg.quaternion128_mul_vec
 entity_right   :: proc(e: ^Entity) -> vec3 { return linalg.quaternion128_mul_vector3(e.rotation, vec3{1, 0, 0}) }
 entity_up      :: proc(e: ^Entity) -> vec3 { return linalg.quaternion128_mul_vector3(e.rotation, vec3{0, 1, 0}) }
 
-create_entites :: proc(w: ^World) {
-    world_add(w, "car",    "assets/models/cars.gltf:car",    { 1, 0, 0})
-    world_add(w, "police", "assets/models/cars.gltf:police", {-1, 0, 0})
-    world_add(w, "floor",  "assets/models/cars.gltf:floor",  { 0, 0, 0})
-}
-
 // Serialization
 entity_to_text :: proc(e: ^Entity, allocator := context.allocator) -> string {
     b: strings.Builder

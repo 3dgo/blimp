@@ -104,7 +104,6 @@ app_init :: proc() {
 
     asset_system_init()
     world_init(&game_world)
-    create_entites(&game_world)
 
     lua_init()
     sound_init()

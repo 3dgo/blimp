@@ -110,7 +110,7 @@ ui_draw_entity_panel :: proc(p: ^Entity_Panel) {
     im.End()
 }
 
-// "Follow active (scene.level)" / one entry per open world.
+// "Follow active (castle.level)" / one entry per open world.
 @(private="file")
 ui_panel_target_combo :: proc(p: ^Entity_Panel) {
     active := active_world()

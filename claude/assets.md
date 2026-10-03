@@ -53,7 +53,7 @@ position when the kit opens as a world, so the layout matches the DCC. A mesh re
 several nodes bakes the last node's rotation/scale, since geometry is stored once.
 
 **Artist workflow (3ds Max).** One `.max` per kit, saved under `assets/` next to its export with
-the same base name (`assets/models/cars.max` → `cars.gltf` + `cars.bin`). Shared textures live
+the same base name (`assets/models/castle.max` → `castle.gltf` + `castle.bin`). Shared textures live
 under `assets/` too and the Max scene references them there. The scan imports only `.gltf`/`.glb`
 and textures load only when a glTF references them, so `.max`, `.psd` and autobackups in `assets/`
 cost nothing. Export `.gltf`, not `.glb`, so textures stay external and are shared by path. Setting
