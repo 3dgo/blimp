@@ -5,11 +5,12 @@ Everything loads at init and never changes at runtime. No streaming, no eviction
 manifests, no per-asset meta files. This is deliberate — a prior, more complex asset
 system was cut for exceeding current needs.
 
-**Hot reload** (debug builds, `asset_hot_reload.odin`) doesn't change that: it reloads *everything*
+**Hot reload** (debug builds, `app_hot_reload.odin`) doesn't change that: it reloads *everything*
 of a kind, as init would. A `ReadDirectoryChangesW` watcher on `assets/` and `assets_engine/`, polled at
 the top of each frame, waits 0.3 s after the last change (Max writes `.bin` then `.gltf`), then:
-- `.gltf .glb .bin .png` → `asset_system_reload`: GPU idle, the asset arena and GPU asset buffers
-  thrown away and rebuilt. Entities keep working because the keys they hold are interned in their own
+- `.gltf .glb .bin .png` → `app_reload_assets` (app_lifecycle.odin): GPU idle, play worlds' physics
+  stopped, the asset arena (`asset_system_reload`) and GPU asset buffers thrown away and rebuilt, physics
+  started again. Entities keep working because the keys they hold are interned in their own
   arena, `asset_keys` (`asset_intern`), which outlives every reload — so do undo snapshots and the
   clipboard. Anything that keeps an asset key must intern it (`entity_intern_keys` after reading
   fields from text). Play worlds' physics are rebuilt with it.

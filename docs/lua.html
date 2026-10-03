@@ -203,8 +203,8 @@ body { margin: 0; }
 <p>这样做的好处是：<strong>脚本随时可以从头重新执行</strong>。保存脚本时引擎热重载它，游戏不会因此坏掉。</p>
 </section><section><h2 id="s2"><span class="num">2</span><span>脚本文件与运行方式</span></h2>
 <h3 id="s2-1"><span class="num">2.1</span><span>两种脚本</span></h3>
-<div class="tbl"><table><thead><tr><th></th><th>世界脚本</th><th>引擎脚本</th></tr></thead><tbody><tr><td>文件</td><td>关卡的世界设置里的 <code>script</code> 路径，如 <code>assets/scripts/castle.lua</code></td><td>固定为 <code>assets/scripts/main.lua</code></td></tr><tr><td>何时运行</td><td>只在关卡<strong>运行（Play）</strong>时</td><td>引擎启动后整个会话</td></tr><tr><td>回调</td><td><code>世界.开始()</code>、<code>世界.更新(时间差)</code></td><td><code>引擎.开始()</code>、<code>引擎.更新(时间差)</code>、<code>引擎.完结()</code></td></tr><tr><td><code>世界.*</code> / <code>实体.*</code> 作用于</td><td>这个运行中的关卡</td><td>内部的 <code>game_world</code>（不渲染）</td></tr></tbody></table></div>
-<p><strong>游戏逻辑写在世界脚本里。</strong> 引擎脚本作用的 <code>game_world</code> 不在屏幕上，不是你正在玩的关卡。</p>
+<div class="tbl"><table><thead><tr><th></th><th>世界脚本</th><th>引擎脚本</th></tr></thead><tbody><tr><td>文件</td><td>关卡的世界设置里的 <code>script</code> 路径，如 <code>assets/scripts/castle.lua</code></td><td>固定为 <code>assets/scripts/main.lua</code></td></tr><tr><td>何时运行</td><td>只在关卡<strong>运行（Play）</strong>时</td><td>引擎启动后整个会话</td></tr><tr><td>回调</td><td><code>世界.开始()</code>、<code>世界.更新(时间差)</code></td><td><code>引擎.开始()</code>、<code>引擎.更新(时间差)</code>、<code>引擎.完结()</code></td></tr><tr><td><code>世界.*</code> / <code>实体.*</code> 作用于</td><td>这个运行中的关卡</td><td>没有世界：调用会在日志里报错，什么也不做</td></tr></tbody></table></div>
+<p><strong>游戏逻辑写在世界脚本里。</strong> 引擎脚本没有世界可以操作，只适合整个会话的逻辑（比如读 <code>输入.*</code>）。</p>
 <p>每个世界脚本运行在自己的环境表里（找不到的名字回落到全局 <code>_G</code>），所以同时打开的两个关卡的脚本互不覆盖全局变量。脚本里的 <code>世界</code> 也是它自己的表，<code>世界.开始</code> 等回调只属于这个关卡。</p>
 <h3 id="s2-2"><span class="num">2.2</span><span>LuaCN：中文关键字的 Lua</span></h3>
 <p>脚本可以写成 <code>.luacn</code>：关键字是中文，构建时（以及编辑器热重载时）转译成同名的 <code>.lua</code>。<strong>关卡引用的是 <code>.lua</code>，但要改的是 <code>.luacn</code></strong>，生成的 <code>.lua</code> 会被覆盖。也可以直接写普通 <code>.lua</code>，所有接口都有英文名。</p>

@@ -79,15 +79,11 @@ world_open_kit :: proc(kit: ^Kit) -> ^World {
     return w
 }
 
-// A new view onto `w`, looking through `camera` (several viewports on one scene share the world's draw
-// data; a view only adds a camera, a target and its frame constants).
-view_open :: proc(w: ^World, camera: Camera) -> ^Render_View {
-    v := new(Render_View, app.allocators.perm)
-    render_view_create(v, w, camera, 640, 480)
-    v.id   = next_view_id
+// Adds a view (already created by the renderer, app_view_open) to the list and gives it its stable id.
+view_register :: proc(v: ^Render_View) {
+    v.id = next_view_id
     next_view_id += 1
     append(&views, v)
-    return v
 }
 
 // The open world opened from `path` (scene or kit), if any.

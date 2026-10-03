@@ -34,9 +34,15 @@ design notes there.
 ## Language and style
 
 - Odin. Snake_case procs, Pascal_Snake_Case types (`Mesh_Instance`, `Draw_Command`).
-- `src/` is one package; files are grouped by prefix: `asset_`, `render_`, `world_`, `editor_`
-  (editor logic), `ui_` (ImGui panels), `lua_`, `gen_` (generated). Unprefixed files are the
-  shared foundation (`app`, `basics`, `loc`, `time`, `serialize`).
+- `src/` is one package; files are grouped by prefix: `asset_`, `world_`, `render_`, `lua_`, `editor_`
+  (editor logic), `ui_` (ImGui panels), `app_` (drivers: lifecycle, remote control, hot reload,
+  RenderDoc), `gen_` (generated). Unprefixed files are the shared foundation (`app`, `basics`, `time`,
+  `serialize`, `entity`, `input`, `loc`, `search`, `game_settings`).
+- **Layers call downward only:** foundation → asset → world → render → lua → editor → ui → app. The
+  renderer reads worlds and never writes them; world code never calls render, Lua, editor or UI.
+  Sequences that touch every layer (open, play, stop, close, asset reload) are one proc each in
+  `app_lifecycle.odin`, which ui and blimpctl call; `app_run` is the frame order. Pass data down
+  (`input_update(game_mode)`, `sound_update(listener)`) rather than reaching up for it.
 - Fat structs and top-down per-system loops. No ECS, no components, no OOP hierarchies.
 - Multiple linear passes over flat arrays per frame is correct and intentional.
 - Explicit allocator parameters on anything that returns allocated memory. Procs that
@@ -44,13 +50,14 @@ design notes there.
 
 ## Core rules
 
-- **Memory:** group arenas by lifetime first — permanent (assets, never reset), level (entities,
-  level unload), frame (frame start), scratch (`context.temp_allocator`). Prefer `core:mem/virtual`
+- **Memory:** group arenas by lifetime first — permanent (assets, never reset), level (a world and its
+  probe arena, freed when it closes), frame (frame start), scratch (`context.temp_allocator`). Prefer `core:mem/virtual`
   `Arena`. Dynamic arrays in arenas strand memory on grow: reserve up front.
 - **Assets** load at init and never change at runtime: no streaming, manifests or meta files. Debug
-  hot reload rebuilds all of them, as init would (`asset_hot_reload.odin`). A glTF file is a kit. Keys are
+  hot reload rebuilds all of them, as init would (`app_hot_reload.odin`). A glTF file is a kit. Keys are
   project-relative forward-slash paths plus a name (`assets/models/car.gltf:body`), never absolute, no UUIDs.
-  Anything that keeps a key interns it (`asset_intern`), so it outlives a reload.
+  Anything that keeps a key interns it (`asset_intern`), so it outlives a reload. Strings decoded from
+  text are temp; an entity enters a world only through `world_add`, which interns its keys.
 - **Coordinates:** left-handed, Y-up, +Z forward, clockwise front faces. glTF import reflects `-X`
   **and** swaps winding; both are required, don't remove the swap. Reversed-Z (`GREATER`, clear 0).
   Float HDR target. Simple forward, not clustered.
@@ -60,15 +67,18 @@ design notes there.
 - **Entities** are one fat struct. Cameras and lights are flat fields (`camera_type`, `light_type`,
   `color`, `fov`, `size`, `range`…), no nesting; two roles are two entities. Fields come from
   `entity_schema.ini`, which generates `src/gen_entity.odin` (don't hand-edit the generated file).
-- **Worlds** are instantiable; systems take `^World`. Editor state stays off core structs
-  (`Editor_View` and other editor-side structs, not `Render_View`, `Camera` or the renderer).
+- **Worlds** are instantiable; systems take `^World`. Editor state stays off core structs: it lives in
+  `Editor_World` (active entity, Shift anchor, unsaved tracking) and `Editor_View`, not in `World`,
+  `Render_View`, `Camera` or the renderer. The one exception is `Entity.selected`, so undo carries it.
 - **Every edit calls `undo_push(w)` first**: undo and unsaved tracking both come from it. Data an
   entity points into is replaced, never mutated in place.
 - **Play mode runs a copy** of the level; `world_level(w)` is the world that's edited and saved. Game
   systems check `w.ticks`, never `paused`.
 - **Viewport drawing at a 3D position** uses `debug_*` (depth-tested scene lines) or `overlay_*`
   (ImGui on top of one view), not ad hoc ImGui calls.
-- **Lua issues commands and queries state; it never holds state.**
+- **Lua issues commands and queries state; it never holds state.** The whole script API is the
+  `@(lua)` procs in `lua_api_*.odin`, thin wrappers over world procs; they act on the world whose
+  script is running (`lua_world()`).
 - **UI text** goes through `tr(.Key)` with EN and ZH on one row in `loc.odin` (default zh). Logs,
   asserts, keys and paths stay ASCII English. Window titles end in a `###id` suffix. Every search box
   matches through `search_matches` (`search.odin`), so Chinese is also found by pinyin.

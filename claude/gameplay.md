@@ -40,7 +40,7 @@ Same structure for AI. Effort goes into perception and steering, not decision st
   - There's no `aspect`: a camera takes it from the target it renders into. `size` never holds model
     bounds, which come from the asset.
   - Something that needs two roles (a flashlight on a camera) is two entities.
-  - An entity may have no model. The editor makes cameras and lights visible (`editor_shapes.odin`):
+  - An entity may have no model. The editor makes cameras and lights visible (`editor_shapes.odin`, `editor_icons.odin`):
     an icon at the entity, drawn on the view's overlay like Unity's gizmo icons, and its shape
     (frustum, light reach) as debug lines, dimmed unless selected.
     - **G** (or the toolbar button) toggles a view's game view (`Editor_View.game_view`), like Unreal.
@@ -60,6 +60,16 @@ Same structure for AI. Effort goes into perception and steering, not decision st
 
 Lua issues commands and queries state. **Lua never holds state** — not for animation, not
 for AI, not for sound. Odin is authoritative so script reload can't corrupt anything.
+
+- The whole script API is the `@(lua)` procs in `lua_api_world.odin`, `lua_api_entity.odin` and
+  `lua_api_input.odin`: thin wrappers over world-layer procs that take `^World`. World, entity, physics,
+  sound and input code knows nothing about Lua. The binding codegen (`src/codegen/codegen_lua_binding.odin`)
+  scans for the attribute and marshals params and returns.
+- They act on `lua_world()`, the world whose script is running. There is no hidden world: called from an
+  engine hook (`引擎.更新`), World/Entity procs log an error and do nothing; engine hooks are for
+  session-level logic and Input.
+- `Entity.set_*` write through `entity_writable_field` like files and blimpctl do: no `noserialize`
+  fields, string fields are interned asset keys, names stay unique. `World.add` goes through `world_add`.
 
 ### Sound
 
@@ -86,13 +96,15 @@ Built (`world_sound.odin`):
 - Lua gets no handles: the entity is the handle. `Entity.play_sound(e)` / `stop_sound(e)` (its own fields),
   `World.play_sound(key [, volume])` (2D), `World.play_sound_at(key, pos [, volume])` (positional,
   `SOUND_DEFAULT_RANGE`).
-- Listener: the camera of the view showing a playing world (its game camera in game mode). miniaudio is
-  right-handed, so z is negated at the boundary. Doppler is off.
+- Listener: `app_listener` (app.odin) picks the view showing a playing world (the game view first, else
+  the active view) and passes its camera — its camera entity if it renders through one — to
+  `sound_update`; sound reads no views or UI. miniaudio is right-handed, so z is negated at the boundary.
+  Doppler is off.
 
 ### Input
 
 `input.odin`: keyboard, mouse and the first gamepad, read from SDL's state once a frame before the game runs.
-It's live only in game mode with the window focused; otherwise everything reads up/zero, so editor typing never
+It's live only in game mode (the app passes it in: `input_update(game_mode)`) with the window focused; otherwise everything reads up/zero, so editor typing never
 reaches the game. Lua `Input.down / pressed / released(key)` (SDL scancode names: `"W"`, `"Space"`,
 `"Left Shift"`), `mouse_down / mouse_pressed(1–5)`, `mouse_delta()`, `lock_mouse(bool)` (relative mode,
 released whenever the editor has the window), `gamepad_axis(name)` (deadzoned), `gamepad_down / pressed(name)`

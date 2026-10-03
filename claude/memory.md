@@ -11,7 +11,7 @@ complicates teardown.
 | Arena | Holds | Reset |
 |---|---|---|
 | permanent | loaded meshes, textures, mesh/material tables | never |
-| level | entities, mesh instances, material overrides, collision | level unload |
+| level | a `World`: its entity handle map (fixed cap, inside the struct), render mirror, physics | world close |
 | probe grid | a world's baked probes (`Probe_Grid.arena`) | rebake, level unload |
 | frame | poses, visible lists, command staging | frame start (double-buffered if GPU reads) |
 | scratch | short-scope working memory | scope exit (`context.temp_allocator`) |
@@ -21,15 +21,20 @@ complicates teardown.
   `Arena_Temp` for nesting save-points.
 - **Dynamic arrays in arenas strand memory on grow** — unless the array is the arena's
   last allocation, where `resize` extends in place. Reserve capacity up front where the
-  count is known (the entity handle map gets a fixed cap in the level arena). Where it
+  count is known (the entity handle map is a fixed-cap `Static_Handle_Map` inside `World`). Where it
   isn't (asset load), accept the transient stranding and report real size with a
   `len × size_of` helper rather than the arena's used bytes.
+- **No per-world string arena.** Strings decoded from text (`deserialize_value`) are temp. The only
+  `string` fields are asset keys, and whoever keeps one interns it (`world_add` → `entity_intern_keys`),
+  so loads and pastes strand nothing.
 - `delete` on a nil slice is a no-op. Nil means "owns nothing" — unconditional cleanup is fine.
 - The fixed-budget arenas (frame, temp) get a panic-on-failure wrapper so exhaustion fails
   loudly with a stack trace and no call-site checks; it formats its message into a stack
   buffer, since it also wraps `temp` and must not allocate to report. `perm` is the
   `Tracking_Allocator`→heap directly, no guard — the OS heap won't realistically run dry.
   `mem.Tracking_Allocator` in debug.
+- The frame arena exists (reset each frame, `Panic_On_Fail`-wrapped like temp) but **nothing uses it
+  yet**; animation poses are its first user (claude/animation.md).
 - The frame arena is **single-buffered for now**: frame data is CPU-only staging copied
   into GPU upload buffers before submit, so the GPU never reads the arena itself. Rotate
   per-flight (reset after the frame fence, indexed by the renderer's frame slot) only once

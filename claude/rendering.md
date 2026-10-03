@@ -25,7 +25,7 @@ PBR version later is additive.
   picking is unaffected). Depth is `R32_TYPELESS` with a DSV and an `R32_FLOAT` SRV: passes at
   the display size can't bind it as a DSV, so debug lines depth-test against it in the shader.
 - **Render mode** is per view (`Render_View.mode`, viewport toolbar). `.Retro` (default, and
-  always in release): the effects of the level's `Retro_Settings` (see Retro look below).
+  always in release): the effects of the shown world's `Retro_Settings` (see Retro look below).
   `.Clean`: scale 1, none of them. Same scene shaders and passes; only frame constants, the
   scale and the post passes differ, so the two can't drift. Affine UVs are a second
   `noperspective` varying blended by `affine`, since interpolation can't switch at runtime.
@@ -36,6 +36,12 @@ PBR version later is additive.
   clears to it with alpha 0, the scene writes alpha 1, and the tonemap passes alpha-0 pixels
   through untouched, so the background shows exactly as picked.
 - Light data lives in a GPU buffer indexed from the shader, not root constants.
+- **The frame is three calls the app makes** (`app_run`): `renderer_dx_draw_frame` (each world's draw
+  mirror staged, shadows, every view's scene + post + debug lines, the backbuffer cleared and bound),
+  then the app's `ui_draw`, then `renderer_dx_submit` and `renderer_dx_present`. The renderer never calls
+  the UI or the editor: the editor's debug lines are already in `debug_draw` when the frame starts.
+- **Probe data is world data.** `Probe_Grid`, its CPU maths (the mirror of `shading.slang`) and the
+  `.probes` sidecar are `world_probes.odin`; `render_probes.odin` only creates and stages the GPU copy.
 - Hardware floor is Resource Binding Tier 3 (~2015 GPUs). No fallback path. Log
   `ResourceBindingTier` and `DXGI_QUERY_VIDEO_MEMORY_INFO` at startup.
 
@@ -244,9 +250,10 @@ is worth more than a 100× speedup.
 
 - **Two-level BVH** (`asset_bvh.odin`), both median-split by one builder over primitive bounds.
   `Mesh_BVH`: one per mesh, object space, built at asset load (also editor picking).
-  `Scene_BVH`: top level over a world's mesh instances (entity × mesh, world bounds); a leaf
-  sends the ray into its mesh's BVH through the inverse entity transform. Built on demand as a
-  snapshot — the baker builds one per bake over `entity_bakes` (drawn, `Static`, `Cast_Indirect`).
+  `Scene_BVH`: top level over a list of mesh instances (entity × mesh, world bounds) the caller
+  picks; a leaf sends the ray into its mesh's BVH through the inverse entity transform. Built on
+  demand as a snapshot — the baker builds one per bake (`bake_scene_bvh`) over `entity_bakes` (drawn,
+  `Static`, `Cast_Indirect`). The asset layer never reads a world: the baker hands it the instances.
   Closest-hit and any-hit (shadow rays) queries, iterative with a fixed stack.
 - **Indirect only.** Every light stays realtime direct; a light reaches a probe only off a
   surface it lit. The sky (`bake.sky_color × sky_intensity`, linear) is in the probes unless `bake.sky`
@@ -301,7 +308,7 @@ is worth more than a 100× speedup.
   counting as that.
   - A **buried** probe (over 25% back-face hits) gets an all-zero map, so Chebyshev gives it about zero
     weight everywhere. That's the "weight 0" step, done by the same test.
-  - Sampling (`probe_visibility`, the same in `render_probes.odin` and `shading.slang`) moves the point
+  - Sampling (`probe_visibility`, the same in `world_probes.odin` and `shading.slang`) moves the point
     0.2 spacings along the normal first. Per corner it multiplies the trilinear weight by DDGI's smooth
     backface term `((dot(toProbe, N) + 1) / 2)² + 0.2` and by Chebyshev cubed, with variance floored at
     `1e-3 × spacing²`, floored at 1e-6, then renormalized.

@@ -25,9 +25,13 @@ app_open_kit :: proc(kit: ^Kit) -> ^World {
     return w
 }
 
-// Another viewport onto `w`, framing the whole world.
+// Another viewport onto `w`, framing the whole world. Several viewports on one world share its draw data;
+// a view only adds a camera, a target and its frame constants.
 app_view_open :: proc(w: ^World) -> ^Render_View {
-    return view_open(w, camera_frame_world(w))
+    v := new(Render_View, app.allocators.perm)
+    render_view_create(v, w, camera_frame_world(w), 640, 480)
+    view_register(v)
+    return v
 }
 
 @(private="file")
