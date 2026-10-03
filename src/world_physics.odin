@@ -18,8 +18,8 @@ import b3 "vendor:box3d"
 //
 // Lua asks it things and moves characters through it; the answer is Odin's, so Lua holds nothing:
 //   World.raycast(origin, direction, distance) → hit, point, normal, entity
-//   Entity.move(e, delta, radius, height)      → grounded   (a capsule standing on e's position, sliding; never
-//                                                             stopped by e's own collision)
+//   Entity.move_character(e, delta, radius, height) → grounded   (a capsule standing on e's position, sliding;
+//                                                                  never stopped by e's own collision)
 // Box3D has no handedness of its own: it gets the engine's left-handed coordinates as they are.
 
 Physics_World :: struct {
@@ -238,11 +238,11 @@ world_raycast_lua :: proc(origin: vec3, direction: vec3, distance: f32) -> (bool
     return ok, hit.point, hit.normal, hit.entity
 }
 
-// Moves the entity by `delta` as a capsule of `radius` and total `height` standing on its position, sliding along
-// static collision (walls stop it, slopes and steps it rides). True if it ends standing on ground. Gravity is
-// part of delta: Lua decides how things fall.
-@(lua=move, table=Entity, lua_zh="移动")
-entity_move_lua :: proc(handle: Entity_Handle, delta: vec3, radius: f32, height: f32) -> bool {
+// The character mover: moves the entity by `delta` as a capsule of `radius` and total `height` standing on its
+// position, sliding along static collision (walls stop it, slopes and steps it rides). True if it ends standing on
+// ground. Gravity is part of delta: Lua decides how things fall.
+@(lua=move_character, table=Entity, lua_zh="角色移动")
+entity_move_character_lua :: proc(handle: Entity_Handle, delta: vec3, radius: f32, height: f32) -> bool {
     w := lua_world()
     e, ok := entity_get(w, handle)
     if !ok do return false

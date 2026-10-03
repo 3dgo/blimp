@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blimp Lua 脚本指南</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Serif+SC:wght@600;900&display=swap">
+<style>
+/* Layout: an engine reference manual. Sticky contents rail on the left, one reading column of ~70ch,
+   code blocks as night-sky panels like the engine viewport, screenshots side by side for before/after. */
+:root {
+  --bg: #f4f6fa;        /* page: faintly blue, like the editor's daylight theme */
+  --surface: #ffffff;
+  --fg: #1a1f2c;
+  --muted: #5a6377;
+  --line: #dce1ea;
+  --accent: #3150c0;    /* the castle's roof blue */
+  --warm: #b8611c;      /* torchlight */
+  --code-bg: #121620;   /* engine background 0.07, 0.08, 0.11 */
+  --code-fg: #dfe4ee;
+  --code-line: #252c3b;
+  --t-kw: #8fa4ff;
+  --t-api: #f0a65a;
+  --t-str: #8fd3a5;
+  --t-num: #e49ac6;
+  --t-com: #7d879c;
+  --inline-code: #e9edf5;
+  --display: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --body: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
+  --step-0: 1rem;
+  --step-1: 1.125rem;
+  --step-2: 1.4rem;
+  --step-3: 2.6rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1118; --surface: #151a24; --fg: #e3e7ef; --muted: #98a1b4; --line: #262e3e;
+    --accent: #93a6ff; --warm: #f0a65a; --code-bg: #0a0d13; --code-line: #1f2533; --inline-code: #1d2330;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1118; --surface: #151a24; --fg: #e3e7ef; --muted: #98a1b4; --line: #262e3e;
+  --accent: #93a6ff; --warm: #f0a65a; --code-bg: #0a0d13; --code-line: #1f2533; --inline-code: #1d2330;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 400 var(--step-0)/1.8 var(--body);
+  padding-inline: 16px;
+}
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+.page {
+  max-width: 1120px; margin: 0 auto;
+  display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px;
+  padding-block: 48px 96px;
+}
+
+/* ── Contents rail ── */
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 32px); align-self: start; max-height: calc(100vh - 64px); overflow-y: auto; }
+nav.toc .label, .eyebrow {
+  font: 600 0.72rem/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+}
+nav.toc ol { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 2px; }
+nav.toc a {
+  display: grid; grid-template-columns: 2.2em 1fr; padding: 5px 8px; border-radius: 6px;
+  color: var(--fg); text-decoration: none; font-size: 0.9rem; line-height: 1.45;
+}
+nav.toc a:hover { background: var(--surface); }
+nav.toc a.on { background: var(--surface); color: var(--accent); }
+nav.toc .num { font: 400 0.8rem/1.6 var(--mono); color: var(--muted); }
+details.toc-m { display: none; }
+
+/* ── Header ── */
+header.hero { display: grid; gap: 18px; margin-bottom: 40px; }
+header.hero h1 {
+  font: 900 var(--step-3)/1.15 var(--display); margin: 0; letter-spacing: 0.01em; text-wrap: balance;
+}
+header.hero h1 .en { display: block; font: 600 0.95rem/1.4 var(--mono); color: var(--muted); letter-spacing: 0.04em; margin-top: 10px; }
+header.hero p { margin: 0; max-width: 66ch; color: var(--muted); }
+.facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.facts li {
+  font-size: 0.85rem; line-height: 1.4; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+}
+.facts b { font: 600 0.72rem/1 var(--mono); letter-spacing: 0.08em; color: var(--warm); margin-right: 6px; }
+header.hero figure { margin: 8px 0 0; }
+
+/* ── Body ── */
+main { min-width: 0; }
+section { padding-top: 28px; margin-top: 28px; border-top: 1px solid var(--line); max-width: 760px; }
+details.toc-m + section { border-top: 0; margin-top: 0; padding-top: 0; }
+h2, h3 { text-wrap: balance; }
+h2 { font: 600 var(--step-2)/1.35 var(--display); margin: 0 0 18px; display: flex; gap: 14px; align-items: baseline; }
+h2 .num { font: 600 0.9rem/1 var(--mono); color: var(--warm); min-width: 1.8em; }
+h3 { font: 600 var(--step-1)/1.4 var(--body); margin: 34px 0 12px; display: flex; gap: 10px; align-items: baseline; }
+h3 .num { font: 400 0.82rem/1 var(--mono); color: var(--muted); }
+p, ul, ol { margin: 0 0 14px; }
+ul, ol { padding-left: 1.4em; }
+li { margin: 4px 0; }
+li > ol, li > ul { margin: 6px 0 4px; }
+strong { font-weight: 650; }
+:not(pre) > code {
+  font: 0.86em/1 var(--mono); background: var(--inline-code); padding: 2px 6px; border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+/* The first section's core rule reads as the page's thesis. */
+#s1 + p { font-size: var(--step-1); }
+
+pre.code {
+  background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--code-line);
+  border-radius: 8px; padding: 16px 18px; margin: 14px 0 18px; overflow-x: auto;
+  font: 0.86rem/1.7 var(--mono); tab-size: 4;
+}
+pre.code code { font: inherit; }
+.t-kw { color: var(--t-kw); font-weight: 600; }
+.t-api { color: var(--t-api); }
+.t-str { color: var(--t-str); }
+.t-num { color: var(--t-num); }
+.t-com { color: var(--t-com); font-style: italic; }
+
+.tbl { overflow-x: auto; margin: 14px 0 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; line-height: 1.6; }
+th, td { text-align: left; vertical-align: top; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+th { font: 600 0.72rem/1.4 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { white-space: nowrap; }
+td code { white-space: nowrap; }
+tr.group td { font: 600 0.78rem/1 var(--mono); letter-spacing: 0.1em; color: var(--warm); padding-top: 16px; background: transparent; }
+
+figure { margin: 18px 0; }
+figure img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
+figcaption { font-size: 0.82rem; color: var(--muted); margin-top: 8px; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0 20px; }
+.pair figure { margin: 0; }
+.pair figcaption { font-family: var(--mono); font-size: 0.78rem; }
+
+aside.note {
+  margin: 14px 0; padding: 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--warm);
+  border-radius: 0 8px 8px 0; background: var(--surface); font-size: 0.92rem;
+}
+
+footer { max-width: 760px; margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.82rem; }
+
+@media (max-width: 900px) {
+  .page { grid-template-columns: minmax(0, 1fr); gap: 0; padding-block: 28px 64px; }
+  nav.toc { display: none; }
+  details.toc-m { display: block; margin: 0 0 28px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 10px 14px; }
+  details.toc-m summary { cursor: pointer; font: 600 0.78rem/1.6 var(--mono); letter-spacing: 0.1em; color: var(--muted); }
+  details.toc-m ol { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 2px; }
+  details.toc-m a { display: grid; grid-template-columns: 2.2em 1fr; text-decoration: none; color: var(--fg); font-size: 0.92rem; padding: 4px 0; }
+  details.toc-m .num { font: 400 0.8rem/1.7 var(--mono); color: var(--muted); }
+  :root { --step-3: 2rem; --step-2: 1.25rem; }
+}
+@media (max-width: 560px) {
+  .pair { grid-template-columns: minmax(0, 1fr); }
+  pre.code { font-size: 0.8rem; padding: 14px; }
+}
+body { margin: 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <nav class="toc" aria-label="目录">
+    <div class="label">目录</div>
+    <ol><li><a href="#s1"><span class="num">1</span>核心规则：Lua 发命令、查状态，不保存状态</a></li><li><a href="#s2"><span class="num">2</span>脚本文件与运行方式</a></li><li><a href="#s3"><span class="num">3</span>生命周期回调</a></li><li><a href="#s4"><span class="num">4</span>实体</a></li><li><a href="#s5"><span class="num">5</span>数学库</a></li><li><a href="#s6"><span class="num">6</span>输入</a></li><li><a href="#s7"><span class="num">7</span>声音</a></li><li><a href="#s8"><span class="num">8</span>灯光组</a></li><li><a href="#s9"><span class="num">9</span>移动与碰撞</a></li><li><a href="#s10"><span class="num">10</span>相机</a></li><li><a href="#s11"><span class="num">11</span>调试</a></li><li><a href="#s12"><span class="num">12</span>示例：城堡关卡</a></li><li><a href="#appendix"><span class="num">附录</span>接口速查</a></li></ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">Blimp 引擎 · 脚本</div>
+      <h1>Lua 脚本指南<span class="en">World / Entity / Input · LuaCN</span></h1>
+      <p>本文介绍怎样用 Lua 编写 Blimp 的游戏逻辑：脚本放在哪里、什么时候运行、能调用哪些引擎接口（实体、输入、移动与碰撞、声音、灯光组、相机），最后逐段讲解城堡关卡的脚本 <code>assets/scripts/castle.luacn</code>。</p><p>本文假设你已经会写 Lua，不讲 Lua 语言本身。引擎内嵌的是 <strong>LuaJIT</strong>（Lua 5.1 语法），矢量和四元数是 FFI 结构体。</p>
+      <ul class="facts">
+        <li><b>运行时</b>LuaJIT，Lua 5.1 语法</li>
+        <li><b>源文件</b>.luacn → .lua</li>
+        <li><b>坐标</b>左手系，Y 上，+Z 前</li>
+        <li><b>状态</b>存在实体字段里，不在 Lua 里</li>
+      </ul>
+      <figure>
+        <img src="images/lua/editor.jpg" alt="城堡关卡的编辑器界面" width="1280" height="720">
+        <figcaption>编辑器里打开的城堡关卡 <code>assets/scenes/castle.level</code>：左边是模板和世界列表，右边是实体列表。</figcaption>
+      </figure>
+    </header>
+
+    <details class="toc-m">
+      <summary>目录</summary>
+      <ol><li><a href="#s1"><span class="num">1</span>核心规则：Lua 发命令、查状态，不保存状态</a></li><li><a href="#s2"><span class="num">2</span>脚本文件与运行方式</a></li><li><a href="#s3"><span class="num">3</span>生命周期回调</a></li><li><a href="#s4"><span class="num">4</span>实体</a></li><li><a href="#s5"><span class="num">5</span>数学库</a></li><li><a href="#s6"><span class="num">6</span>输入</a></li><li><a href="#s7"><span class="num">7</span>声音</a></li><li><a href="#s8"><span class="num">8</span>灯光组</a></li><li><a href="#s9"><span class="num">9</span>移动与碰撞</a></li><li><a href="#s10"><span class="num">10</span>相机</a></li><li><a href="#s11"><span class="num">11</span>调试</a></li><li><a href="#s12"><span class="num">12</span>示例：城堡关卡</a></li><li><a href="#appendix"><span class="num">附录</span>接口速查</a></li></ol>
+    </details>
+
+    <section><h2 id="s1"><span class="num">1</span><span>核心规则：Lua 发命令、查状态，不保存状态</span></h2>
+<p>这是整个脚本系统的前提，后面每个接口都按它设计：</p>
+<ul><li><strong>游戏状态归引擎所有</strong>。实体的位置、速度、声音都存在 Odin 那一侧；Lua 每帧读取它们，算出结果，再写回去。</li><li><strong>脚本里不留会变的东西</strong>。不要在脚本的全局或 upvalue 里存计时器、状态机、"上一帧的值"。顶层的 <code>本地</code> 只放常量（速度、半径、方向向量）。</li><li>需要随时间变化的东西，有两种写法：<ol><li><strong>写成时间的函数</strong>：<code>世界.时间()</code> 是运行世界的游戏时钟，暂停时停止。城门、旗帜、探照灯都按 <code>世界.时间()</code> 算出当前姿态，不需要任何记忆。</li><li><strong>存进实体字段</strong>：例如玩家的竖直速度存在 <code>player</code> 实体的 <code>velocity</code> 字段里。字段不够用就在实体 schema 里加一个（见 <a href="#s4-4">4.4</a>）。</li></ol></li></ul>
+<p>这样做的好处是：<strong>脚本随时可以从头重新执行</strong>。保存脚本时引擎热重载它，游戏不会因此坏掉。</p>
+</section><section><h2 id="s2"><span class="num">2</span><span>脚本文件与运行方式</span></h2>
+<h3 id="s2-1"><span class="num">2.1</span><span>两种脚本</span></h3>
+<div class="tbl"><table><thead><tr><th></th><th>世界脚本</th><th>引擎脚本</th></tr></thead><tbody><tr><td>文件</td><td>关卡的世界设置里的 <code>script</code> 路径，如 <code>assets/scripts/castle.lua</code></td><td>固定为 <code>assets/scripts/main.lua</code></td></tr><tr><td>何时运行</td><td>只在关卡<strong>运行（Play）</strong>时</td><td>引擎启动后整个会话</td></tr><tr><td>回调</td><td><code>世界.开始()</code>、<code>世界.更新(时间差)</code></td><td><code>引擎.开始()</code>、<code>引擎.更新(时间差)</code>、<code>引擎.完结()</code></td></tr><tr><td><code>世界.*</code> / <code>实体.*</code> 作用于</td><td>这个运行中的关卡</td><td>内部的 <code>game_world</code>（不渲染）</td></tr></tbody></table></div>
+<p><strong>游戏逻辑写在世界脚本里。</strong> 引擎脚本作用的 <code>game_world</code> 不在屏幕上，不是你正在玩的关卡。</p>
+<p>每个世界脚本运行在自己的环境表里（找不到的名字回落到全局 <code>_G</code>），所以同时打开的两个关卡的脚本互不覆盖全局变量。脚本里的 <code>世界</code> 也是它自己的表，<code>世界.开始</code> 等回调只属于这个关卡。</p>
+<h3 id="s2-2"><span class="num">2.2</span><span>LuaCN：中文关键字的 Lua</span></h3>
+<p>脚本可以写成 <code>.luacn</code>：关键字是中文，构建时（以及编辑器热重载时）转译成同名的 <code>.lua</code>。<strong>关卡引用的是 <code>.lua</code>，但要改的是 <code>.luacn</code></strong>，生成的 <code>.lua</code> 会被覆盖。也可以直接写普通 <code>.lua</code>，所有接口都有英文名。</p>
+<div class="tbl"><table><thead><tr><th>LuaCN</th><th>Lua</th><th>LuaCN</th><th>Lua</th></tr></thead><tbody><tr><td><code>本地</code></td><td><code>local</code></td><td><code>返回</code></td><td><code>return</code></td></tr><tr><td><code>函数</code></td><td><code>function</code></td><td><code>结束</code></td><td><code>end</code></td></tr><tr><td><code>如果</code> / <code>那么</code></td><td><code>if</code> / <code>then</code></td><td><code>否则如果</code> / <code>否则</code></td><td><code>elseif</code> / <code>else</code></td></tr><tr><td><code>当</code> / <code>做</code></td><td><code>while</code> / <code>do</code></td><td><code>对于</code> / <code>在</code></td><td><code>for</code> / <code>in</code></td></tr><tr><td><code>重复</code> / <code>直到</code></td><td><code>repeat</code> / <code>until</code></td><td><code>中断</code></td><td><code>break</code></td></tr><tr><td><code>真</code> / <code>假</code> / <code>空</code></td><td><code>true</code> / <code>false</code> / <code>nil</code></td><td><code>和</code> / <code>或</code> / <code>非</code></td><td><code>and</code> / <code>or</code> / <code>not</code></td></tr></tbody></table></div>
+<p>常用标准库也有中文别名：<code>打印</code>(print)、<code>转文本</code>(tostring)、<code>转数字</code>(tonumber)、<code>遍历</code>(pairs)、<code>遍历列表</code>(ipairs)、<code>安全调用</code>(pcall)、<code>字符串.格式化</code>(string.format)、<code>表.插入</code>(table.insert) 等，完整列表在 <code>assets_engine/scripts/lua_chinese_defs.lua</code>。</p>
+<h3 id="s2-3"><span class="num">2.3</span><span>给关卡挂脚本</span></h3>
+<ol><li>打开关卡，点视口工具栏上的齿轮按钮打开<strong>世界设置</strong>，在 <code>script</code> 里填脚本路径（项目相对路径，如 <code>assets/scripts/castle.lua</code>）。</li><li>齿轮旁边的 <code>&lt;&gt;</code> 按钮用 VS Code 打开这个脚本；如果它是由 <code>.luacn</code> 生成的，打开的是 <code>.luacn</code>。</li><li>按 <strong>F5</strong> 运行。</li></ol>
+<p>运行相关的功能键：</p>
+<div class="tbl"><table><thead><tr><th>键</th><th>作用</th></tr></thead><tbody><tr><td>F5</td><td>运行：复制一份关卡来运行，脚本执行 <code>世界.开始()</code></td></tr><tr><td>F6</td><td>暂停 / 继续。暂停时 <code>世界.更新</code> 不调用，<code>世界.时间()</code> 不走</td></tr><tr><td>F10</td><td>暂停时单步一帧</td></tr><tr><td>F7</td><td>停止。运行副本被丢弃，编辑中的关卡<strong>从不</strong>被运行修改</td></tr><tr><td>F8</td><td>在游戏模式（整个窗口是游戏画面，通过相机实体看）和编辑器之间切换，游戏继续运行</td></tr></tbody></table></div>
+<p>运行的是关卡的<strong>副本</strong>：脚本把吊桥转了、把玩家移走了，停止后关卡还是原样，也不会被保存。</p>
+<h3 id="s2-4"><span class="num">2.4</span><span>热重载与报错</span></h3>
+<ul><li>运行时保存脚本，引擎会重新加载它，并<strong>重新执行 <code>世界.开始()</code></strong>。因为脚本不保存状态，这总是安全的。</li><li>脚本出错时，错误写进日志，这个关卡的脚本停止运行，直到你修改脚本（热重载）或重新打开关卡。不会每帧刷屏。</li><li><code>打印(...)</code> 输出到引擎日志（控制台）。</li></ul>
+</section><section><h2 id="s3"><span class="num">3</span><span>生命周期回调</span></h2>
+<pre class="code"><code><span class="t-kw">function</span> <span class="t-api">世界</span>.开始()
+    <span class="t-com">-- 运行开始时执行一次（脚本热重载后也会再执行一次）</span>
+<span class="t-kw">end</span>
+
+<span class="t-kw">function</span> <span class="t-api">世界</span>.更新(时间差)
+    <span class="t-com">-- 关卡每走一帧调用一次；时间差 是这一帧的秒数</span>
+    <span class="t-kw">本地</span> t = <span class="t-api">世界</span>.时间()   <span class="t-com">-- 自运行开始的游戏秒数，暂停时停止</span>
+<span class="t-kw">end</span></code></pre>
+<p>英文写法是 <code>function World.start()</code> / <code>function World.update(dt)</code> / <code>World.time()</code>。</p>
+<ul><li><code>世界.更新</code> 只在关卡真正前进的帧调用：暂停时不调用，F10 单步时调用一次。</li><li>动画请基于 <code>世界.时间()</code>，不要在 Lua 里自己累加时间。</li></ul>
+</section><section><h2 id="s4"><span class="num">4</span><span>实体</span></h2>
+<h3 id="s4-1"><span class="num">4.1</span><span>句柄</span></h3>
+<p>实体就是句柄。Lua 拿到的是一个整数，所有实体接口都以它为第一个参数。</p>
+<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>世界.查找(名称)</code></td><td><code>World.find(name)</code></td><td>按名称找实体，返回 <code>句柄, 是否找到</code></td></tr><tr><td><code>实体.有效(句柄)</code></td><td><code>Entity.valid(h)</code></td><td>句柄是否还指向一个存在的实体</td></tr><tr><td><code>世界.添加(名称, 模型, 位置)</code></td><td><code>World.add(name, model, pos)</code></td><td>新建实体，返回句柄。<code>模型</code> 是资产键，如 <code>&quot;assets/models/castle.gltf:flag001&quot;</code>；名称重复时自动改成 <code>name_1</code> 这样的唯一名</td></tr><tr><td><code>世界.移除(句柄)</code></td><td><code>World.remove(h)</code></td><td>删除实体</td></tr></tbody></table></div>
+<p><code>世界.查找</code> 很便宜，每帧按名称查找就是推荐写法，不要把句柄缓存在脚本里。找不到时句柄无效，<code>实体.有效</code> 返回假，后续对它的读写都是安全的空操作：</p>
+<pre class="code"><code><span class="t-kw">本地</span> 灯 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;searchlight&quot;</span>)
+<span class="t-kw">如果</span> <span class="t-kw">非</span> <span class="t-api">实体</span>.有效(灯) <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-kw">结束</span></code></pre>
+<aside class="note">运行中用 <code>世界.添加</code> 生成的实体目前不参与碰撞（物理世界在运行开始时建好）。</aside>
+<h3 id="s4-2"><span class="num">4.2</span><span>读写字段</span></h3>
+<p>实体是一个"胖结构体"，所有字段都按名称读写。接口按值的类型区分：</p>
+<div class="tbl"><table><thead><tr><th>类型</th><th>读</th><th>写</th><th>适用字段</th></tr></thead><tbody><tr><td>数字</td><td><code>实体.取数(e, 字段)</code></td><td><code>实体.设数(e, 字段, 值)</code></td><td><code>f32</code>、整数、枚举（序号）、标志位（位掩码）</td></tr><tr><td>布尔</td><td><code>实体.取布尔(e, 字段)</code></td><td><code>实体.设布尔(e, 字段, 值)</code></td><td><code>bool</code></td></tr><tr><td>文本</td><td><code>实体.取文本(e, 字段)</code></td><td><code>实体.设文本(e, 字段, 值)</code></td><td>名称、模型、声音等字符串</td></tr><tr><td>矢量</td><td><code>实体.取矢量(e, 字段)</code></td><td><code>实体.设矢量(e, 字段, 矢量3)</code></td><td><code>vec3</code></td></tr><tr><td>四元数</td><td><code>实体.取四元数(e, 字段)</code></td><td><code>实体.设四元数(e, 字段, 四元数)</code></td><td><code>quat</code></td></tr></tbody></table></div>
+<p>英文名：<code>Entity.get_number / set_number / get_bool / set_bool / get_string / set_string / get_vec3 / set_vec3 / get_quat / set_quat</code>。</p>
+<p>字段名用 schema 里的<strong>英文 id</strong>（编辑器检查器里显示的是中文标签）。字段名写错或类型不对时，读返回零值，写不生效。</p>
+<pre class="code"><code><span class="t-kw">本地</span> 门 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;portcullis&quot;</span>)
+<span class="t-kw">本地</span> 位置 = <span class="t-api">实体</span>.取矢量(门, <span class="t-str">&quot;position&quot;</span>)
+<span class="t-api">实体</span>.设矢量(门, <span class="t-str">&quot;position&quot;</span>, <span class="t-api">矢量3</span>(位置.x, <span class="t-num">0.6</span>, 位置.z))
+<span class="t-api">实体</span>.设数(<span class="t-api">世界</span>.查找(<span class="t-str">&quot;torch_keep&quot;</span>), <span class="t-str">&quot;intensity&quot;</span>, <span class="t-num">2.0</span>)</code></pre>
+<h3 id="s4-3"><span class="num">4.3</span><span>常用字段</span></h3>
+<div class="tbl"><table><thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead><tbody><tr><td><code>name</code></td><td>文本</td><td>名称，在一个关卡里唯一</td></tr><tr><td><code>position</code> / <code>rotation</code> / <code>scale</code></td><td>矢量 / 四元数 / 矢量</td><td>变换</td></tr><tr><td><code>model</code></td><td>文本</td><td>模型资产键</td></tr><tr><td><code>basic_flags</code></td><td>标志</td><td>位 0 = 启用（Enabled），位 1 = 隐藏（Hidden）</td></tr><tr><td><code>basic_static_flags</code></td><td>标志</td><td>位 0 = 静态（Static），位 1 = 可渲染（Renderable），位 2 = 投射间接光（Cast Indirect）</td></tr><tr><td><code>camera_type</code></td><td>枚举</td><td>0 无，1 透视，2 正交</td></tr><tr><td><code>light_type</code></td><td>枚举</td><td>0 无，1 平行光，2 点光源，3 聚光灯，4 圆柱光</td></tr><tr><td><code>color</code> / <code>intensity</code></td><td>矢量 / 数字</td><td>灯光颜色与强度</td></tr><tr><td><code>fov</code> / <code>inner_fov</code></td><td>数字</td><td>相机视角；聚光灯外 / 内锥角（度）</td></tr><tr><td><code>range</code></td><td>矢量（x, y）</td><td>灯光：照射范围；声音：x 以内满音量，到 y 线性衰减为零</td></tr><tr><td><code>light_group</code></td><td>数字</td><td>灯光所属的光源组，0 = 不可切换（见第 8 节）</td></tr><tr><td><code>sound</code> / <code>volume</code> / <code>sound_flags</code></td><td>文本 / 数字 / 标志</td><td>实体自带的声音（见第 7 节）</td></tr><tr><td><code>collision</code></td><td>枚举</td><td>0 无，1 包围盒，2 碰撞网格（<code>_col</code>），3 渲染网格</td></tr><tr><td><code>velocity</code></td><td>矢量</td><td>游戏自用的速度，不保存到关卡文件</td></tr></tbody></table></div>
+<p>标志位按位掩码读写，例如隐藏一个实体：</p>
+<pre class="code"><code><span class="t-kw">本地</span> 标志 = <span class="t-api">实体</span>.取数(e, <span class="t-str">&quot;basic_flags&quot;</span>)       <span class="t-com">-- 1 = 只启用</span>
+<span class="t-api">实体</span>.设数(e, <span class="t-str">&quot;basic_flags&quot;</span>, 标志 + <span class="t-num">2</span>)          <span class="t-com">-- 加上 Hidden（假设原来没有隐藏）</span></code></pre>
+<p><strong>会被脚本移动的实体不要勾"静态"</strong>。静态实体参与探针烘焙，也是物理里的静态刚体；城堡里的吊桥、闸门、旗帜都只设了 Renderable。</p>
+<h3 id="s4-4"><span class="num">4.4</span><span>自定义字段</span></h3>
+<p>字段定义在项目根目录的 <code>entity_schema.ini</code>（也可以用引擎内的 schema 编辑器修改），构建时生成 <code>src/gen_entity.odin</code>。新加的字段<strong>不需要重新生成任何绑定</strong>，Lua 立即可以按名称读写。城堡玩家用的 <code>velocity</code> 就是这样一个游戏字段。</p>
+</section><section><h2 id="s5"><span class="num">5</span><span>数学库</span></h2>
+<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th></th></tr></thead><tbody><tr><td><code>矢量2/3/4(x, y, …)</code></td><td><code>Vec2/3/4</code></td><td>支持 <code>+ - *</code>（与数字或同类相乘）、取负；方法 <code>:点乘 :叉乘 :长度 :标准化 :插值</code></td></tr><tr><td><code>四元数(x, y, z, w)</code></td><td><code>Quat</code></td><td><code>四元数.单位()</code>、<code>四元数.轴角(轴, 弧度)</code>、<code>四元数.欧拉角(俯仰, 偏航, 滚转)</code>；方法 <code>:旋转(矢量) :球面插值 :逆 :共轭 :标准化</code></td></tr><tr><td><code>矩阵3</code> / <code>矩阵4</code></td><td><code>Mat3</code> / <code>Mat4</code></td><td><code>矩阵4.变换矩阵(位置, 旋转, 缩放)</code>、<code>:变换点 :变换方向 :逆矩阵</code> 等</td></tr><tr><td><code>数学.*</code></td><td><code>CMath.*</code></td><td><code>圆周率 正弦 余弦 反正切2 反正弦 开方 夹紧 截断(0–1) 插值 平滑阶跃 向下取整 角度转弧度 …</code></td></tr></tbody></table></div>
+<ul><li>四元数相乘 <code>a * b</code> 表示先做 <code>b</code> 再做 <code>a</code>（相对本地坐标）。城堡里 <code>四元数.轴角(上, 偏航) * 四元数.轴角(右, 俯仰)</code> 是先抬头低头、再左右转。</li><li><code>四元数:旋转(矢量)</code> 把向量转到这个朝向下，例如 <code>朝向:旋转(矢量3(0, 0, 1))</code> 是朝前的方向。</li><li>角度一律是<strong>弧度</strong>。</li></ul>
+<p><strong>坐标系</strong>：左手系，<strong>Y 向上，+Z 向前</strong>，+X 向右。</p>
+</section><section><h2 id="s6"><span class="num">6</span><span>输入</span></h2>
+<p>输入只在<strong>游戏模式</strong>下、窗口有焦点时有效（运行后，或按 F8 进入）。在编辑器里打字不会传进游戏；不在游戏模式时所有按键读作松开、所有轴读作 0。</p>
+<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>输入.按住(键)</code></td><td><code>Input.down(key)</code></td><td>现在是否按着</td></tr><tr><td><code>输入.按下(键)</code></td><td><code>Input.pressed(key)</code></td><td>这一帧刚按下</td></tr><tr><td><code>输入.松开(键)</code></td><td><code>Input.released(key)</code></td><td>这一帧刚松开</td></tr><tr><td><code>输入.鼠标按住(n)</code> / <code>输入.鼠标按下(n)</code></td><td><code>Input.mouse_down / mouse_pressed</code></td><td>鼠标键 1–5：1 左键，2 中键，3 右键</td></tr><tr><td><code>输入.鼠标移动()</code></td><td><code>Input.mouse_delta()</code></td><td>这一帧鼠标移动的像素（矢量2，+y 向下），锁定鼠标时也有效</td></tr><tr><td><code>输入.锁定鼠标(布尔)</code></td><td><code>Input.lock_mouse(b)</code></td><td>隐藏光标并锁在窗口内（鼠标视角）。回到编辑器时自动放开，回到游戏时重新锁定</td></tr><tr><td><code>输入.手柄轴(名称)</code></td><td><code>Input.gamepad_axis(name)</code></td><td>摇杆 −1 到 1（+y 向下，已去死区），扳机 0 到 1；无手柄时为 0</td></tr><tr><td><code>输入.手柄按住(名称)</code> / <code>输入.手柄按下(名称)</code></td><td><code>Input.gamepad_down / gamepad_pressed</code></td><td>手柄按键</td></tr></tbody></table></div>
+<p>键名是 SDL 的扫描码名：<code>&quot;W&quot;</code>、<code>&quot;Space&quot;</code>、<code>&quot;Escape&quot;</code>、<code>&quot;Left Shift&quot;</code>、<code>&quot;Return&quot;</code>、<code>&quot;Up&quot;</code>…… 手柄名是 SDL 的手柄名：轴 <code>&quot;leftx&quot; &quot;lefty&quot; &quot;rightx&quot; &quot;righty&quot; &quot;lefttrigger&quot; &quot;righttrigger&quot;</code>，按键 <code>&quot;a&quot; &quot;b&quot; &quot;x&quot; &quot;y&quot; &quot;leftstick&quot; &quot;start&quot;</code>……</p>
+</section><section><h2 id="s7"><span class="num">7</span><span>声音</span></h2>
+<p>声音文件（<code>.wav .ogg .mp3 .flac</code>）在启动时全部解码，用项目路径作为键，例如 <code>&quot;assets/sounds/jump.wav&quot;</code>。Lua 拿不到声音句柄：<strong>要控制的声音就挂在实体上，实体就是句柄。</strong></p>
+<h3 id="s7-1"><span class="num">7.1</span><span>实体上的声音</span></h3>
+<p>在编辑器里给实体设置：</p>
+<ul><li><code>sound</code>：声音文件；<code>volume</code>：音量；</li><li><code>sound_flags</code>：<strong>开始时播放</strong>（运行开始自动播放）、<strong>循环</strong>、<strong>空间定位</strong>；</li><li><code>range</code>：x 以内满音量，到 y 线性衰减为零。</li></ul>
+<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>实体.播放声音(e)</code></td><td><code>Entity.play_sound(e)</code></td><td>按这个实体的 sound / volume / range / sound_flags 播放，声音跟着实体移动。没播出来返回假</td></tr><tr><td><code>实体.停止声音(e)</code></td><td><code>Entity.stop_sound(e)</code></td><td>停止它的声音</td></tr></tbody></table></div>
+<h3 id="s7-2"><span class="num">7.2</span><span>一次性声音</span></h3>
+<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>世界.播放声音(键 [, 音量])</code></td><td><code>World.play_sound(key [, volume])</code></td><td>不在空间中的声音：音乐、界面音效，哪里听都一样大</td></tr><tr><td><code>世界.在位置播放声音(键, 位置 [, 音量])</code></td><td><code>World.play_sound_at(key, pos [, volume])</code></td><td>在某一点播放，按默认范围随距离衰减</td></tr></tbody></table></div>
+<p>注意：</p>
+<ul><li>同时最多 32 个声音。满了以后挤掉听起来最小的；新声音比所有正在播放的都小时直接丢弃。</li><li>同一个声音文件 0.05 秒内只会响一次（循环声音除外），每帧调用播放不会叠成噪音，但也不会每帧都响。</li><li>听者是正在显示运行世界的那个视口的相机（游戏模式下就是游戏相机）。</li><li>暂停时声音暂停，停止运行时全部停止。编辑中的关卡不发声。</li></ul>
+</section><section><h2 id="s8"><span class="num">8</span><span>灯光组</span></h2>
+<p>灯光组用来在运行时整体调节一批灯：停电、蜡烛闪烁、窗户的灯一开一关。</p>
+<ul><li>每个关卡最多 <strong>4 个</strong>可切换的组，在<strong>世界设置 → 光源组</strong>里命名，并设置初始强度 <code>scale</code> 和闪烁图案 <code>pattern</code>。</li><li>每盏灯的 <code>light_group</code> 字段指定它属于哪个组（1–4）。0 组永远满强度。</li><li>组的强度同时作用于这些灯的<strong>实时直接光</strong>和<strong>烘焙的间接光</strong>（每个组烘焙在探针的独立一层），所以关灯后墙上的反光也一起消失。</li><li><code>pattern</code> 是 Quake 风格的灯光图案：每个字母持续 0.1 秒，循环；<code>a</code> = 0，<code>m</code> = 1，<code>z</code> ≈ 2；留空表示常亮。城堡的火把组用的是 <code>mmnmmommommnonmmonqnmmo</code>。</li></ul>
+<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>世界.设光源组(名称, 强度)</code></td><td><code>World.set_light_group(name, scale)</code></td><td>0 = 关，1 = 和保存/烘焙时一样。没有这个名称的组时返回假</td></tr><tr><td><code>世界.光源组(名称)</code></td><td><code>World.light_group(name)</code></td><td>当前强度（不含闪烁图案）</td></tr></tbody></table></div>
+<p>名称不区分大小写。最终亮度 = 组强度 × 闪烁图案当前的值，所以对火把组调用 <code>世界.设光源组(&quot;torches&quot;, 0.5)</code> 后它仍然闪烁，只是整体暗了一半。脚本设置的强度只属于这次运行，不会保存。</p>
+<div class="pair"><figure><img src="images/lua/lights_on.jpg" alt="灯光组全开" loading="lazy"><figcaption>所有组 = 1</figcaption></figure><figure><img src="images/lua/lights_off.jpg" alt="灯光组全关" loading="lazy"><figcaption>所有组 = 0</figcaption></figure></div>
+<p>上图是城堡关卡把 <code>torches</code>、<code>beacon</code>、<code>windows</code> 三组全开和全关的对比：城门两侧的火把、右侧角楼的信标和庭院里的篝火都熄灭了，只剩平行光 <code>sun</code> 和探照灯（都在 0 组）。</p>
+</section><section><h2 id="s9"><span class="num">9</span><span>移动与碰撞</span></h2>
+<p>物理目前只提供<strong>查询</strong>：不做模拟，没有刚体下落。"东西怎么掉"由 Lua 自己决定（重力写进位移里）。</p>
+<h3 id="s9-1"><span class="num">9.1</span><span>哪些实体会挡路</span></h3>
+<p>运行开始时，引擎给每个启用、且 <code>collision</code> 不为"无"的实体建一个碰撞体：</p>
+<div class="tbl"><table><thead><tr><th><code>collision</code></th><th>形状</th><th>适合</th></tr></thead><tbody><tr><td>无</td><td>不碰撞</td><td>旗子、装饰小物</td></tr><tr><td>包围盒</td><td>模型包围盒 × 缩放</td><td>树、石头，最便宜</td></tr><tr><td>碰撞网格（默认）</td><td>套件里的 <code>&lt;模型&gt;_col</code> 网格</td><td>美术专门做了简化碰撞的模型</td></tr><tr><td>渲染网格</td><td>模型的所有三角形</td><td>低多边形的城墙、地面</td></tr></tbody></table></div>
+<p>勾了"静态"的实体是静态碰撞体；其他的会<strong>跟着实体移动</strong>——脚本转动吊桥，玩家就会被吊桥挡住。</p>
+<h3 id="s9-2"><span class="num">9.2</span><span>角色移动</span></h3>
+<pre class="code"><code><span class="t-kw">本地</span> 着地 = <span class="t-api">实体</span>.角色移动(e, 位移, 半径, 高度)   <span class="t-com">-- Entity.move_character(e, delta, radius, height)</span></code></pre>
+<p>给玩家、NPC 这类在场景里走动的角色用。引擎用物理（Box3D）把实体当成一个站在它 <code>position</code> 上的胶囊体（半径、总高度），移动 <code>位移</code>，沿碰撞面滑动：撞墙停下，斜坡和台阶会走上去。结果直接写进实体的 <code>position</code>。返回值表示结束时是否站在地面上（法线 y ≥ 0.7 的面算地面）。实体自己的碰撞体会被忽略。</p>
+<p>只想直接改位置、不需要碰撞（吊桥、闸门、旗帜）就直接设 <code>position</code> / <code>rotation</code> 字段。</p>
+<p>位移已经乘过 <code>时间差</code>；重力也是位移的一部分。速度要跨帧保留就存进实体字段（见第 10 节玩家的写法）。</p>
+<h3 id="s9-3"><span class="num">9.3</span><span>射线检测</span></h3>
+<pre class="code"><code><span class="t-kw">本地</span> 命中, 点, 法线, 实体号 = <span class="t-api">世界</span>.射线检测(起点, 方向, 距离)   <span class="t-com">-- World.raycast(origin, dir, dist)</span></code></pre>
+<p>沿射线找第一个碰撞（方向不必是单位向量），返回是否命中、命中点、表面法线和命中的实体句柄。</p>
+</section><section><h2 id="s10"><span class="num">10</span><span>相机</span></h2>
+<p>游戏画面通过运行世界里<strong>第一个启用的相机实体</strong>（<code>camera_type</code> 不为"无"）来渲染。控制相机就是写它的 <code>position</code> 和 <code>rotation</code>，和任何实体一样。</p>
+<p>城堡的 <code>main_camera</code> 在关卡里摆成编辑器的俯瞰视角；脚本在 <code>世界.开始()</code> 里把它转到玩家的朝向，之后每帧放到玩家眼睛的位置。</p>
+</section><section><h2 id="s11"><span class="num">11</span><span>调试</span></h2>
+<ul><li><code>打印(...)</code> 输出到引擎日志。</li><li>调试版引擎可以用 <code>bin/blimpctl.exe</code> 从命令行执行 Lua：<pre class="code"><code>blimpctl worlds                      # 列出世界，运行副本的序号在这里
+echo print(World.time()) | blimpctl lua 1 -</code></pre><p><code>lua &lt;世界&gt; -</code> 让 <code>World.*</code> / <code>Entity.*</code> 作用于指定的世界，适合在运行中的关卡里测试射线、声音、灯光组。例如在城堡的运行副本里从玩家眼睛向前打一条射线：</p><pre class="code"><code>local p = World.find(&quot;player&quot;)
+local hit, pt, n, e = World.raycast(Entity.get_vec3(p, &quot;position&quot;) + Vec3(0, 0.34, 0), Vec3(0, 0, 1), 8)
+print(hit, Entity.get_string(e, &quot;name&quot;), pt)
+-- true    tree-small_1    Vec3(-2.98023e-08, 0.335, 1.60769)</code></pre></li><li>暂停（F6）后可以用 <code>blimpctl lua</code> 改实体、改灯光组，画面立即反映，而脚本不会把它覆盖回去，因为暂停时 <code>世界.更新</code> 不运行。</li></ul>
+</section><section><h2 id="s12"><span class="num">12</span><span>示例：城堡关卡</span></h2>
+<p><code>assets/scenes/castle.level</code> 的世界设置里 <code>script = assets/scripts/castle.lua</code>，它由 <code>assets/scripts/castle.luacn</code> 生成。脚本做了六件事：城门开关、城门音效、探照灯扫动、旗帜飘动、灯光组变化，以及一个第一人称玩家。所有动画都只是 <code>世界.时间()</code> 的函数；唯一跨帧的状态（玩家的竖直速度）存在实体字段里。</p>
+<h3 id="s12-1"><span class="num">12.1</span><span>常量与工具函数</span></h3>
+<pre class="code"><code><span class="t-kw">本地</span> 上 = <span class="t-api">矢量3</span>(<span class="t-num">0</span>, <span class="t-num">1</span>, <span class="t-num">0</span>)
+<span class="t-kw">本地</span> 右 = <span class="t-api">矢量3</span>(<span class="t-num">1</span>, <span class="t-num">0</span>, <span class="t-num">0</span>)
+<span class="t-kw">本地</span> 前 = <span class="t-api">矢量3</span>(<span class="t-num">0</span>, <span class="t-num">0</span>, <span class="t-num">1</span>)
+
+<span class="t-kw">本地</span> <span class="t-kw">函数</span> 平滑(x)
+    x = <span class="t-api">数学</span>.截断(x)
+    <span class="t-kw">返回</span> x * x * (<span class="t-num">3</span> - <span class="t-num">2</span> * x)
+<span class="t-kw">结束</span></code></pre>
+<p>顶层只有常量和纯函数。<code>平滑</code> 是 0–1 的 smoothstep 缓动。</p>
+<h3 id="s12-2"><span class="num">12.2</span><span>城门：用时间算出姿态</span></h3>
+<pre class="code"><code><span class="t-com">-- 城门循环，0 = 关闭并升起，1 = 打开并放下：开 6 秒，关闭 2 秒，关 5 秒，打开 2 秒。</span>
+<span class="t-kw">本地</span> <span class="t-kw">函数</span> 城门开度(t)
+    <span class="t-kw">本地</span> p = t % <span class="t-num">15</span>
+    <span class="t-kw">如果</span> p &lt; <span class="t-num">6</span>  <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-num">1</span> <span class="t-kw">结束</span>
+    <span class="t-kw">如果</span> p &lt; <span class="t-num">8</span>  <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-num">1</span> - 平滑((p - <span class="t-num">6</span>) / <span class="t-num">2</span>) <span class="t-kw">结束</span>
+    <span class="t-kw">如果</span> p &lt; <span class="t-num">13</span> <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-num">0</span> <span class="t-kw">结束</span>
+    <span class="t-kw">返回</span> 平滑((p - <span class="t-num">13</span>) / <span class="t-num">2</span>)
+<span class="t-kw">结束</span>
+
+<span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新城门(t)
+    <span class="t-kw">本地</span> 开度 = 城门开度(t)
+    <span class="t-kw">本地</span> 朝向 = <span class="t-api">四元数</span>.轴角(上, <span class="t-api">数学</span>.圆周率 / <span class="t-num">2</span>)   <span class="t-com">-- 城门朝 -Z（它的套件部件偏航了 90 度）</span>
+
+    <span class="t-com">-- 吊桥：铰链在原点，沿本地 +X 平放；升起时绕本地 Z 把 +X 往上转。</span>
+    <span class="t-kw">本地</span> 吊桥 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;drawbridge&quot;</span>)
+    <span class="t-kw">如果</span> <span class="t-api">实体</span>.有效(吊桥) <span class="t-kw">那么</span>
+        <span class="t-api">实体</span>.设四元数(吊桥, <span class="t-str">&quot;rotation&quot;</span>, 朝向 * <span class="t-api">四元数</span>.轴角(前, (<span class="t-num">1</span> - 开度) * <span class="t-api">数学</span>.角度转弧度(<span class="t-num">80</span>)))
+    <span class="t-kw">结束</span>
+
+    <span class="t-com">-- 闸门：城门打开时从拱门里升起（在吊桥放下之前先升）。</span>
+    <span class="t-kw">本地</span> 闸门 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;portcullis&quot;</span>)
+    <span class="t-kw">如果</span> <span class="t-api">实体</span>.有效(闸门) <span class="t-kw">那么</span>
+        <span class="t-kw">本地</span> 位置 = <span class="t-api">实体</span>.取矢量(闸门, <span class="t-str">&quot;position&quot;</span>)
+        <span class="t-api">实体</span>.设矢量(闸门, <span class="t-str">&quot;position&quot;</span>, <span class="t-api">矢量3</span>(位置.x, 平滑(开度 * <span class="t-num">1.5</span>) * <span class="t-num">0.6</span>, 位置.z))
+    <span class="t-kw">结束</span>
+<span class="t-kw">结束</span></code></pre>
+<p>要点：</p>
+<ul><li><code>城门开度(t)</code> 是一个 15 秒循环的纯函数。任意时刻（包括热重载之后、单步之后）都能直接算出城门该在哪，不需要"当前状态"变量。</li><li>吊桥的旋转 = 基础朝向 × 绕本地 Z 的抬起角度。四元数右乘表示在本地坐标里旋转。</li><li>闸门只改 <code>position.y</code>，x、z 从实体上读出来原样写回。</li><li>吊桥和闸门的 <code>collision</code> 不为"无"、也不是静态，所以物理碰撞体跟着它们动：吊桥升起时玩家走不过去。</li></ul>
+<div class="pair"><figure><img src="images/lua/gate_open.jpg" alt="城门打开" loading="lazy"><figcaption>打开（t % 15 &lt; 6）</figcaption></figure><figure><img src="images/lua/gate_closed.jpg" alt="城门关闭" loading="lazy"><figcaption>关闭（8 ≤ t % 15 &lt; 13）</figcaption></figure></div>
+<h3 id="s12-3"><span class="num">12.3</span><span>城门音效：检测"越过"某个时刻</span></h3>
+<pre class="code"><code><span class="t-com">-- 越过 = 这一帧越过了 间隔 的整数倍。</span>
+<span class="t-kw">本地</span> <span class="t-kw">函数</span> 越过(t, 时间差, 间隔)
+    <span class="t-kw">返回</span> <span class="t-api">数学</span>.向下取整(t / 间隔) ~= <span class="t-api">数学</span>.向下取整((t - 时间差) / 间隔)
+<span class="t-kw">结束</span>
+
+<span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新城门声音(t, 时间差)
+    <span class="t-kw">如果</span> 越过(t - <span class="t-num">6</span>, 时间差, <span class="t-num">15</span>) <span class="t-kw">或</span> 越过(t - <span class="t-num">13</span>, 时间差, <span class="t-num">15</span>) <span class="t-kw">那么</span>   <span class="t-com">-- 开始关闭 / 开始打开</span>
+        <span class="t-api">实体</span>.播放声音(<span class="t-api">世界</span>.查找(<span class="t-str">&quot;gate_sound&quot;</span>))
+    <span class="t-kw">结束</span>
+<span class="t-kw">结束</span></code></pre>
+<p>不保存"上次播放的时间"，而是比较这一帧的开始和结束是否跨过了 6 秒、13 秒这两个节点。<code>gate_sound</code> 是放在城门处的一个空实体，它的 <code>sound = assets/sounds/gate.wav</code>、<code>sound_flags = 空间定位</code>、<code>range = 0.5, 10</code>，脚本只管"现在播"，怎么播由实体字段决定。</p>
+<h3 id="s12-4"><span class="num">12.4</span><span>探照灯与旗帜</span></h3>
+<pre class="code"><code><span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新探照灯(t)
+    <span class="t-kw">本地</span> 灯 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;searchlight&quot;</span>)
+    <span class="t-kw">如果</span> <span class="t-kw">非</span> <span class="t-api">实体</span>.有效(灯) <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-kw">结束</span>
+    <span class="t-kw">本地</span> 偏航 = <span class="t-api">数学</span>.圆周率 + <span class="t-api">数学</span>.正弦(t * <span class="t-num">0.5</span>) * <span class="t-api">数学</span>.角度转弧度(<span class="t-num">70</span>)
+    <span class="t-api">实体</span>.设四元数(灯, <span class="t-str">&quot;rotation&quot;</span>, <span class="t-api">四元数</span>.轴角(上, 偏航) * <span class="t-api">四元数</span>.轴角(右, <span class="t-api">数学</span>.角度转弧度(<span class="t-num">38</span>)))
+<span class="t-kw">结束</span>
+
+<span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新旗帜(t)
+    <span class="t-kw">本地</span> i = <span class="t-num">1</span>
+    <span class="t-kw">当</span> <span class="t-kw">真</span> <span class="t-kw">做</span>
+        <span class="t-kw">本地</span> 旗 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;flag_&quot;</span> .. i)
+        <span class="t-kw">如果</span> <span class="t-kw">非</span> <span class="t-api">实体</span>.有效(旗) <span class="t-kw">那么</span> <span class="t-kw">中断</span> <span class="t-kw">结束</span>
+        <span class="t-kw">本地</span> 摆动 = <span class="t-api">数学</span>.正弦(t * <span class="t-num">2.3</span> + i * <span class="t-num">1.7</span>) * <span class="t-num">0.35</span> + <span class="t-api">数学</span>.正弦(t * <span class="t-num">5.1</span> + i) * <span class="t-num">0.08</span>
+        <span class="t-api">实体</span>.设四元数(旗, <span class="t-str">&quot;rotation&quot;</span>, <span class="t-api">四元数</span>.轴角(上, 摆动))
+        i = i + <span class="t-num">1</span>
+    <span class="t-kw">结束</span>
+<span class="t-kw">结束</span></code></pre>
+<ul><li>探照灯是一个投射阴影的聚光灯实体，转它的 <code>rotation</code> 就是转光束：先向下俯 38°，再左右扫 ±70°。</li><li>旗帜按命名约定 <code>flag_1</code>、<code>flag_2</code>……逐个查找，直到找不到为止。在编辑器里多复制一面旗（复制会自动编号）脚本就会让它一起飘，不用改代码。每面旗的相位 <code>i * 1.7</code> 不同，所以不会整齐划一。</li></ul>
+<h3 id="s12-5"><span class="num">12.5</span><span>灯光组</span></h3>
+<pre class="code"><code><span class="t-com">-- 光源组（世界设置）：信标闪烁，大厅的窗户每 20 秒里暗 4 秒。</span>
+<span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新灯光(t)
+    <span class="t-api">世界</span>.设光源组(<span class="t-str">&quot;beacon&quot;</span>, <span class="t-num">0.55</span> + <span class="t-num">0.45</span> * <span class="t-api">数学</span>.正弦(t * <span class="t-num">3</span>))
+    <span class="t-api">世界</span>.设光源组(<span class="t-str">&quot;windows&quot;</span>, (t % <span class="t-num">20</span>) &lt; <span class="t-num">16</span> <span class="t-kw">和</span> <span class="t-num">1</span> <span class="t-kw">或</span> <span class="t-num">0</span>)
+<span class="t-kw">结束</span></code></pre>
+<p>城堡的世界设置里有三个组：<code>torches</code>（火把，带闪烁图案）、<code>beacon</code>（城门塔上的信标）、<code>windows</code>（大厅窗户）。火把的闪烁完全由图案完成，脚本不用管；信标用正弦做呼吸效果；窗户每 20 秒熄灭 4 秒。因为组强度也作用于烘焙的间接光，窗户熄灭时它照在庭院里的反光也会消失。</p>
+<h3 id="s12-6"><span class="num">12.6</span><span>第一人称玩家</span></h3>
+<p><code>player</code> 是一个没有模型的实体，代表站在它 <code>position</code> 上的胶囊；<code>main_camera</code> 每帧跟到它的眼睛处。</p>
+<figure class="wide"><img src="images/lua/game_fps.jpg" alt="游戏模式下的第一人称视角" loading="lazy"><figcaption>游戏模式下的第一人称视角</figcaption></figure>
+<p><strong>视角：从相机现在的朝向反推偏航和俯仰。</strong> 脚本不存"当前偏航角"，而是每帧从相机的 <code>rotation</code> 算出来，加上这一帧的鼠标 / 右摇杆输入：</p>
+<pre class="code"><code><span class="t-kw">本地</span> 朝前 = <span class="t-api">实体</span>.取四元数(相机, <span class="t-str">&quot;rotation&quot;</span>):旋转(前)
+<span class="t-kw">本地</span> 鼠标 = <span class="t-api">输入</span>.鼠标移动()
+<span class="t-kw">本地</span> 偏航 = <span class="t-api">数学</span>.反正切2(朝前.x, 朝前.z) + 鼠标.x * 灵敏度 + <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;rightx&quot;</span>) * 摇杆看速 * 时间差
+<span class="t-kw">本地</span> 俯仰 = -<span class="t-api">数学</span>.反正弦(<span class="t-api">数学</span>.夹紧(朝前.y, -<span class="t-num">1</span>, <span class="t-num">1</span>)) + 鼠标.y * 灵敏度 + <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;righty&quot;</span>) * 摇杆看速 * 时间差
+俯仰 = <span class="t-api">数学</span>.夹紧(俯仰, -<span class="t-num">1.4</span>, <span class="t-num">1.4</span>)
+<span class="t-kw">本地</span> 朝向 = <span class="t-api">四元数</span>.轴角(上, 偏航) * <span class="t-api">四元数</span>.轴角(右, 俯仰)</code></pre>
+<p><strong>移动：键盘和左摇杆合成一个方向。</strong></p>
+<pre class="code"><code><span class="t-kw">本地</span> 向前 = <span class="t-api">矢量3</span>(<span class="t-api">数学</span>.正弦(偏航), <span class="t-num">0</span>, <span class="t-api">数学</span>.余弦(偏航))
+<span class="t-kw">本地</span> 向右 = <span class="t-api">矢量3</span>(<span class="t-api">数学</span>.余弦(偏航), <span class="t-num">0</span>, -<span class="t-api">数学</span>.正弦(偏航))
+<span class="t-kw">本地</span> 前后 = -<span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;lefty&quot;</span>)
+<span class="t-kw">本地</span> 左右 = <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;leftx&quot;</span>)
+<span class="t-kw">如果</span> <span class="t-api">输入</span>.按住(<span class="t-str">&quot;W&quot;</span>) <span class="t-kw">那么</span> 前后 = 前后 + <span class="t-num">1</span> <span class="t-kw">结束</span>
+<span class="t-kw">如果</span> <span class="t-api">输入</span>.按住(<span class="t-str">&quot;S&quot;</span>) <span class="t-kw">那么</span> 前后 = 前后 - <span class="t-num">1</span> <span class="t-kw">结束</span>
+<span class="t-kw">如果</span> <span class="t-api">输入</span>.按住(<span class="t-str">&quot;D&quot;</span>) <span class="t-kw">那么</span> 左右 = 左右 + <span class="t-num">1</span> <span class="t-kw">结束</span>
+<span class="t-kw">如果</span> <span class="t-api">输入</span>.按住(<span class="t-str">&quot;A&quot;</span>) <span class="t-kw">那么</span> 左右 = 左右 - <span class="t-num">1</span> <span class="t-kw">结束</span>
+<span class="t-com">-- （长度超过 1 时归一化，按住左 Shift / 按下左摇杆时用跑速）</span>
+<span class="t-kw">本地</span> 水平 = (向前 * 前后 + 向右 * 左右) * 速度</code></pre>
+<p><strong>重力、跳跃与碰撞：竖直速度存在实体字段里。</strong></p>
+<pre class="code"><code><span class="t-kw">本地</span> 竖直 = <span class="t-api">实体</span>.取矢量(玩家, <span class="t-str">&quot;velocity&quot;</span>).y - 重力 * 时间差
+<span class="t-kw">本地</span> 着地 = <span class="t-api">实体</span>.角色移动(玩家, <span class="t-api">矢量3</span>(水平.x * 时间差, 竖直 * 时间差, 水平.z * 时间差), 玩家半径, 玩家身高)
+<span class="t-kw">如果</span> 着地 <span class="t-kw">和</span> 竖直 &lt; <span class="t-num">0</span> <span class="t-kw">那么</span> 竖直 = -<span class="t-num">0.1</span> <span class="t-kw">结束</span>          <span class="t-com">-- 轻轻压住地面，下一帧还算着地</span>
+<span class="t-kw">如果</span> 着地 <span class="t-kw">和</span> (<span class="t-api">输入</span>.按下(<span class="t-str">&quot;Space&quot;</span>) <span class="t-kw">或</span> <span class="t-api">输入</span>.手柄按下(<span class="t-str">&quot;a&quot;</span>)) <span class="t-kw">那么</span>
+    竖直 = 跳速
+    <span class="t-api">世界</span>.播放声音(<span class="t-str">&quot;assets/sounds/jump.wav&quot;</span>, <span class="t-num">0.5</span>)
+<span class="t-kw">结束</span>
+<span class="t-api">实体</span>.设矢量(玩家, <span class="t-str">&quot;velocity&quot;</span>, <span class="t-api">矢量3</span>(<span class="t-num">0</span>, 竖直, <span class="t-num">0</span>))</code></pre>
+<p>这里是"Lua 不保存状态"的标准写法：读字段 → 计算 → <code>实体.角色移动</code> → 写回字段。速度在 <code>player</code> 实体上，脚本热重载后玩家照样在空中继续下落。</p>
+<p><strong>相机跟随、出界复位、脚步声：</strong></p>
+<pre class="code"><code><span class="t-kw">本地</span> 位置 = <span class="t-api">实体</span>.取矢量(玩家, <span class="t-str">&quot;position&quot;</span>)
+<span class="t-kw">如果</span> 位置.y &lt; -<span class="t-num">5</span> <span class="t-kw">那么</span>   <span class="t-com">-- 掉出了世界：回到出生点</span>
+    位置 = 出生点
+    <span class="t-api">实体</span>.设矢量(玩家, <span class="t-str">&quot;position&quot;</span>, 位置)
+    <span class="t-api">实体</span>.设矢量(玩家, <span class="t-str">&quot;velocity&quot;</span>, <span class="t-api">矢量3</span>(<span class="t-num">0</span>, <span class="t-num">0</span>, <span class="t-num">0</span>))
+<span class="t-kw">结束</span>
+<span class="t-kw">本地</span> 眼 = 位置 + 上 * 眼高
+<span class="t-api">实体</span>.设矢量(相机, <span class="t-str">&quot;position&quot;</span>, 眼)
+<span class="t-api">实体</span>.设四元数(相机, <span class="t-str">&quot;rotation&quot;</span>, 朝向)
+
+<span class="t-com">-- 在地上走动时每 步距时间 一步，跑时按速度加快。</span>
+<span class="t-kw">如果</span> 着地 <span class="t-kw">和</span> 长 &gt; <span class="t-num">0.1</span> <span class="t-kw">和</span> 越过(t, 时间差, 步距时间 * 走速 / 速度) <span class="t-kw">那么</span>
+    <span class="t-api">世界</span>.在位置播放声音(<span class="t-str">&quot;assets/sounds/footstep.wav&quot;</span>, 位置, <span class="t-num">0.7</span>)
+<span class="t-kw">结束</span></code></pre>
+<p>脚步声复用了 12.3 节的 <code>越过</code>：每跨过一个步距就响一声，不需要计步器。</p>
+<p><strong>射线检测：按 E / 手柄 X 沿视线打一条 8 单位的射线。</strong></p>
+<pre class="code"><code><span class="t-kw">如果</span> <span class="t-api">输入</span>.按下(<span class="t-str">&quot;E&quot;</span>) <span class="t-kw">或</span> <span class="t-api">输入</span>.手柄按下(<span class="t-str">&quot;x&quot;</span>) <span class="t-kw">那么</span>
+    <span class="t-kw">本地</span> 命中, 点, 法线, 实体号 = <span class="t-api">世界</span>.射线检测(眼, 朝向:旋转(前), <span class="t-num">8</span>)
+    <span class="t-kw">如果</span> 命中 <span class="t-kw">那么</span>
+        <span class="t-api">世界</span>.在位置播放声音(<span class="t-str">&quot;assets/sounds/ping.wav&quot;</span>, 点)
+        <span class="t-api">打印</span>(<span class="t-str">&quot;射线命中 &quot;</span> .. <span class="t-api">实体</span>.取文本(实体号, <span class="t-str">&quot;name&quot;</span>) .. <span class="t-str">&quot; &quot;</span> .. <span class="t-api">转文本</span>(点))
+    <span class="t-kw">结束</span>
+<span class="t-kw">结束</span></code></pre>
+<h3 id="s12-7"><span class="num">12.7</span><span>回调</span></h3>
+<pre class="code"><code><span class="t-kw">函数</span> <span class="t-api">世界</span>.开始()
+    <span class="t-api">打印</span>(<span class="t-str">&quot;castle.luacn: 开始&quot;</span>)
+    <span class="t-com">-- 相机从玩家的朝向开始（关卡里的 main_camera 是编辑器里的俯瞰视角）。</span>
+    <span class="t-kw">本地</span> 玩家 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;player&quot;</span>)
+    <span class="t-kw">本地</span> 相机 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;main_camera&quot;</span>)
+    <span class="t-kw">如果</span> <span class="t-api">实体</span>.有效(玩家) <span class="t-kw">和</span> <span class="t-api">实体</span>.有效(相机) <span class="t-kw">那么</span>
+        <span class="t-api">实体</span>.设四元数(相机, <span class="t-str">&quot;rotation&quot;</span>, <span class="t-api">实体</span>.取四元数(玩家, <span class="t-str">&quot;rotation&quot;</span>))
+        <span class="t-api">输入</span>.锁定鼠标(<span class="t-kw">真</span>)
+    <span class="t-kw">结束</span>
+<span class="t-kw">结束</span>
+
+<span class="t-kw">函数</span> <span class="t-api">世界</span>.更新(时间差)
+    <span class="t-kw">本地</span> t = <span class="t-api">世界</span>.时间()
+    更新城门(t)
+    更新城门声音(t, 时间差)
+    更新探照灯(t)
+    更新旗帜(t)
+    更新灯光(t)
+    更新玩家(t, 时间差)
+<span class="t-kw">结束</span></code></pre>
+<p><code>世界.更新</code> 只是按顺序调用各个系统，每个系统自己查找实体、读写字段。这和引擎本身"每帧几趟线性循环"的结构一致。</p>
+<p>操作方式：WASD / 左摇杆走，左 Shift / 按下左摇杆跑，鼠标 / 右摇杆看，空格 / A 跳，E / X 射线检测，Esc 放开鼠标，左键再锁定。</p>
+</section><section><h2 id="appendix"><span class="num">附录</span><span>接口速查</span></h2>
+<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>参数 → 返回</th></tr></thead><tbody><tr class="group"><td colspan="3">世界</td></tr><tr><td><code>世界.开始</code> / <code>世界.更新</code></td><td><code>World.start</code> / <code>World.update</code></td><td>由脚本定义的回调；<code>更新(时间差)</code></td></tr><tr><td><code>世界.时间()</code></td><td><code>World.time()</code></td><td>→ 运行以来的游戏秒数</td></tr><tr><td><code>世界.查找(名称)</code></td><td><code>World.find(name)</code></td><td>→ 句柄, 是否找到</td></tr><tr><td><code>世界.添加(名称, 模型, 位置)</code></td><td><code>World.add(name, model, pos)</code></td><td>→ 句柄</td></tr><tr><td><code>世界.移除(句柄)</code></td><td><code>World.remove(h)</code></td><td></td></tr><tr><td><code>世界.射线检测(起点, 方向, 距离)</code></td><td><code>World.raycast(o, d, dist)</code></td><td>→ 命中, 点, 法线, 句柄</td></tr><tr><td><code>世界.播放声音(键 [, 音量])</code></td><td><code>World.play_sound(key [, vol])</code></td><td>→ 是否播放</td></tr><tr><td><code>世界.在位置播放声音(键, 位置 [, 音量])</code></td><td><code>World.play_sound_at(key, pos [, vol])</code></td><td>→ 是否播放</td></tr><tr><td><code>世界.设光源组(名称, 强度)</code></td><td><code>World.set_light_group(name, s)</code></td><td>→ 是否有这个组</td></tr><tr><td><code>世界.光源组(名称)</code></td><td><code>World.light_group(name)</code></td><td>→ 强度</td></tr><tr class="group"><td colspan="3">实体</td></tr><tr><td><code>实体.有效(e)</code></td><td><code>Entity.valid(e)</code></td><td>→ 布尔</td></tr><tr><td><code>实体.取数 / 设数</code></td><td><code>Entity.get_number / set_number</code></td><td><code>(e, 字段 [, 值])</code></td></tr><tr><td><code>实体.取布尔 / 设布尔</code></td><td><code>Entity.get_bool / set_bool</code></td><td><code>(e, 字段 [, 值])</code></td></tr><tr><td><code>实体.取文本 / 设文本</code></td><td><code>Entity.get_string / set_string</code></td><td><code>(e, 字段 [, 值])</code></td></tr><tr><td><code>实体.取矢量 / 设矢量</code></td><td><code>Entity.get_vec3 / set_vec3</code></td><td><code>(e, 字段 [, 矢量3])</code></td></tr><tr><td><code>实体.取四元数 / 设四元数</code></td><td><code>Entity.get_quat / set_quat</code></td><td><code>(e, 字段 [, 四元数])</code></td></tr><tr><td><code>实体.角色移动(e, 位移, 半径, 高度)</code></td><td><code>Entity.move_character(e, delta, r, h)</code></td><td>→ 是否着地</td></tr><tr><td><code>实体.播放声音(e)</code> / <code>实体.停止声音(e)</code></td><td><code>Entity.play_sound / stop_sound</code></td><td>→ 是否播放 / 无</td></tr><tr class="group"><td colspan="3">输入</td></tr><tr><td><code>输入.按住 / 按下 / 松开(键)</code></td><td><code>Input.down / pressed / released</code></td><td>→ 布尔</td></tr><tr><td><code>输入.鼠标按住 / 鼠标按下(n)</code></td><td><code>Input.mouse_down / mouse_pressed</code></td><td>→ 布尔</td></tr><tr><td><code>输入.鼠标移动()</code></td><td><code>Input.mouse_delta()</code></td><td>→ 矢量2</td></tr><tr><td><code>输入.锁定鼠标(布尔)</code></td><td><code>Input.lock_mouse(b)</code></td><td></td></tr><tr><td><code>输入.手柄轴(名称)</code></td><td><code>Input.gamepad_axis(name)</code></td><td>→ 数字</td></tr><tr><td><code>输入.手柄按住 / 手柄按下(名称)</code></td><td><code>Input.gamepad_down / gamepad_pressed</code></td><td>→ 布尔</td></tr><tr class="group"><td colspan="3"><strong>引擎</strong>（<code>main.lua</code>）</td></tr><tr><td><code>引擎.开始 / 更新 / 完结</code></td><td><code>Blimp.start / update / finish</code></td><td>由 main.lua 定义的会话级回调</td></tr></tbody></table></div></section>
+
+    <footer>由 <code>docs/lua.md</code> 生成。截图拍自运行中的引擎，开启了 PS1 复古效果。</footer>
+  </main>
+</div>
+
+<script>
+// Highlight the contents entry for the section being read.
+(function () {
+  var links = document.querySelectorAll('nav.toc a');
+  if (!('IntersectionObserver' in window) || !links.length) return;
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      links.forEach(function (a) { a.classList.remove('on'); });
+      var a = byId[e.target.id];
+      if (a) a.classList.add('on');
+    });
+  }, { rootMargin: '0px 0px -75% 0px' });
+  document.querySelectorAll('main h2[id]').forEach(function (h) { obs.observe(h); });
+})();
+</script>
+</body>
+</html>

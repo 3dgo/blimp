@@ -132,7 +132,7 @@ Built so far (`world_physics.odin`): **queries only**. Nothing is simulated and 
   points out", the engine's own.
 - Lua (Odin answers, Lua holds nothing):
   - `World.raycast(origin, dir, dist)` → hit, point, normal, entity.
-  - `Entity.move(e, delta, radius, height)` → grounded. It's the character mover: a capsule standing on the
+  - `Entity.move_character(e, delta, radius, height)` → grounded. It's the character mover: a capsule standing on the
     entity's position, collide → `SolvePlanes` → `CastMover`, up to 5 times. Ground is a plane with normal.y ≥ 0.7.
     The entity's own collision is skipped (both callbacks filter on the shape's user data).
     Gravity is part of `delta`; velocity, if a game wants it, is an entity field (schema editor).
