@@ -53,7 +53,7 @@ retro.crt.gamma = 2.3
 retro.crt.brightness = 1
 
 [entity]
-name = ground
+name = 地面
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -83,7 +83,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_1
+name = 城墙_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -113,7 +113,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_2
+name = 城墙_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -143,7 +143,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_3
+name = 城墙_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -173,7 +173,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_4
+name = 城墙_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -203,7 +203,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_5
+name = 城墙_5
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -233,7 +233,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_6
+name = 城墙_6
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -263,7 +263,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_7
+name = 城墙_7
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -293,7 +293,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_8
+name = 城墙_8
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -323,7 +323,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_9
+name = 城墙_9
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -353,7 +353,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_10
+name = 城墙_10
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -383,7 +383,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_11
+name = 城墙_11
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -413,7 +413,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_12
+name = 城墙_12
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -443,7 +443,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_13
+name = 城墙_13
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -473,7 +473,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_14
+name = 城墙_14
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -503,7 +503,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_15
+name = 城墙_15
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -533,7 +533,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = wall_16
+name = 城墙_16
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -563,7 +563,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_fl_1
+name = 前左塔楼_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -593,7 +593,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_fl_2
+name = 前左塔楼_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -623,7 +623,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_fl_3
+name = 前左塔楼_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -653,7 +653,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_fr_1
+name = 前右塔楼_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -683,7 +683,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_fr_2
+name = 前右塔楼_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -713,7 +713,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_bl_1
+name = 后左塔楼_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -743,7 +743,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_bl_2
+name = 后左塔楼_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -773,7 +773,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_bl_3
+name = 后左塔楼_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -803,7 +803,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_br_1
+name = 后右塔楼_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -833,7 +833,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_br_2
+name = 后右塔楼_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -863,7 +863,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_l_1
+name = 左塔楼_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -893,7 +893,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_l_2
+name = 左塔楼_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -923,7 +923,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_r_1
+name = 右塔楼_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -953,7 +953,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_r_2
+name = 右塔楼_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -983,7 +983,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tower_r_3
+name = 右塔楼_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1013,7 +1013,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = gatehouse_l_1
+name = 左门楼_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1043,7 +1043,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = gatehouse_l_2
+name = 左门楼_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1073,7 +1073,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = gatehouse_r_1
+name = 右门楼_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1103,7 +1103,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = gatehouse_r_2
+name = 右门楼_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1133,7 +1133,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = gate
+name = 城门
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1163,7 +1163,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = portcullis
+name = 闸门
 icon = 
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -1193,7 +1193,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = drawbridge
+name = 吊桥
 icon = 
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -1223,7 +1223,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = banner_1
+name = 旗幡_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1253,7 +1253,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = banner_2
+name = 旗幡_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1283,7 +1283,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = keep_1
+name = 主塔_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1313,7 +1313,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = keep_2
+name = 主塔_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1343,7 +1343,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = keep_3
+name = 主塔_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1373,7 +1373,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = keep_4
+name = 主塔_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1403,7 +1403,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = banner_keep
+name = 主塔旗幡
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1433,7 +1433,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = hall
+name = 大厅
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1463,7 +1463,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = watchtower_1
+name = 瞭望塔_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1493,7 +1493,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = watchtower_2
+name = 瞭望塔_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1523,7 +1523,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = watchtower_3
+name = 瞭望塔_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1553,7 +1553,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = stairs
+name = 台阶
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1583,7 +1583,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = tree-small_1
+name = 小树_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1613,7 +1613,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-large_1
+name = 大树_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1643,7 +1643,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = campfire_log_1
+name = 篝火木柴_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1673,7 +1673,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = campfire_log_2
+name = 篝火木柴_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1703,7 +1703,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = stump
+name = 树桩
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1733,7 +1733,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-large_2
+name = 大树_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1763,7 +1763,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-small_2
+name = 小树_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1793,7 +1793,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-large_3
+name = 大树_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1823,7 +1823,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-small_3
+name = 小树_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1853,7 +1853,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-large_4
+name = 大树_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1883,7 +1883,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-small_4
+name = 小树_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1913,7 +1913,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-large_5
+name = 大树_5
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1943,7 +1943,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-large_6
+name = 大树_6
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -1973,7 +1973,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-small_5
+name = 小树_5
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2003,7 +2003,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-small_6
+name = 小树_6
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2033,7 +2033,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-small_7
+name = 小树_7
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2063,7 +2063,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-large_7
+name = 大树_7
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2093,7 +2093,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-small_8
+name = 小树_8
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2123,7 +2123,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = rocks-large_1
+name = 大石_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2153,7 +2153,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = rocks-small_1
+name = 小石_1
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2183,7 +2183,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = rocks-small_2
+name = 小石_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2213,7 +2213,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = rocks-large_2
+name = 大石_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2243,7 +2243,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-log_3
+name = 圆木_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2273,7 +2273,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-log_4
+name = 圆木_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2303,7 +2303,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = tree-trunk_2
+name = 树干_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2333,7 +2333,7 @@ sound_flags = Positional
 collision = Box
 
 [entity]
-name = trebuchet.siege-trebuchet
+name = 配重投石机.机身
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2363,7 +2363,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = trebuchet.arm
+name = 配重投石机.抛臂
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2393,7 +2393,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = trebuchet.catapult
+name = 配重投石机.投臂
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2423,7 +2423,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = trebuchet.weight
+name = 配重投石机.配重
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2453,7 +2453,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = trebuchet.catapult_2
+name = 配重投石机.投臂_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2483,7 +2483,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = trebuchet.weight_2
+name = 配重投石机.配重_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2513,7 +2513,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = trebuchet.wheel
+name = 配重投石机.轮子
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2543,7 +2543,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = trebuchet.wheel_2
+name = 配重投石机.轮子_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2573,7 +2573,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = trebuchet.wheel_3
+name = 配重投石机.轮子_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2603,7 +2603,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = trebuchet.wheel_4
+name = 配重投石机.轮子_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2633,7 +2633,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = catapult.siege-catapult
+name = 投石车.车身
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2663,7 +2663,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = catapult.catapult
+name = 投石车.投臂
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2693,7 +2693,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = catapult.wheel
+name = 投石车.轮子
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2723,7 +2723,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = catapult.wheel_2
+name = 投石车.轮子_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2753,7 +2753,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = catapult.wheel_3
+name = 投石车.轮子_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2783,7 +2783,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = catapult.wheel_4
+name = 投石车.轮子_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2813,7 +2813,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = siege_tower.siege-tower
+name = 攻城塔.塔身
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2843,7 +2843,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = siege_tower.wheel
+name = 攻城塔.轮子
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2873,7 +2873,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = siege_tower.wheel_2
+name = 攻城塔.轮子_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2903,7 +2903,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = siege_tower.wheel_3
+name = 攻城塔.轮子_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2933,7 +2933,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = siege_tower.wheel_4
+name = 攻城塔.轮子_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2963,7 +2963,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ballista.siege-ballista
+name = 弩车.车身
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -2993,7 +2993,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = ballista.arrow
+name = 弩车.弩箭
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3023,7 +3023,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ballista.wheel
+name = 弩车.轮子
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3053,7 +3053,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ballista.wheel_2
+name = 弩车.轮子_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3083,7 +3083,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ram.siege-ram
+name = 攻城锤.车身
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3113,7 +3113,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = ram.ram
+name = 攻城锤.撞锤
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3143,7 +3143,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ram.wheel
+name = 攻城锤.轮子
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3173,7 +3173,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ram.wheel_2
+name = 攻城锤.轮子_2
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3203,7 +3203,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ram.wheel_3
+name = 攻城锤.轮子_3
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3233,7 +3233,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ram.wheel_4
+name = 攻城锤.轮子_4
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3263,7 +3263,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ram.wheel_5
+name = 攻城锤.轮子_5
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3293,7 +3293,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = ram.wheel_6
+name = 攻城锤.轮子_6
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3323,7 +3323,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = catapult_wreck
+name = 投石车残骸
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3353,7 +3353,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = ballista_wreck
+name = 弩车残骸
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3383,7 +3383,7 @@ sound_flags = Positional
 collision = Render_Mesh
 
 [entity]
-name = flag_1
+name = 旗帜_1
 icon = 
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3413,7 +3413,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = flag_2
+name = 旗帜_2
 icon = 
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3443,7 +3443,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = flag_3
+name = 旗帜_3
 icon = 
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3473,7 +3473,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = flag_4
+name = 旗帜_4
 icon = 
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3503,7 +3503,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = flag_5
+name = 旗帜_5
 icon = 
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3533,7 +3533,7 @@ sound_flags = Positional
 collision = None
 
 [entity]
-name = sun
+name = 太阳
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3563,7 +3563,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = torch_gate_l
+name = 城门左火把
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3593,7 +3593,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = torch_gate_r
+name = 城门右火把
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3623,7 +3623,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = campfire
+name = 篝火
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3653,7 +3653,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = torch_keep
+name = 主塔火把
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3683,7 +3683,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = beacon
+name = 信标
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3713,7 +3713,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = hall_window
+name = 大厅窗户
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3743,7 +3743,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = searchlight
+name = 探照灯
 icon = 
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3773,7 +3773,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = main_camera
+name = 主相机
 icon = 
 basic_static_flags = Static, Renderable, Cast_Indirect
 basic_flags = Enabled
@@ -3803,7 +3803,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = player
+name = 玩家
 icon = E7FD
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3833,7 +3833,7 @@ sound_flags = Positional
 collision = Collision_Mesh
 
 [entity]
-name = wind
+name = 风声
 icon = E050
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3863,7 +3863,7 @@ sound_flags = Play_On_Start, Loop
 collision = Collision_Mesh
 
 [entity]
-name = campfire_sound
+name = 篝火声
 icon = E050
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3893,7 +3893,7 @@ sound_flags = Play_On_Start, Loop, Positional
 collision = Collision_Mesh
 
 [entity]
-name = gate_torches_sound
+name = 城门火把声
 icon = E050
 basic_static_flags = Renderable
 basic_flags = Enabled
@@ -3923,7 +3923,7 @@ sound_flags = Play_On_Start, Loop, Positional
 collision = Collision_Mesh
 
 [entity]
-name = gate_sound
+name = 城门声
 icon = E050
 basic_static_flags = Renderable
 basic_flags = Enabled

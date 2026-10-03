@@ -28,13 +28,13 @@ local function 更新城门(t)
     local 朝向 = 四元数.轴角(上, 数学.圆周率 / 2)   -- 城门朝 -Z（它的套件部件偏航了 90 度）
 
     -- 吊桥：铰链在原点，沿本地 +X 平放；升起时绕本地 Z 把 +X 往上转。
-    local 吊桥 = 世界.查找("drawbridge")
+    local 吊桥 = 世界.查找("吊桥")
     if 实体.有效(吊桥) then
         实体.设四元数(吊桥, "rotation", 朝向 * 四元数.轴角(前, (1 - 开度) * 数学.角度转弧度(80)))
     end
 
     -- 闸门：城门打开时从拱门里升起（在吊桥放下之前先升）。
-    local 闸门 = 世界.查找("portcullis")
+    local 闸门 = 世界.查找("闸门")
     if 实体.有效(闸门) then
         local 位置 = 实体.取矢量(闸门, "position")
         实体.设矢量(闸门, "position", 矢量3(位置.x, 平滑(开度 * 1.5) * 0.6, 位置.z))
@@ -43,7 +43,7 @@ end
 
 -- 主塔的探照灯扫过庭院和城门前的空地。
 local function 更新探照灯(t)
-    local 灯 = 世界.查找("searchlight")
+    local 灯 = 世界.查找("探照灯")
     if not 实体.有效(灯) then return end
     local 偏航 = 数学.圆周率 + 数学.正弦(t * 0.5) * 数学.角度转弧度(70)
     实体.设四元数(灯, "rotation", 四元数.轴角(上, 偏航) * 四元数.轴角(右, 数学.角度转弧度(38)))
@@ -53,7 +53,7 @@ end
 local function 更新旗帜(t)
     local i = 1
     while true do
-        local 旗 = 世界.查找("flag_" .. i)
+        local 旗 = 世界.查找("旗帜_" .. i)
         if not 实体.有效(旗) then break end
         local 摆动 = 数学.正弦(t * 2.3 + i * 1.7) * 0.35 + 数学.正弦(t * 5.1 + i) * 0.08
         实体.设四元数(旗, "rotation", 四元数.轴角(上, 摆动))
@@ -67,21 +67,21 @@ local function 更新灯光(t)
     世界.设光源组("windows", (t % 20) < 16 and 1 or 0)
 end
 
--- 城门开关时的声音：gate_sound 实体（城门处，Positional）。越过 = 这一帧越过了 间隔 的整数倍。
+-- 城门开关时的声音：城门声 实体（城门处，Positional）。越过 = 这一帧越过了 间隔 的整数倍。
 local function 越过(t, 时间差, 间隔)
     return 数学.向下取整(t / 间隔) ~= 数学.向下取整((t - 时间差) / 间隔)
 end
 
 local function 更新城门声音(t, 时间差)
     if 越过(t - 6, 时间差, 15) or 越过(t - 13, 时间差, 15) then   -- 开始关闭 / 开始打开（城门开度）
-        实体.播放声音(世界.查找("gate_sound"))
+        实体.播放声音(世界.查找("城门声"))
     end
 end
 
 -- ── 玩家：测试碰撞、输入和声音 ──
 -- 第一人称。WASD / 左摇杆走，左 Shift / 按下左摇杆跑，鼠标 / 右摇杆看，空格 / A 跳，E / X 沿视线射线检测
 -- （命中处响一声，控制台打印命中的实体），Esc 放开鼠标，左键再锁定。输入只在游戏模式（运行后）有效。
--- "player" 是一个不画的胶囊，站在它的 position 上；"main_camera" 跟在它的眼睛处。竖直速度存在 player 的
+-- "玩家" 是一个不画的胶囊，站在它的 position 上；"主相机" 跟在它的眼睛处。竖直速度存在 玩家 的
 -- velocity 字段里（Lua 不保存状态）。碰撞看每个实体的 collision 字段：城墙、塔楼、地面用渲染网格，
 -- 树和石头用包围盒，旗子和轮子没有；吊桥和闸门不是 Static，会跟着脚本移动并挡住玩家。
 local 玩家半径 = 0.08
@@ -97,8 +97,8 @@ local 出生点   = 矢量3(0, 0.05, -6)
 local 步距时间 = 0.32    -- 走路时一步的秒数
 
 local function 更新玩家(t, 时间差)
-    local 玩家 = 世界.查找("player")
-    local 相机 = 世界.查找("main_camera")
+    local 玩家 = 世界.查找("玩家")
+    local 相机 = 世界.查找("主相机")
     if not 实体.有效(玩家) or not 实体.有效(相机) then return end
 
     if 输入.按下("Escape") then 输入.锁定鼠标(false) end
@@ -130,7 +130,7 @@ local function 更新玩家(t, 时间差)
     if 输入.按住("Left Shift") or 输入.手柄按住("leftstick") then 速度 = 跑速 end
     local 水平 = (向前 * 前后 + 向右 * 左右) * 速度
 
-    -- 重力和跳跃：竖直速度是 player 的 velocity.y。站在地上时轻轻压住地面，好让下一帧还算着地。
+    -- 重力和跳跃：竖直速度是 玩家 的 velocity.y。站在地上时轻轻压住地面，好让下一帧还算着地。
     local 竖直 = 实体.取矢量(玩家, "velocity").y - 重力 * 时间差
     local 着地 = 实体.角色移动(玩家, 矢量3(水平.x * 时间差, 竖直 * 时间差, 水平.z * 时间差), 玩家半径, 玩家身高)
     if 着地 and 竖直 < 0 then 竖直 = -0.1 end
@@ -167,9 +167,9 @@ end
 
 function 世界.开始()
     打印("castle.luacn: 开始")
-    -- 相机从玩家的朝向开始（关卡里的 main_camera 是编辑器里的俯瞰视角）。
-    local 玩家 = 世界.查找("player")
-    local 相机 = 世界.查找("main_camera")
+    -- 相机从玩家的朝向开始（关卡里的 主相机 是编辑器里的俯瞰视角）。
+    local 玩家 = 世界.查找("玩家")
+    local 相机 = 世界.查找("主相机")
     if 实体.有效(玩家) and 实体.有效(相机) then
         实体.设四元数(相机, "rotation", 实体.取四元数(玩家, "rotation"))
         输入.锁定鼠标(true)
