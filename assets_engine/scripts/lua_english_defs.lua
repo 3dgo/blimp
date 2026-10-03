@@ -2,7 +2,7 @@
 -- LuaLS type definitions for Chinese/English global aliases.
 -- Each Chinese global is typed with a Chinese-only class, and each English
 -- global with an English-only class, so autocomplete never mixes the two.
--- Chinese types and globals live in luazh_defs.lua.
+-- Chinese types and globals live in lua_chinese_defs.lua.
 
 -- ── cmath ─────────────────────────────────────────────────────────────
 

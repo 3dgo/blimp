@@ -18,7 +18,7 @@ World :: struct {
     settings: World_Settings,     // the scene file's [world] section
     script:   Lua_World_Script,   // its Lua script's loaded state (lua_world_script.odin) — runtime, never saved
     physics:  Physics_World,      // play worlds: Box3D's copy of the static collision (world_physics.odin) — runtime
-    probes:   Probe_Grid,         // baked indirect light (render_probes.odin); loaded from and baked to the level's .probes sidecar, not undoable
+    probes:   Probe_Grid,         // baked indirect light (world_probes.odin); loaded from and baked to the level's .probes sidecar, not undoable
     light_group_override: [MAX_LIGHT_GROUPS + 1]Maybe(f32),   // runtime scales set by Lua or the Lighting menu, over the saved ones; never saved
 
     // Play mode (world_play.odin): a level points at its running copy, the copy back at its level.
@@ -37,14 +37,14 @@ World_Settings :: struct {
     background: [3]f32 `loc:World_Background, widget:color`,   // the viewport clear colour: display-space (sRGB), shown as picked, not tonemapped
     exposure:   f32 `loc:World_Exposure`,   // stops (EV): the HDR scene is scaled by 2^exposure before the tonemap
     shading:    ShadingModel `loc:World_Shading`,   // what an entity's shading Default means (entity_shading)
-    script:     sbuf256 `loc:World_Script`,   // the world's Lua script (init + update), e.g. assets/scripts/level.lua
+    script:     sbuf256 `loc:World_Script`,   // the world's Lua script (start + update hooks, run while playing), e.g. assets/scripts/castle.lua
     light_groups: Light_Groups `loc:World_Light_Groups`,   // where the switchable light groups start (world_light_groups.odin)
     bake:       Bake_Settings `hidden`,   // saved as bake.* keys; edited in the Bake window (ui_bake.odin), not this one
     retro:      Retro_Settings `hidden`,  // saved as retro.* keys; edited in the Retro Look window (ui_retro.odin)
 }
 
 // The retro look (claude/rendering.md → Retro look): what a view in render mode .Retro does, effect by
-// effect. Views read their level's settings, so edits show live, in play too. Each effect has its switch
+// effect. A view reads the settings of the world it shows (during play the play copy). Each effect has its switch
 // and its amounts; a group's `on` switches all of its effects. Drawn by hand in the Retro Look window.
 Retro_Settings :: struct {
     ps1: Retro_PS1,
@@ -239,6 +239,13 @@ entity_shading :: proc(world: ^World, entity: ^Entity) -> ShadingModel {
     case .Phong:   return .Phong
     }
     return .Lambert
+}
+
+// The 8 world-space corners of `e`'s model box (box_corners order); false if it has no model.
+entity_world_corners :: proc(e: ^Entity) -> (corners: [8]vec3, ok: bool) {
+    model := asset_system.models[e.model] or_return
+    lo, hi := model_bounds(model)
+    return box_corners(entity_transform(e), lo, hi), true
 }
 
 // A copy of entity `h` (everything, the selection flag included) under a unique name.

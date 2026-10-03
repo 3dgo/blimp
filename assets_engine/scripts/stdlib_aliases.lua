@@ -21,7 +21,6 @@ _G.引入         = require
 _G.原始取       = rawget
 _G.原始设       = rawset
 _G.原始相等     = rawequal
-_G.原始长度     = rawlen
 
 _G.字符串 = {
     字节     = string.byte,

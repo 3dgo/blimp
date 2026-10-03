@@ -19,8 +19,8 @@ import "dx"
 // (buffers_resource_copy). The renderer owns the *frame timeline* — when each upload
 // happens, on which queue, and the barriers/fences that pair with it — so the per-frame
 // copies are driven from renderer_dx_draw_frame using the primitives here, right next to the
-// transitions they depend on. The one exception is buffers_upload_static, a one-time init
-// upload with no per-frame barrier pairing, which is cohesive enough to own outright.
+// transitions they depend on. The one exception is asset_buffers_upload, the shared asset copy (at init
+// and after an asset hot reload), with no per-frame barrier pairing, which is cohesive enough to own outright.
 
 // Fixed capacity for a world's per-frame-rebuilt entity buffers (transforms, instances, draw
 // commands). Sized once per world in world_render_create; spawning is bounded by this and the
@@ -255,7 +255,7 @@ buffers_build_scene :: proc(world: ^World) {
             append(&r.draw_cmd_data, ..later[blend][:])
         }
     }
-    group_scales := light_group_scales(world, timer_sec_since_start())   // world_light_groups.odin: power cuts, flicker
+    group_scales := light_group_scales(world)   // world_light_groups.odin: power cuts, flicker
 
     it := hm.iterator_make(&world.entities)
     for entity, _ in hm.iterate(&it) {
@@ -468,16 +468,29 @@ buffers_resource_destroy :: proc(r: Resource_With_Upload) {
     dx.buffer_destroy(r.resource)
 }
 
+// Binds the shared index buffer (every mesh's indices) for indexed draws.
+asset_buffers_bind_indices :: proc(cmd: dx.Command_List) {
+    cmd.handle->IASetIndexBuffer(&d3d12.INDEX_BUFFER_VIEW{
+        BufferLocation = dx.resource_get_gpu_address(asset_buffers.index_buffer.resource),
+        SizeInBytes    = u32(len(asset_system.vertex_indices) * size_of(u32)),
+        Format         = .R32_UINT,
+    })
+}
+
+// Bytes per row of an RGBA8 texture's upload copy: D3D12 wants rows 256-byte aligned.
+texture_row_pitch :: proc(width: u32) -> u32 {
+    return (width * 4 + 255) &~ 255
+}
+
 buffers_texture_create :: proc(width: u32, height: u32, format: dxgi.FORMAT) -> Resource_With_Upload {
     r: Resource_With_Upload
     r.resource = dx.texture2d_create(renderer_dx.render_context,
         {width = width, height = height, format = format, mip_levels = 1, heap_type = .DEFAULT})
     r.resource_view = dx.descriptor_heap_register_srv(renderer_dx.render_context, &renderer_dx.resource_heap, r.resource)
 
-    row_size := (int(width) * 4 + 255) &~ 255
     r.upload = dx.buffer_create(renderer_dx.render_context, {
         element_size = 1,
-        num_elements = u32(row_size * int(height)), heap_type = .UPLOAD})
+        num_elements = texture_row_pitch(width) * height, heap_type = .UPLOAD})
     r.upload_ptr = dx.buffer_map(r.upload)
     return r
 }
@@ -485,7 +498,7 @@ buffers_texture_create :: proc(width: u32, height: u32, format: dxgi.FORMAT) -> 
 @(private="file")
 buffers_texture_copy :: proc(cmd: dx.Command_List, target: ^Resource_With_Upload, source: Image) {
     src_row_size := source.width * 4
-    dst_row_size := (src_row_size + 255) &~ 255
+    dst_row_size := texture_row_pitch(source.width)
     for y in 0..<source.height {
         ptr := uintptr(target.upload_ptr) + uintptr(y * dst_row_size)
         mem.copy(rawptr(ptr), raw_data(source.pixels[y * src_row_size:]), int(src_row_size))

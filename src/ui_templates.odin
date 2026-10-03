@@ -36,7 +36,7 @@ ui_draw_templates :: proc() {
     if !ui.show_templates do return
     if !templates_ui.loaded do templates_load()
 
-    s := app.dispaly_scale
+    s := app.display_scale
     im.SetNextWindowSize({TEMPLATES_WINDOW_SIZE.x * s, TEMPLATES_WINDOW_SIZE.y * s}, .FirstUseEver)
     if !im.Begin(tr(.Win_Templates), &ui.show_templates) { im.End(); return }
     defer im.End()
@@ -64,19 +64,10 @@ ui_draw_templates :: proc() {
     if len(templates_ui.list) == 0 do im.TextDisabled("%s", tr(.Worlds_None))
 }
 
-// Adds `t` to `w` at `pos` and selects it. Unlike a one-block paste it keeps the block's rotation and
-// scale (a spot light starts pointing down); only the position comes from the paste point.
+// Adds `t` to `w` at `pos` and selects it: a paste of its block (selection_paste).
 @(private="file")
 templates_add :: proc(w: ^World, t: Entity_Template, pos: vec3) {
-    undo_push(w)
-    handles := make([dynamic]Entity_Handle, context.temp_allocator)
-    scene_load_from_text(w, t.text, &handles)
-    selection_clear(w)
-    for h in handles {
-        e := entity_get(w, h) or_continue
-        e.position = pos
-        selection_set(w, h, true)
-    }
+    selection_paste(w, t.text, pos)
 }
 
 // (Re)reads TEMPLATES_PATH and splits it at its [entity] headers. Each block runs to the next header
@@ -94,13 +85,12 @@ templates_load :: proc() {
     templates_ui.text = string(data)
 
     start := -1   // byte offset of the current [entity] header, -1 outside one
-    txt := templates_ui.text
-    for line in strings.split_lines_iterator(&txt) {
-        line_start := int(uintptr(raw_data(line)) - uintptr(raw_data(templates_ui.text)))   // lines slice the text (CRLF-safe)
-        t := strings.trim_space(line)
-        if len(t) < 2 || t[0] != '[' || t[len(t)-1] != ']' do continue
+    r := Ini_Reader{text = templates_ui.text}
+    for line in ini_next(&r) {
+        if !line.header do continue
+        line_start := int(uintptr(raw_data(line.raw)) - uintptr(raw_data(templates_ui.text)))
         if start >= 0 do templates_append(templates_ui.text[start:line_start])
-        start = strings.trim_space(t[1:len(t)-1]) == "entity" ? line_start : -1
+        start = line.section == ENTITY_SECTION ? line_start : -1
     }
     if start >= 0 do templates_append(templates_ui.text[start:])
 }
@@ -123,8 +113,7 @@ templates_free :: proc() {
 
 @(private="file")
 templates_append :: proc(block: string) {
-    e: Entity
-    entity_apply_defaults(&e)
+    e := entity_default()
     entity_apply_text(&e, block)
     icon, _ := entity_icon(&e)
     name := sbuf_str(&e.name)

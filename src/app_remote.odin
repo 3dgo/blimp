@@ -163,7 +163,6 @@ remote_poll :: proc() {
     }
 }
 
-
 // The reply to a `screenshot ui` whose frame has been submitted: waits for that frame, reads the copy
 // and writes the PNG.
 @(private="file")
@@ -257,6 +256,17 @@ Lua
                                           (a playing level's play world, for collision and sound queries)
 `
 
+// The N numbers in `args` (a command's coordinates), or an error naming the one that isn't.
+@(private="file")
+remote_floats :: proc(args: []string, $N: int) -> (f: [N]f32, err: Remote_Error) {
+    for i in 0 ..< N {
+        ok: bool
+        f[i], ok = strconv.parse_f32(args[i])
+        if !ok do return f, fmt.tprintf("not a number: '%s'", args[i])
+    }
+    return f, nil
+}
+
 @(private="file")
 remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.Builder) -> Remote_Error {
     switch cmd {
@@ -337,13 +347,8 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
 
     case "paste":
         w := remote_world(args) or_return
-        if entity_count_blocks(body) == 0 do return "no [entity] blocks in the body (blimpctl: pass '-' and pipe them on stdin)"
-        undo_push(w)
-        handles := make([dynamic]Entity_Handle, context.temp_allocator)
-        scene_load_from_text(w, body, &handles)
-        for h in handles do if e, ok := entity_get(w, h); ok do fmt.sbprintf(out, "added %s\n", sbuf_str(&e.name))
-        selection_clear(w)
-        for h in handles do selection_set(w, h, true)   // what was pasted becomes the selection
+        if selection_paste(w, body) == 0 do return "no [entity] blocks in the body (blimpctl: pass '-' and pipe them on stdin)"
+        for h in selection_handles(w) do if e, ok := entity_get(w, h); ok do fmt.sbprintf(out, "added %s\n", sbuf_str(&e.name))
 
     case "delete":
         w := remote_world(args) or_return
@@ -364,7 +369,6 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         }
         selection_clear(w)
         for h in hs do selection_set(w, h, true)
-
 
     case "duplicate":
         // Ctrl+D: copy the selection in place and select the copies; undoable.
@@ -397,17 +401,12 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         src := remote_world(args) or_return   // lit by its group scales; a play world reads its level's grid
         w := world_level(src)
         if len(args) < 4 do return "usage: probe <world> <x> <y> <z>"
-        p: vec3
-        for i in 0..<3 {
-            v, ok := strconv.parse_f32(args[1 + i])
-            if !ok do return fmt.tprintf("bad coordinate '%s'", args[1 + i])
-            p[i] = v
-        }
+        p := vec3(remote_floats(args[1:4], 3) or_return)
         if len(w.probes.probes) == 0 do return "not baked"
         dirs  := [6]vec3{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
         names := [6]string{"+X", "-X", "+Y", "-Y", "+Z", "-Z"}
         for d, i in dirs {
-            e := probe_grid_sample(&w.probes, p, d, probe_layer_scales(&w.probes, light_group_scales(src, timer_sec_since_start())))
+            e := probe_grid_sample(&w.probes, p, d, probe_layer_scales(&w.probes, light_group_scales(src)))
             fmt.sbprintf(out, "%s  %.4f %.4f %.4f\n", names[i], e.x, e.y, e.z)
         }
 
@@ -439,12 +438,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         v := remote_view(args) or_return
         c := &v.camera
         if len(args) >= 7 {
-            f: [6]f32
-            for i in 0 ..< 6 {
-                val, ok := strconv.parse_f32(args[1 + i])
-                if !ok do return fmt.tprintf("not a number: '%s'", args[1 + i])
-                f[i] = val
-            }
+            f := remote_floats(args[1:7], 6) or_return
             c.pivot = {f[0], f[1], f[2]}
             c.yaw, c.pitch, c.distance = math.to_radians(f[3]), math.to_radians(f[4]), max(f[5], CAMERA_MIN_DISTANCE)
         } else if len(args) != 1 {
@@ -457,23 +451,18 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         editor_frame_selection(editor_view(v))
 
     case "pick":
-        // A click at view pixel x,y, exactly as the mouse does it; `ctrl` toggles instead of replacing.
+        // A click at view pixel x,y, exactly as the mouse does it; add / remove / toggle instead of replacing.
         v := remote_view(args) or_return
         if len(args) < 3 do return "usage: pick <view> <x> <y> [add|remove|toggle]"
-        x, xok := strconv.parse_f32(args[1])
-        y, yok := strconv.parse_f32(args[2])
-        if !xok || !yok do return "x and y must be numbers"
+        xy := remote_floats(args[1:3], 2) or_return
+        x, y := xy[0], xy[1]
         ev := editor_view(v)
-        if ih, iok := editor_icon_pick(ev, ev.screen_min + {x, y}); iok {   // a camera / light icon wins, as for the mouse
-            selection_click(ev, ev.screen_min + {x, y}, remote_selection_op(args[3:]))
-            if e, eok := entity_get(v.world, ih); eok do fmt.sbprintf(out, "hit %s  (icon)\n", sbuf_str(&e.name))
-            break
-        }
-        ray := camera_ray(v.camera, x, y, ev.screen_size.x, ev.screen_size.y)
-        hit, ok := pick_entity(v.world, ray)
+        hit, ok := view_pick(ev, ev.screen_min + {x, y})
         selection_click(ev, ev.screen_min + {x, y}, remote_selection_op(args[3:]))
         if !ok { strings.write_string(out, "miss\n"); break }
-        if e, eok := entity_get(v.world, hit.entity); eok do fmt.sbprintf(out, "hit %s  point=%v  t=%v\n", sbuf_str(&e.name), hit.point, hit.t)
+        e := entity_get(v.world, hit.entity) or_break
+        if hit.icon do fmt.sbprintf(out, "hit %s  (icon)\n", sbuf_str(&e.name))
+        else do fmt.sbprintf(out, "hit %s  point=%v  t=%v\n", sbuf_str(&e.name), hit.point, hit.t)
 
     case "maximize":
         // F11: the view fills the main window, or goes back.
@@ -514,26 +503,18 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         // A right-click at view pixel x,y: selects what's there and opens the context menu next frame.
         v := remote_view(args) or_return
         if len(args) < 3 do return "usage: menu <view> <x> <y>"
-        x, xok := strconv.parse_f32(args[1])
-        y, yok := strconv.parse_f32(args[2])
-        if !xok || !yok do return "x and y must be numbers"
-        editor_view(v).remote_context = vec2{x, y}
+        xy := remote_floats(args[1:3], 2) or_return
+        editor_view(v).remote_context = vec2(xy)
 
     case "marquee":
-        // A marquee drag between two view pixels, exactly as the mouse does it; `ctrl` toggles.
+        // A marquee drag between two view pixels, exactly as the mouse does it; add / remove / toggle as for pick.
         v := remote_view(args) or_return
         if len(args) < 5 do return "usage: marquee <view> <x0> <y0> <x1> <y1> [add|remove|toggle]"
-        c: [4]f32
-        for i in 0 ..< 4 {
-            val, ok := strconv.parse_f32(args[1 + i])
-            if !ok do return fmt.tprintf("not a number: '%s'", args[1 + i])
-            c[i] = val
-        }
+        c := remote_floats(args[1:5], 4) or_return
         ev := editor_view(v)
         a, b := ev.screen_min + {c[0], c[1]}, ev.screen_min + {c[2], c[3]}
         selection_marquee(ev, linalg.min(a, b), linalg.max(a, b), remote_selection_op(args[5:]))
         for h in selection_handles(v.world) do if e, eok := entity_get(v.world, h); eok do fmt.sbprintf(out, "%s\n", sbuf_str(&e.name))
-
 
     case "screenshot":
         if len(args) >= 1 && args[0] == "ui" {

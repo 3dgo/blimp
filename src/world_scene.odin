@@ -75,7 +75,7 @@ scene_load :: proc(world: ^World, path: string) -> bool {
 // Additive: parses [entity] blocks from `text`, adding one entity per block (world_add). Optionally
 // collects the created handles (paste selects them). Backs file load, clipboard paste and templates —
 // the block format is identical.
-scene_load_from_text :: proc(world: ^World, text: string, out_handles: ^[dynamic]Entity_Handle = nil, skip_tags: []string = {}) -> (count: int) {
+scene_load_from_text :: proc(world: ^World, text: string, out_handles: ^[dynamic]Entity_Handle = nil) -> (count: int) {
     e: Entity
     in_entity := false
     flush :: proc(world: ^World, e: Entity, out_handles: ^[dynamic]Entity_Handle, count: ^int) {
@@ -91,7 +91,7 @@ scene_load_from_text :: proc(world: ^World, text: string, out_handles: ^[dynamic
             in_entity = line.section == ENTITY_SECTION
             e = entity_default()
         } else if in_entity {
-            deserialize_field(&e, line.key, line.value, skip_tags)
+            deserialize_field(&e, line.key, line.value)
         }
     }
     if in_entity do flush(world, e, out_handles, &count)

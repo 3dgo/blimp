@@ -6,13 +6,13 @@ import "core:os"
 import "core:strings"
 import win32 "core:sys/windows"
 
-// Sends one command to a running Blimp editor (debug build) and prints the reply. See src/editor_remote.odin.
+// Sends one command to a running Blimp editor (debug build) and prints the reply. See src/app_remote.odin.
 //   blimpctl help
 //   blimpctl entities castle.level
 //   blimpctl set castle.level 吊桥 position "0, 0, -3.15"
 //   blimpctl paste castle.level - < blocks.txt      ('-' sends stdin as the request body)
 // Exit code: 0 ok, 1 the engine reported an error, 2 couldn't reach the engine / bad usage.
-PORT :: 47800   // must match REMOTE_PORT in src/editor_remote.odin
+PORT :: 47800   // must match REMOTE_PORT in src/app_remote.odin
 
 main :: proc() {
     args := utf8_args()[1:]

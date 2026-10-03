@@ -53,7 +53,6 @@ ICON_CAMERA       :: "\uE04B"   // videocam
 ICON_GAME_VIEW    :: "\uE338"   // videogame_asset
 ICON_RETRO        :: "\uE3EA"   // grain
 ICON_RETRO_SETTINGS :: "\uE429"   // tune
-ICON_PROBES       :: "\uE3A5"   // blur_on
 ICON_LIGHTING     :: "\uE0F0"   // lightbulb
 ICON_BAKE         :: "\uE80E"   // whatshot
 ICON_SCRIPT       :: "\uE86F"   // code
@@ -107,7 +106,7 @@ Editor_Icon :: struct {
 // The icon `e` shows in the viewport, if any: entity_icon (its own icon, else its light or camera
 // type's), while it's enabled and unhidden.
 editor_entity_icon :: proc(e: ^Entity) -> (icon: string, ok: bool) {
-    if .Enabled not_in e.basic_flags || .Hidden in e.basic_flags do return
+    if !entity_editor_visible(e) do return
     return entity_icon(e)
 }
 
@@ -132,7 +131,7 @@ editor_icon_of :: proc(ev: ^Editor_View, e: ^Entity) -> (ic: Editor_Icon, ok: bo
     icon := editor_entity_icon(e) or_return
     center, front := world_to_screen(ev, e.position)
     if !front do return
-    full := OVERLAY_ICON_RADIUS * app.dispaly_scale
+    full := OVERLAY_ICON_RADIUS * app.display_scale
     if !on_view(ev, center, full) do return
 
     dist := linalg.length(e.position - camera_eye(ev.view.camera))
@@ -142,7 +141,7 @@ editor_icon_of :: proc(ev: ^Editor_View, e: ^Entity) -> (ic: Editor_Icon, ok: bo
     if e.selected do alpha = max(alpha, EDITOR_ICON_SELECTED_MIN_ALPHA)
     if alpha <= 0.01 do return
 
-    radius := clamp(EDITOR_ICON_WORLD_RADIUS * overlay_pixels_per_unit(ev, e.position), EDITOR_ICON_MIN_PX * app.dispaly_scale, full)
+    radius := clamp(EDITOR_ICON_WORLD_RADIUS * overlay_pixels_per_unit(ev, e.position), EDITOR_ICON_MIN_PX * app.display_scale, full)
     return {e.handle, icon, center, radius, alpha, !occluded || e.selected}, true
 }
 
@@ -195,7 +194,7 @@ editor_draw_icons :: proc(ev: ^Editor_View) {
     for e, h in hm.iterate(&it) {
         ic := editor_icon_of(ev, e) or_continue
         ring: vec4
-        if e.selected do ring = h == editor_world(w).active ? vec4{0.7, 1, 0.7, 1} : vec4{0.15, 0.9, 0.3, 1}
+        if e.selected do ring = selection_color(w, h)
         col := e.light_type != .None ? editor_light_color(e) : vec4{0.9, 0.9, 0.95, 1}
         col.a = ic.alpha
         overlay_icon(o, e.position, ic.icon, col, ring, ic.radius)
@@ -210,7 +209,7 @@ editor_icon_pick :: proc(ev: ^Editor_View, p: vec2) -> (handle: Entity_Handle, o
     for e, _ in hm.iterate(&it) {
         ic := editor_icon_of(ev, e) or_continue
         if !ic.pickable do continue
-        if d := linalg.length(ic.center - p); d <= max(ic.radius, 7 * app.dispaly_scale) && d < best {
+        if d := linalg.length(ic.center - p); d <= max(ic.radius, 7 * app.display_scale) && d < best {
             best, handle, ok = d, ic.handle, true
         }
     }

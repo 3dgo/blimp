@@ -26,16 +26,17 @@ Ini_Line :: struct {
     section: string,
     key:     string,
     value:   string,
+    raw:     string,   // the whole line as it is in the text (slices it: its offset is where the line starts)
 }
 
 // Parses one raw line. ok = false for a blank line, a # or ; comment, or anything else.
 ini_line :: proc(raw: string) -> (line: Ini_Line, ok: bool) {
     t := strings.trim_space(raw)
     if len(t) == 0 || t[0] == '#' || t[0] == ';' do return
-    if t[0] == '[' && t[len(t) - 1] == ']' do return {header = true, section = strings.trim_space(t[1:len(t) - 1])}, true
+    if t[0] == '[' && t[len(t) - 1] == ']' do return {header = true, section = strings.trim_space(t[1:len(t) - 1]), raw = raw}, true
     eq := strings.index_byte(t, '=')
     if eq < 0 do return
-    return {key = strings.trim_space(t[:eq]), value = strings.trim_space(t[eq + 1:])}, true
+    return {key = strings.trim_space(t[:eq]), value = strings.trim_space(t[eq + 1:]), raw = raw}, true
 }
 
 // Reads INI text line by line: `for line in ini_next(&r)`. r.section is the section the line is in

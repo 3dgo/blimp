@@ -58,7 +58,7 @@ physics_world_start :: proc(w: ^World) {
     missing_example: string
     it := hm.iterator_make(&w.entities)
     for e, h in hm.iterate(&it) {
-        if .Enabled not_in e.basic_flags do continue
+        if !entity_enabled(e) do continue
         shape, has := physics_entity_shape(e)
         if !has {
             if e.collision == .Collision_Mesh && e.model != "" {
@@ -150,7 +150,6 @@ physics_update :: proc() {
 Physics_Hit :: struct {
     point, normal: vec3,
     entity:        Entity_Handle,
-    distance:      f32,
 }
 
 // The first collision along the ray from origin in `direction` (normalized here), up to `distance` away.
@@ -160,7 +159,7 @@ physics_raycast :: proc(w: ^World, origin, direction: vec3, distance: f32) -> (h
     if dir == {} do return
     r := b3.World_CastRayClosest(w.physics.id, origin, dir * distance, b3.DefaultQueryFilter())
     if !r.hit do return
-    return {point = r.point, normal = r.normal, entity = physics_shape_entity(r.shapeId), distance = r.fraction * distance}, true
+    return {point = r.point, normal = r.normal, entity = physics_shape_entity(r.shapeId)}, true
 }
 
 MOVER_ITERATIONS :: 5

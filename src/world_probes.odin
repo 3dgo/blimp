@@ -307,11 +307,8 @@ probe_grid_atlas :: proc(g: ^Probe_Grid, scales: Probe_Layer_Scales, exposure: f
     // Octahedral decode of each tile pixel centre, once.
     basis: [T * T][9]f32
     for j in 0..<T do for i in 0..<T {
-        u := 2 * (f32(i) + 0.5) / T - 1
-        v := 2 * (f32(j) + 0.5) / T - 1
-        n := vec3{u, v, 1 - abs(u) - abs(v)}
-        if n.z < 0 do n.xy = {(1 - abs(v)) * math.sign(u), (1 - abs(u)) * math.sign(v)}
-        basis[j * T + i] = sh_basis(linalg.normalize(vec3{n.x, n.z, -n.y}))   // tile centre → +Y, image up → +Z
+        n := octahedral_decode({2 * (f32(i) + 0.5) / T - 1, 2 * (f32(j) + 0.5) / T - 1})
+        basis[j * T + i] = sh_basis(vec3{n.x, n.z, -n.y})   // tile centre → +Y, image up → +Z
     }
 
     for y in 0..<g.dims.y do for z in 0..<g.dims.z do for x in 0..<g.dims.x {

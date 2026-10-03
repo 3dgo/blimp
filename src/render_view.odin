@@ -120,22 +120,19 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
     frame_constants := Frame_Constants{
         view_mat              = camera_view(view.camera),
         proj_mat              = camera_proj(view.camera, aspect),
-        time                  = f32(timer_sec_since_start()),
-        resolution            = {view.target.width, view.target.height},
         camera_pos            = camera_eye(view.camera),
         light_count           = u32(len(world.render.lights_data)),
-        
+
         transform_buffer_slot     = world.render.transform[frame_slot].resource_view.heap_slot,
         mesh_instance_buffer_slot = world.render.mesh_instance[frame_slot].resource_view.heap_slot,
         lights_buffer_slot        = world.render.lights[frame_slot].resource_view.heap_slot,
-        
+
         mesh_buffer_slot      = asset_buffers.mesh_buffer.resource_view.heap_slot,
-        index_buffer_slot     = asset_buffers.index_buffer.resource_view.heap_slot,
         position_buffer_slot  = asset_buffers.position_buffer.resource_view.heap_slot,
         attribute_buffer_slot = asset_buffers.attribute_buffer.resource_view.heap_slot,
         material_buffer_slot  = asset_buffers.material_buffer.resource_view.heap_slot,
         sampler_slot          = ps1.point_sampling ? asset_buffers.sampler_point.heap_slot : asset_buffers.sampler.heap_slot,
-        
+
         debug_line_buffer_slot = debug_draw.buffer_srv[frame_slot].heap_slot,
         hdr_texture_slot       = view.target.hdr_srv.heap_slot,
         exposure               = math.pow(2, world.settings.exposure),
@@ -177,7 +174,7 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         frame_constants.probe_spacing     = g.spacing
         frame_constants.probe_dims        = {u32(g.dims.x), u32(g.dims.y), u32(g.dims.z)}
         frame_constants.probe_layers      = u32(g.layers)
-        scales := probe_layer_scales(g, light_group_scales(world, timer_sec_since_start()))   // this world's: a play world's power cut
+        scales := probe_layer_scales(g, light_group_scales(world))   // this world's: a play world's power cut
         for s, k in scales do frame_constants.probe_layer_scale[k / 4][k % 4] = s
     }
     if e, ok := render_view_camera_entity(view); ok {
@@ -212,7 +209,7 @@ render_view_draw :: proc(view: ^Render_View, frame_slot: u64) {
     cmd.handle->IASetPrimitiveTopology(.TRIANGLELIST)
 
     cmd.handle->SetGraphicsRootConstantBufferView(0, dx.resource_get_gpu_address(view.frame_constants[frame_slot]))
-    cmd.handle->IASetIndexBuffer(&d3d12.INDEX_BUFFER_VIEW{BufferLocation = dx.resource_get_gpu_address(asset_buffers.index_buffer.resource), SizeInBytes = u32(len(asset_system.vertex_indices) * size_of(u32)), Format = .R32_UINT})
+    asset_buffers_bind_indices(cmd)
     // One range per blend, in EntityBlend order: everything opaque is in the depth buffer before anything blends.
     r := &world.render
     for blend in EntityBlend {

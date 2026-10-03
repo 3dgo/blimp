@@ -117,7 +117,7 @@ light_shadow_report :: proc(r: ^World_Render) {
 //   Spot        — its cone: a square frustum of the full fov, out to range.y
 //   Point       — six 90° frusta along the world axes, out to range.y (the entity's rotation doesn't matter)
 light_shadow_cameras :: proc(e: ^Entity) -> (cameras: [6]mat4, count: int, texel: f32) {
-    view := linalg.inverse(linalg.matrix4_from_trs_f32(e.position, e.rotation, 1))
+    view := entity_camera_view(e)   // looking down its +Z, like a camera entity
     far  := max(e.range.y, SHADOW_NEAR * 2)
     switch e.light_type {
     case .None:
@@ -177,7 +177,7 @@ render_shadows_draw :: proc(w: ^World, frame_slot: u64) {
         cmd.handle->RSSetViewports(1, &dx_viewport)
         cmd.handle->RSSetScissorRects(1, &scissor)
         cmd.handle->IASetPrimitiveTopology(.TRIANGLELIST)
-        cmd.handle->IASetIndexBuffer(&d3d12.INDEX_BUFFER_VIEW{BufferLocation = dx.resource_get_gpu_address(asset_buffers.index_buffer.resource), SizeInBytes = u32(len(asset_system.vertex_indices) * size_of(u32)), Format = .R32_UINT})
+        asset_buffers_bind_indices(cmd)
 
         views_va := dx.resource_get_gpu_address(r.shadow_views[frame_slot])
         // Opaque and Cutout cast (the first two ranges; a cutout casts its whole quad, this pass has no pixel

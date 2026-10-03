@@ -175,12 +175,10 @@ bvh_build_node :: proc(b: ^BVH_Build, first, count: u32) -> i32 {
 
 // ============================ Queries ============================
 
-BVH_Hit :: struct { t: f32, tri: Triangle, tri_id: u32 }
-
-bvh_closest_hit :: proc(bvh: ^Mesh_BVH, r: Ray) -> (BVH_Hit, bool) {
-    t, id, found := mesh_walk(bvh, r, max(f32), false)
-    if !found do return {t = max(f32)}, false
-    return BVH_Hit{t = t, tri = bvh.tris[id], tri_id = id}, true
+// The distance along `r` (in r.dir lengths) to the nearest triangle it hits.
+bvh_closest_hit :: proc(bvh: ^Mesh_BVH, r: Ray) -> (t: f32, ok: bool) {
+    t, _, ok = mesh_walk(bvh, r, max(f32), false)
+    return
 }
 
 // A Scene_BVH hit: the instance and its mesh's triangle, so callers can reach the entity, the mesh's

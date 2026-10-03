@@ -23,7 +23,7 @@ HOT_RELOAD_ROOTS :: [?]string{"assets", "assets_engine"}
 Hot_Reload :: struct {
     watchers: [len(HOT_RELOAD_ROOTS)]File_Watcher,
     assets, shaders, sounds: bool,   // pending reloads
-    scripts: [dynamic]string,        // pending .lua paths (project-relative), in the hot reload arena
+    scripts: [dynamic]string,        // pending .lua paths (project-relative), cloned with app.allocators.perm
     luacn:   [dynamic]string,        // pending .luacn paths
     last_event: f64,                 // timer_sec_since_init of the last event
 }

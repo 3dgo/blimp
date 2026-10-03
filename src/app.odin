@@ -30,14 +30,13 @@ App :: struct {
     old_context: runtime.Context,
     loggers: App_Loggers,
     allocators: App_Allocators,
-    
+
     window: ^sdl.Window,
     window_id: sdl.WindowID,
     window_hwnd: windows.HWND,
     window_width: u32,
     window_height: u32,
-    resized: bool,
-    dispaly_scale: f32,
+    display_scale: f32,
 
     should_restart: bool,   // set by the schema editor Apply to exit the loop after a rebuild
     quit_requested: bool,   // the unsaved-changes prompt said go ahead and quit (ui_unsaved.odin)
@@ -55,7 +54,8 @@ App_Allocators :: struct {
 
     heap_tracker: mem.Tracking_Allocator,
 
-    frame_arena: vmem.Arena,
+    frame_arena: vmem.Arena,   // reset at the start of every frame; nothing uses it yet (claude/memory.md)
+    frame_guard: Panic_On_Fail,
 
     temp_arena: vmem.Arena,
     temp_guard: Panic_On_Fail,
@@ -63,7 +63,7 @@ App_Allocators :: struct {
 
 app_init :: proc() {
     windows.SetConsoleOutputCP(.UTF8)
-    
+
     timer_init()
 
     app.old_context = context
@@ -81,7 +81,7 @@ app_init :: proc() {
     ok := sdl.Init({.VIDEO, .GAMEPAD})
     if !ok do log.panicf("Can't initialize SDL. %s", sdl.GetError())
 
-    app.dispaly_scale = sdl.GetDisplayContentScale(sdl.GetPrimaryDisplay())
+    app.display_scale = sdl.GetDisplayContentScale(sdl.GetPrimaryDisplay())
 
     app.window_width = WINDOW_WIDTH
     app.window_height = WINDOW_HEIGHT
@@ -94,15 +94,15 @@ app_init :: proc() {
     if app.window_hwnd == nil do log.panic("Failed to get window handle")
 
     sdl.SetWindowPosition(app.window, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED)
-    
+
     sdl.ShowWindow(app.window)
 
     free_all(context.temp_allocator)
     free_all(app.allocators.frame)
-    
+
     os.remove(EXE_OLD_PATH)   // best effort: clear the exe left behind by a previous Apply & Restart
 
-    asset_system_init()
+    asset_system_load()
 
     lua_init()
     sound_init()
@@ -127,7 +127,6 @@ app_run :: proc() {
         free_all(app.allocators.frame)
         when ODIN_DEBUG do hot_reload_update()   // first: an asset reload waits for the GPU and rebuilds the asset arena
 
-        app.resized = false
         event: sdl.Event
         for sdl.PollEvent(&event) {
             #partial switch event.type {
@@ -135,23 +134,22 @@ app_run :: proc() {
                     if event.window.windowID == app.window_id {
                         app.window_width = u32(event.window.data1)
                         app.window_height = u32(event.window.data2)
-                        app.resized = true
                         renderer_dx_resize_window({app.window_width, app.window_height})
                     }
                 }
                 // Quit asks first if any world has unsaved changes. Only the main window's close quits;
                 // other windows (ImGui platform windows dragged out) are the UI backend's to handle.
                 case .WINDOW_CLOSE_REQUESTED: {
-                    if event.window.windowID == app.window_id && ui_request_quit() do break main_loop
+                    if event.window.windowID == app.window_id && ui_request_exit(.Quit) do break main_loop
                 }
                 case .QUIT: {
-                    if ui_request_quit() do break main_loop
+                    if ui_request_exit(.Quit) do break main_loop
                 }
                 // F9 relaunches the engine (F12 is left to RenderDoc's capture key). Like quitting, it asks
                 // first if anything is unsaved; the
                 // prompt then relaunches it if the user goes ahead (ui_unsaved.odin).
                 case .KEY_DOWN: {
-                    if event.key.key == sdl.K_F9 && !event.key.repeat && ui_request_restart() {
+                    if event.key.key == sdl.K_F9 && !event.key.repeat && ui_request_exit(.Restart) {
                         log.info("F9: restarting (nothing unsaved)")
                         app_spawn_self(os.args[1:])
                         break main_loop
@@ -329,16 +327,14 @@ init_app_allocators :: proc() {
     if err := vmem.arena_init_static(&app.allocators.frame_arena, FRAME_ALLOCATOR_SIZE); err != nil {
         log.panicf("Failed to init frame arena: %v", err)
     }
-    app.allocators.frame = frame_allocator(&app.allocators)
+    app.allocators.frame_guard.backing = vmem.arena_allocator(&app.allocators.frame_arena)
+    app.allocators.frame = panic_on_fail_allocator(&app.allocators.frame_guard)
 
     if err := vmem.arena_init_static(&app.allocators.temp_arena, TEMP_ALLOCATOR_SIZE); err != nil {
         log.panicf("Failed to init temp arena: %v", err)
     }
     app.allocators.temp_guard.backing = vmem.arena_allocator(&app.allocators.temp_arena)
     app.allocators.temp = panic_on_fail_allocator(&app.allocators.temp_guard)
-
-    context.allocator = app.allocators.perm
-    context.temp_allocator = app.allocators.temp
 }
 
 destroy_app_allocators :: proc() {

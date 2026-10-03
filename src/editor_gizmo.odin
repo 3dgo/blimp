@@ -43,7 +43,6 @@ Gizmo_State :: struct {
     hot:   Gizmo_Handle,   // under the mouse this frame
     drag:  Gizmo_Handle,   // being dragged; .None = idle
     start: Entity,         // the drag's reference transform: the active entity's rotation + scale at the pivot's position
-    grab:  vec3,           // move: where the cursor met the axis/plane at drag start
     grab_rel: vec3,        // move: that point relative to the pivot, in gizmo lengths (see gizmo_follow)
     grab_s: f32,           // scale: grab distance along the axis
     grab_mouse: vec2,      // uniform scale: mouse position at drag start
@@ -172,8 +171,8 @@ gizmo_begin :: proc(ev: ^Editor_View, g: ^Gizmo_State, tool: Edit_Tool, e: Entit
     case .Select:
         return false
     case .Move:
-        g.grab = gizmo_project(ev, h, e.position, axes, mouse) or_return
-        g.grab_rel = (g.grab - e.position) / gizmo_world_length(ev, e.position)
+        grab := gizmo_project(ev, h, e.position, axes, mouse) or_return   // where the cursor met the axis/plane
+        g.grab_rel = (grab - e.position) / gizmo_world_length(ev, e.position)
     case .Rotate:
         g.view_axis = linalg.normalize(e.position - camera_eye(ev.view.camera))
         angle := gizmo_ring_angle(ev, gizmo_ring_frame(axes, h, g.view_axis), e.position, mouse) or_return
@@ -296,7 +295,7 @@ gizmo_project :: proc(ev: ^Editor_View, h: Gizmo_Handle, origin: vec3, axes: [3]
         len2 := linalg.dot(d2, d2)
         if len2 < 4 do return   // under 2 px on screen: seen end-on
         on_line := o2 + d2 * (linalg.dot(mouse - o2, d2) / len2)
-        ray := gizmo_ray(ev, on_line)
+        ray := view_mouse_ray(ev, on_line)
         // Closest point on line origin + s·a to the ray (both unit length); they intersect here.
         wv := origin - ray.origin
         b := linalg.dot(a, ray.dir)
@@ -305,9 +304,9 @@ gizmo_project :: proc(ev: ^Editor_View, h: Gizmo_Handle, origin: vec3, axes: [3]
         s := (b * linalg.dot(ray.dir, wv) - linalg.dot(a, wv)) / denom
         return origin + a * s, true
     case .YZ, .XZ, .XY:
-        return ray_plane(gizmo_ray(ev, mouse), origin, axes[int(h) - int(Gizmo_Handle.YZ)])   // normal: the axis it leaves out
+        return ray_plane(view_mouse_ray(ev, mouse), origin, axes[int(h) - int(Gizmo_Handle.YZ)])   // normal: the axis it leaves out
     case .Center:
-        return ray_plane(gizmo_ray(ev, mouse), origin, camera_forward(ev.view.camera))
+        return ray_plane(view_mouse_ray(ev, mouse), origin, camera_forward(ev.view.camera))
     }
     return
 }
@@ -320,7 +319,7 @@ Ring_Frame :: struct { n, u, v: vec3, radius: f32 }   // radius: × the axis rin
 gizmo_ring_frame :: proc(axes: [3]vec3, h: Gizmo_Handle, view_axis: vec3) -> Ring_Frame {
     if h == .Center {
         n := view_axis
-        u := linalg.normalize(linalg.cross(abs(n.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, n))
+        u := perpendicular(n)
         return {n, u, linalg.cross(n, u), GIZMO_VIEW_RING}
     }
     i := gizmo_axis_index(h)
@@ -331,14 +330,9 @@ gizmo_ring_frame :: proc(axes: [3]vec3, h: Gizmo_Handle, view_axis: vec3) -> Rin
 // quaternion_angle_axis(·, n), so the entity turns with the cursor.
 @(private="file")
 gizmo_ring_angle :: proc(ev: ^Editor_View, f: Ring_Frame, origin: vec3, mouse: vec2) -> (angle: f32, ok: bool) {
-    hit := ray_plane(gizmo_ray(ev, mouse), origin, f.n) or_return
+    hit := ray_plane(view_mouse_ray(ev, mouse), origin, f.n) or_return
     d := hit - origin
     return math.atan2(linalg.dot(d, f.v), linalg.dot(d, f.u)), true
-}
-
-@(private="file")
-gizmo_ray :: proc(ev: ^Editor_View, screen: vec2) -> Ray {
-    return camera_ray(ev.view.camera, screen.x - ev.screen_min.x, screen.y - ev.screen_min.y, ev.screen_size.x, ev.screen_size.y)
 }
 
 @(private="file")
@@ -356,7 +350,7 @@ ray_plane :: proc(ray: Ray, origin, n: vec3) -> (vec3, bool) {
 gizmo_hit_test :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec3, length: f32, mouse: vec2) -> Gizmo_Handle {
     o, ook := world_to_screen(ev, origin)
     if !ook do return .None
-    s := app.dispaly_scale
+    s := app.display_scale
     best, best_d := Gizmo_Handle.None, f32(GIZMO_HIT_PX) * s
     center_r := (GIZMO_CENTER_PX * GIZMO_GRAB_GROW + 2) * s
     in_center := abs(mouse.x - o.x) <= center_r && abs(mouse.y - o.y) <= center_r
@@ -446,7 +440,7 @@ gizmo_draw :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec
             l := linalg.length(dir)
             if l <= 1 do continue
             dir /= l
-            label_gap := GIZMO_LABEL_PX * app.dispaly_scale
+            label_gap := GIZMO_LABEL_PX * app.display_scale
             label_size := im.CalcTextSize(AXIS_NAMES[i])
             im.DrawList_AddText(dl, tips[i] + dir * label_gap - label_size * 0.5, col, AXIS_NAMES[i])
         }
@@ -480,7 +474,7 @@ gizmo_draw :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec
             tip := world_to_screen(ev, origin + axes[i] * length) or_continue
             if dir := tip - o; linalg.length(dir) > 1 {
                 label_size := im.CalcTextSize(AXIS_NAMES[i])
-                at := tip + linalg.normalize(dir) * GIZMO_LABEL_PX * app.dispaly_scale - label_size * 0.5
+                at := tip + linalg.normalize(dir) * GIZMO_LABEL_PX * app.display_scale - label_size * 0.5
                 im.DrawList_AddText(dl, at, col, AXIS_NAMES[i])
             }
         }
@@ -509,8 +503,8 @@ gizmo_draw :: proc(ev: ^Editor_View, tool: Edit_Tool, origin: vec3, axes: [3]vec
     if ev.gizmo.drag != .None {
         text := fmt.ctprintf("%s", sbuf_str(&ev.gizmo.readout))
         size := im.CalcTextSize(text)
-        pos := o + vec2{14, 14} * app.dispaly_scale
-        pad := vec2{4, 2} * app.dispaly_scale
+        pos := o + vec2{14, 14} * app.display_scale
+        pad := vec2{4, 2} * app.display_scale
         im.DrawList_AddRectFilled(dl, pos - pad, pos + size + pad, im.ColorConvertFloat4ToU32({0, 0, 0, 0.7}), 3)
         im.DrawList_AddText(dl, pos, 0xFFFFFFFF, text)
     }
@@ -571,7 +565,7 @@ gizmo_world_length :: proc(ev: ^Editor_View, p: vec3) -> f32 {
 // The gizmo's world length per unit of view depth (it's linear in depth).
 @(private="file")
 gizmo_length_per_depth :: proc(ev: ^Editor_View) -> f32 {
-    return GIZMO_SIZE_PX * app.dispaly_scale * 2 * math.tan(ev.view.camera.fov_y * 0.5) / max(ev.screen_size.y, 1)
+    return GIZMO_SIZE_PX * app.display_scale * overlay_units_per_pixel_at_depth_1(ev)
 }
 
 // Where the pivot must go so the grabbed point of the gizmo lands on `p` (the cursor's point on the
@@ -610,7 +604,7 @@ gizmo_plane_quad :: proc(ev: ^Editor_View, origin: vec3, axes: [3]vec3, length: 
     return q, true
 }
 
-// Projects a world point into screen pixels (ImGui coordinates). False when it's behind the camera.
+// Distance from point p to the segment a..b, in screen pixels.
 @(private="file")
 dist_to_segment :: proc(p, a, b: vec2) -> f32 {
     ab := b - a
@@ -670,7 +664,7 @@ gizmo_axis_alpha :: proc(ev: ^Editor_View, origin, axis: vec3, length: f32) -> f
     o, ook := world_to_screen(ev, origin)
     t, tok := world_to_screen(ev, origin + axis * length)
     if !ook || !tok do return 0
-    r := linalg.length(t - o) / (GIZMO_SIZE_PX * app.dispaly_scale)
+    r := linalg.length(t - o) / (GIZMO_SIZE_PX * app.display_scale)
     return clamp((r - 0.12) / 0.15, 0, 1)
 }
 

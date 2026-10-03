@@ -8,7 +8,7 @@ import hm "core:container/handle_map"
 
 // The probe baker (claude/rendering.md → Lighting, Baker). A CPU ray tracer over the level's static
 // geometry (a Scene_BVH of the entities that pass entity_bakes) fills a uniform grid of L2 SH irradiance
-// probes (render_probes.odin). Probes hold indirect light only — sky and bounces. Direct light stays
+// probes (world_probes.odin). Probes hold indirect light only — sky and bounces. Direct light stays
 // realtime, so each light reaches a probe only off a surface it lit.
 //
 // Pass k: every probe casts `rays` rays. A miss sees the sky. A hit on a front face sends back
@@ -28,12 +28,6 @@ BAKE_BURIED_FRACTION :: 0.25
 
 // How tightly a depth texel gathers the rays near its direction: weight = max(0, cos)^this (DDGI's 50).
 BAKE_DEPTH_SHARPNESS :: 50
-
-// What takes part in the bake: drawn, static, and not opted out (Cast Indirect). Geometry blocks and
-// bounces light; a light has its bounce baked, scaled by its `indirect`.
-entity_bakes :: proc(e: ^Entity) -> bool {
-    return entity_drawn(e) && .Static in e.basic_static_flags && .Cast_Indirect in e.basic_static_flags
-}
 
 Bake_Stats :: struct {
     dims:      [3]i32,

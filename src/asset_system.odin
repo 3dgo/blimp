@@ -103,7 +103,7 @@ Image_Format :: enum {
 }
 
 // Asset keys handed out to entities (model and texture references), interned in their own arena. It
-// outlives the asset arena, which a hot reload throws away and rebuilds (asset_hot_reload.odin), so an
+// outlives the asset arena, which a hot reload throws away and rebuilds (app_hot_reload.odin), so an
 // entity's model string, and every undo snapshot and clipboard copy of it, stays valid across reloads.
 Asset_Keys :: struct {
     strings: map[string]string,   // key → its interned copy (both the same string)
@@ -120,10 +120,6 @@ asset_intern :: proc(key: string) -> string {
     s := strings.clone(key, arena)
     asset_keys.strings[s] = s
     return s
-}
-
-asset_system_init :: proc() {
-    asset_system_load()
 }
 
 // Throws every asset away and loads them again from disk. Only the asset part: app_reload_assets
@@ -151,7 +147,7 @@ asset_render_collision :: proc(key: string) -> ^b3.MeshData {
     return m
 }
 
-@(private="file")
+// Loads every asset from disk: at init, and again on a hot reload (asset_system_reload).
 asset_system_load :: proc() {
     if err := vmem.arena_init_growing(&asset_system.arena); err != nil {
         log.panicf("Failed to init asset arena: %v", err)
@@ -240,25 +236,6 @@ asset_build_bvhs :: proc() {
         asset_system.mesh_bvhs[i] = bvh_build_for_mesh(m, arena)
     }
     free_all(context.temp_allocator)
-}
-
-// Total bytes of loaded asset payload (geometry + textures + tables), excluding
-// lookup maps and arena bookkeeping.
-asset_system_assets_size :: proc() -> (total: int) {
-    total += len(asset_system.vertex_indices)    * size_of(u32)
-    total += len(asset_system.vertex_positions)  * size_of(vec3)
-    total += len(asset_system.vertex_attributes) * size_of(Vertex_Attributes)
-    total += len(asset_system.meshes)    * size_of(Mesh)
-    total += len(asset_system.materials) * size_of(Material)
-    total += len(asset_system.images)    * size_of(Image)
-    for img in asset_system.images do total += len(img.pixels)
-    return
-}
-
-// Returns the interned (permanent) key string for a model, so callers can store the
-// reference without owning a copy (asset_intern).
-asset_model_key :: proc(key: string) -> string {
-    return asset_intern(key)
 }
 
 asset_system_import_gltf_models :: proc(path: string) {

@@ -7,12 +7,13 @@ import im "lib:odin-imgui"
 
 // Unsaved-changes guard. Closing a dirty scene world (its last view's window, or Close in the Worlds
 // window), or quitting or restarting (F9) the engine with any dirty world, asks first: Save / Don't Save /
-// Cancel. Requests come in through ui_request_close_world / ui_request_close_view / ui_request_quit /
-// ui_request_restart; the
+// Cancel. Requests come in through ui_request_close_world / ui_request_close_view / ui_request_exit; the
 // modal is drawn by ui_draw_unsaved_prompt once per frame, at top level.
+Unsaved_Kind :: enum u8 { None, Close_World, Quit, Restart }
+
 @(private="file")
 Unsaved_Prompt :: struct {
-    kind:  enum u8 { None, Close_World, Quit, Restart },
+    kind:  Unsaved_Kind,
     world: ^World,   // Close_World: the world being closed
 }
 @(private="file")
@@ -39,20 +40,11 @@ ui_request_close_view :: proc(v: ^Render_View) {
     view_request_close(v)
 }
 
-// The engine window is closing. True when it can quit right away (nothing unsaved); otherwise the
-// prompt opens and sets app.quit_requested if the user goes ahead.
-ui_request_quit :: proc() -> bool {
+// The engine is quitting (.Quit: its window closed) or relaunching (.Restart: F9, app.odin). True when it
+// can go right away (nothing unsaved); otherwise the prompt opens and goes ahead if the user says so.
+ui_request_exit :: proc(kind: Unsaved_Kind) -> bool {
     for w in worlds do if world_dirty(w) {
-        unsaved = {kind = .Quit}
-        return false
-    }
-    return true
-}
-
-// F9 (app.odin): the same as quitting, then the engine relaunches. True when it can restart right away.
-ui_request_restart :: proc() -> bool {
-    for w in worlds do if world_dirty(w) {
-        unsaved = {kind = .Restart}
+        unsaved = {kind = kind}
         return false
     }
     return true

@@ -46,7 +46,7 @@ RenderDoc_API :: struct {
     SetCaptureFileComments:     rawptr,
     DiscardFrameCapture:        rawptr,
     ShowReplayUI:               rawptr,
-    SetCaptureTitle:            proc "c" (title: cstring),
+    SetCaptureTitle:            rawptr,
 }
 
 @(private="file") RENDERDOC_API_VERSION_1_6_0 :: 10600

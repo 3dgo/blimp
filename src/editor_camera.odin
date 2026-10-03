@@ -65,7 +65,7 @@ camera_fit_bounds :: proc(c: ^Camera, lo, hi: vec3) {
 
 // Grows lo/hi by the world AABB of the entity's transformed model box. False if it has no model.
 entity_grow_bounds :: proc(e: ^Entity, lo, hi: ^vec3) -> bool {
-    model, ok := asset_system.models[e.model]
+    corners, ok := entity_world_corners(e)
     if !ok {
         // No model: a camera or light still has a place worth framing.
         if e.camera_type == .None && e.light_type == .None do return false
@@ -73,13 +73,9 @@ entity_grow_bounds :: proc(e: ^Entity, lo, hi: ^vec3) -> bool {
         hi^ = linalg.max(hi^, e.position + 0.5)
         return true
     }
-    mlo, mhi := model_bounds(model)
-    M := entity_transform(e)
-    for i in 0 ..< 8 {
-        corner := vec3{ (i & 1) != 0 ? mhi.x : mlo.x, (i & 2) != 0 ? mhi.y : mlo.y, (i & 4) != 0 ? mhi.z : mlo.z }
-        p := transform_point(M, corner)
-        lo^ = {min(lo.x, p.x), min(lo.y, p.y), min(lo.z, p.z)}
-        hi^ = {max(hi.x, p.x), max(hi.y, p.y), max(hi.z, p.z)}
+    for c in corners {
+        lo^ = linalg.min(lo^, c)
+        hi^ = linalg.max(hi^, c)
     }
     return true
 }
@@ -185,7 +181,7 @@ editor_navigate :: proc(ev: ^Editor_View) {
 
     case .Fly:
         if !im.IsMouseDown(.Right) {
-            ev.context_click = ev.hovered && !ev.nav.fly_moved && ev.nav.fly_travel < NAV_CLICK_PX * app.dispaly_scale
+            ev.context_click = ev.hovered && !ev.nav.fly_moved && ev.nav.fly_travel < NAV_CLICK_PX * app.display_scale
             ev.nav.drag = .None
             break
         }
@@ -223,8 +219,7 @@ editor_navigate :: proc(ev: ^Editor_View) {
 nav_pan_depth :: proc(ev: ^Editor_View) -> f32 {
     c := ev.view.camera
     mp := im.GetMousePos()
-    ray := camera_ray(c, mp.x - ev.screen_min.x, mp.y - ev.screen_min.y, ev.screen_size.x, ev.screen_size.y)
-    hit, ok := pick_entity(ev.view.world, ray)
+    hit, ok := pick_entity(ev.view.world, view_mouse_ray(ev, {mp.x, mp.y}))
     if !ok do return c.distance
     return max(linalg.dot(hit.point - camera_eye(c), camera_forward(c)), c.near)
 }

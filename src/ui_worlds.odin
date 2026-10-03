@@ -2,7 +2,6 @@ package blimp
 
 import "core:fmt"
 import "core:path/filepath"
-import "core:strings"
 import im "lib:odin-imgui"
 
 // The Worlds window — the first thing you see. Top: a title, a search box, then what you can open —
@@ -26,14 +25,14 @@ ui_draw_worlds :: proc() {
     defer im.End()
 
     // Header: title, a one-line hint, the search box.
-    im.PushFontFloat(nil, 16 * app.dispaly_scale * WORLDS_TITLE_SCALE)
+    im.PushFontFloat(nil, ui_font_size() * WORLDS_TITLE_SCALE)
     im.TextUnformatted("Blimp")
     im.PopFont()
     text_dim_wrapped(tr(.Worlds_Subtitle))
     im.Spacing()
     im.SetNextItemWidth(-1)
     im.InputTextWithHint("##worlds_filter", fmt.ctprintf("%s  %s", ICON_SEARCH, tr(.Worlds_Search)), cstring(&worlds_ui.filter[0]), len(worlds_ui.filter))
-    filter := strings.to_lower(string(cstring(&worlds_ui.filter[0])), context.temp_allocator)
+    filter := string(cstring(&worlds_ui.filter[0]))   // search_matches ignores case
 
     // What you can open, in the height the open-worlds panel leaves.
     open_h := len(worlds) > 0 ? worlds_open_panel_height() : 0
@@ -61,7 +60,7 @@ worlds_browse :: proc(filter: string) {
         defer im.PopID()
         shown := 0
         for path, i in ui.scene_paths {
-            if !worlds_matches(path, filter) do continue
+            if !search_matches(path, filter) do continue
             shown += 1
             im.PushIDInt(i32(i))
             open := world_find_open(path)
@@ -81,7 +80,7 @@ worlds_browse :: proc(filter: string) {
         defer im.PopID()
         shown := 0
         for &kit, i in asset_system.kits {
-            if !worlds_matches(kit.path, filter) do continue
+            if !search_matches(kit.path, filter) do continue
             shown += 1
             im.PushIDInt(i32(i))
             open := world_find_open(kit.path)
@@ -171,19 +170,13 @@ worlds_open_row :: proc(w: ^World) {
     im.SetItemTooltip("%s", tr(.Btn_Close))
 }
 
-// Brings `w` forward: its first view becomes active and its window takes focus.
+// Brings `w` forward: its view (editor_view_for_world: the active one if it shows `w`, its play world
+// included) becomes active and its window takes focus.
 ui_world_focus :: proc(w: ^World) {
-    for v in views {
-        if world_level(v.world) != w do continue   // its views show its play world while it plays
-        view_activate(v)
-        im.SetWindowFocusStr(fmt.ctprintf("###host%d", v.id))   // its world window ("###view<id>" are extra viewports)
-        return
-    }
-}
-
-@(private="file")
-worlds_matches :: proc(path, filter_lower: string) -> bool {
-    return search_matches(path, filter_lower)
+    ev := editor_view_for_world(w)
+    if ev == nil do return
+    view_activate(ev.view)
+    im.SetWindowFocusStr(fmt.ctprintf("###host%d", ev.view.id))   // its world window ("###view<id>" are extra viewports)
 }
 
 // A collapsible section header: icon, title and a dimmed count. Open by default. `refresh` leaves room

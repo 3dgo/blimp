@@ -15,11 +15,11 @@ Renderer_DX :: struct {
     swapchain: dx.Swapchain,
 
     root_signature: dx.Root_Signature,
-    
+
     resource_heap: dx.Descriptor_Heap,
     sampler_heap: dx.Descriptor_Heap,
     ui_heap: dx.Descriptor_Heap,
-    
+
     cmd_alloc_gfx: [FRAMES_IN_FLIGHT]dx.Command_Allocator,
     cmd_alloc_copy: [FRAMES_IN_FLIGHT]dx.Command_Allocator,
 
@@ -54,20 +54,17 @@ Frame_Constants :: struct {
     proj_mat: mat4,
     camera_pos: vec3,
     light_count: u32,
-    time: f32,
-    resolution: uvec2,
 
     transform_buffer_slot: u32,
     mesh_instance_buffer_slot: u32,
     lights_buffer_slot: u32,
-    
+
     mesh_buffer_slot: u32,
-    index_buffer_slot: u32,
     position_buffer_slot: u32,
     attribute_buffer_slot: u32,
     material_buffer_slot: u32,
     sampler_slot: u32,
-    
+
     debug_line_buffer_slot: u32,
     hdr_texture_slot: u32,   // the view's scene target, read by the post pass
     exposure: f32,           // 2^world.settings.exposure
@@ -78,14 +75,14 @@ Frame_Constants :: struct {
     vertex_snap: vec2,       // the scene VS rounds NDC xy to steps of 1 / vertex_snap (half the scene size); 0 = off
     affine: f32,             // 0 = perspective-correct UVs, 1 = affine; in between blends
 
-    // Baked probes (render_probes.odin) of the world's level; probe_dims 0 = not baked (the shader falls back to a flat ambient).
+    // Baked probes (world_probes.odin) of the world's level; probe_dims 0 = not baked (the shader falls back to a flat ambient).
     probe_buffer_slot: u32,
     probe_origin:  vec3,
     probe_spacing: f32,
     probe_dims:    uvec3,
     lighting_view:  u32,   // Lighting_View
     indirect_scale: f32,   // × indirect light (Render_View.indirect_scale)
-    probe_layers:   u32,   // layers in the probe buffer (render_probes.odin): static, then one per lit light group
+    probe_layers:   u32,   // layers in the probe buffer (world_probes.odin): static, then one per lit light group
     probe_depth_slot: u32,   // their depth maps (Probe_Depth), for the visibility test
     _pad_layers:    u32,
     probe_layer_scale: [2]vec4,   // each layer's light-group scale this frame, layer k at [k / 4][k % 4]
@@ -112,10 +109,10 @@ Frame_Constants :: struct {
     gamma:        f32,
     brightness:   f32,
 
-    _padding: [512 - 388]byte,   // CBVs come in 256-byte steps
+    _padding: [512 - 372]byte,   // CBVs come in 256-byte steps
 }
-#assert(offset_of(Frame_Constants, signal_texture_slot) == 328)
-#assert(offset_of(Frame_Constants, _padding) == 388)
+#assert(offset_of(Frame_Constants, signal_texture_slot) == 312)
+#assert(offset_of(Frame_Constants, _padding) == 372)
 #assert(offset_of(Frame_Constants, probe_layer_scale) % 16 == 0)
 #assert(MAX_PROBE_LAYERS <= 8)
 #assert(size_of(Frame_Constants) == 512)
@@ -124,7 +121,6 @@ Frame_Constants :: struct {
 // attribute for this, so check each non-scalar field.
 #assert(offset_of(Frame_Constants, proj_mat) % 16 == 0)
 #assert(offset_of(Frame_Constants, camera_pos) % 16 + size_of(vec3)  <= 16)
-#assert(offset_of(Frame_Constants, resolution) % 16 + size_of(uvec2) <= 16)
 #assert(offset_of(Frame_Constants, scene_cover) % 16 + size_of(vec2)  <= 16)
 #assert(offset_of(Frame_Constants, vertex_snap) % 16 + size_of(vec2)  <= 16)
 #assert(offset_of(Frame_Constants, probe_origin) % 16 + size_of(vec3)  <= 16)
@@ -154,7 +150,7 @@ renderer_dx_init :: proc() {
     // Cmd
     renderer_dx.cmd_queue_gfx  = dx.command_queue_create(renderer_dx.render_context, {type = .DIRECT})
     renderer_dx.cmd_queue_copy = dx.command_queue_create(renderer_dx.render_context, {type = .COPY})
-    
+
     for i in 0..<FRAMES_IN_FLIGHT {
         renderer_dx.cmd_alloc_gfx[i]  = dx.command_allocator_create(renderer_dx.render_context, {type = .DIRECT})
         renderer_dx.cmd_alloc_copy[i] = dx.command_allocator_create(renderer_dx.render_context, {type = .COPY})
@@ -192,7 +188,7 @@ renderer_dx_init :: proc() {
     }
     render_post_init()   // post chain: HDR scene target → display target (render_post.odin)
     render_shadows_init()   // depth-only shadow map pass (render_shadows.odin)
-    
+
     // Debug line renderer — its own shader, PSO, and per-flight buffers
     debug_draw_init()
     gpu_timer_init()   // per-pass GPU timestamps (render_gpu_timer.odin)
@@ -313,9 +309,7 @@ renderer_dx_present :: proc() {
     dx.command_queue_signal(renderer_dx.cmd_queue_gfx, renderer_dx.frame_fence_gfx, renderer_dx.frame_val)
 }
 
-renderer_dx_shutdown :: proc() {
-    dx.fence_wait(renderer_dx.frame_fence_gfx, renderer_dx.frame_val)
-
+renderer_dx_shutdown :: proc() {   // the GPU is idle (app_shutdown waited)
     debug_draw_shutdown()
     render_post_shutdown()
     render_shadows_shutdown()
@@ -385,7 +379,7 @@ renderer_dx_pipelines :: proc() -> []^Shader_Pipeline {
     return list[:]
 }
 
-// Recompiles every pipeline's shaders from disk (asset_hot_reload.odin). All or nothing: shaders share
+// Recompiles every pipeline's shaders from disk (app_hot_reload.odin). All or nothing: shaders share
 // structs through common.slang, so if any fails to compile, its errors are logged and every pipeline
 // keeps what it had.
 render_shaders_reload :: proc() {
@@ -410,6 +404,7 @@ render_shaders_reload :: proc() {
     log.infof("Shader reload: %v pipelines rebuilt", len(pipelines))
 }
 
+// Waits until the GPU has finished every submitted frame: before freeing anything a frame in flight may use.
 renderer_dx_wait_idle :: proc() {
     dx.fence_wait(renderer_dx.frame_fence_gfx, renderer_dx.frame_val)
 }
@@ -419,7 +414,7 @@ renderer_dx_resize_window :: proc(new_size: uvec2) {
 }
 
 renderer_dx_resize_view :: proc(view: ^Render_View, new_size: uvec2) {
-    dx.fence_wait(renderer_dx.frame_fence_gfx, renderer_dx.frame_val)
+    renderer_dx_wait_idle()
     render_view_resize(view, new_size.x, new_size.y)
 }
 

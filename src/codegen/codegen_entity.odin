@@ -18,15 +18,15 @@ ENTITY_SCHEMA_PATH :: "entity_schema.ini"
 ENTITY_GEN_PATH    :: "src/gen_entity.odin"
 
 @(private = "file")
-Schema_Field :: struct { name, type, tags, section, en, zh, default: string }
+Schema_Field :: struct { name, type, tags, section, en, zh, default, note: string }
 @(private = "file")
-Schema_Member :: struct { name, en, zh: string }   // enum / flags value
+Schema_Member :: struct { name, en, zh, note: string }   // enum / flags value
 @(private = "file")
-Schema_Type :: struct { name: string, is_flags: bool, members: [dynamic]Schema_Member }
+Schema_Type :: struct { name, note: string, is_flags: bool, members: [dynamic]Schema_Member }
 @(private = "file")
-Schema_SMember :: struct { name, type, en, zh, default: string }   // struct field
+Schema_SMember :: struct { name, type, en, zh, default, note: string }   // struct field
 @(private = "file")
-Schema_Struct :: struct { name: string, members: [dynamic]Schema_SMember }
+Schema_Struct :: struct { name, note: string, members: [dynamic]Schema_SMember }
 
 generate_entity :: proc() {
     data, rerr := os.read_entire_file(ENTITY_SCHEMA_PATH, context.temp_allocator)
@@ -40,7 +40,7 @@ generate_entity :: proc() {
     structs: [dynamic]Schema_Struct   // [struct.*] type declarations
 
     // Which record subsequent `key = value` lines apply to.
-    Target :: enum { None, Field, Enum_Member, Struct_Member }
+    Target :: enum { None, Field, Enum, Enum_Member, Struct, Struct_Member }
     target := Target.None
 
     text := string(data)
@@ -57,12 +57,12 @@ generate_entity :: proc() {
                 target = .Field
             case (kind == "enum" || kind == "flags") && len(parts) == 2:
                 append(&types, Schema_Type{name = strings.clone(parts[1]), is_flags = kind == "flags"})
-                target = .None
+                target = .Enum
             case (kind == "enum" || kind == "flags") && len(parts) == 3:
                 if len(types) > 0 { append(&types[len(types) - 1].members, Schema_Member{name = strings.clone(parts[2])}); target = .Enum_Member } else { target = .None }
             case kind == "struct" && len(parts) == 2:
                 append(&structs, Schema_Struct{name = strings.clone(parts[1])})
-                target = .None
+                target = .Struct
             case kind == "struct" && len(parts) == 3:
                 if len(structs) > 0 { append(&structs[len(structs) - 1].members, Schema_SMember{name = strings.clone(parts[2])}); target = .Struct_Member } else { target = .None }
             case:
@@ -87,12 +87,18 @@ generate_entity :: proc() {
             case "en":      f.en      = strings.clone(val)
             case "zh":      f.zh      = strings.clone(val)
             case "default": f.default = strings.clone(val)
+            case "note":    f.note    = strings.clone(val)
             }
+        case .Enum:
+            if key == "note" do types[len(types) - 1].note = strings.clone(val)
+        case .Struct:
+            if key == "note" do structs[len(structs) - 1].note = strings.clone(val)
         case .Enum_Member:
             m := &types[len(types) - 1].members[len(types[len(types) - 1].members) - 1]
             switch key {
-            case "en": m.en = strings.clone(val)
-            case "zh": m.zh = strings.clone(val)
+            case "en":   m.en   = strings.clone(val)
+            case "zh":   m.zh   = strings.clone(val)
+            case "note": m.note = strings.clone(val)
             }
         case .Struct_Member:
             m := &structs[len(structs) - 1].members[len(structs[len(structs) - 1].members) - 1]
@@ -101,6 +107,7 @@ generate_entity :: proc() {
             case "en":      m.en      = strings.clone(val)
             case "zh":      m.zh      = strings.clone(val)
             case "default": m.default = strings.clone(val)
+            case "note":    m.note    = strings.clone(val)
             }
         }
     }
@@ -125,6 +132,7 @@ generate_entity :: proc() {
     // ---- Entity struct. A field's `section` is emitted as a `section:<Member>` tag, which the inspector reads. ----
     fmt.sbprintln(&sb, "Entity :: struct {")
     for f in fields {
+        _emit_note(&sb, f.note, "    ")
         tags := f.tags
         if f.section != "" do tags = fmt.tprintf("%s%ssection:%s", tags, tags != "" ? ", " : "", f.section)
         if len(tags) > 0 {
@@ -139,15 +147,23 @@ generate_entity :: proc() {
     // ---- Composite types. Package-scope decls are order-independent in Odin, so a struct may
     // reference another declared later (a by-value cycle is a compile error, by design). ----
     for s in structs {
+        _emit_note(&sb, s.note, "")
         fmt.sbprintfln(&sb, "%v :: struct {{", s.name)
-        for m in s.members do fmt.sbprintfln(&sb, "    %v: %v,", m.name, _odin_field_type(m.type))
+        for m in s.members {
+            _emit_note(&sb, m.note, "    ")
+            fmt.sbprintfln(&sb, "    %v: %v,", m.name, _odin_field_type(m.type))
+        }
         fmt.sbprintln(&sb, "}")
         fmt.sbprintln(&sb, "")
     }
 
     for t in types {
+        _emit_note(&sb, t.note, "")
         fmt.sbprintfln(&sb, "%v :: enum u64 {{", t.name)
-        for m in t.members do fmt.sbprintfln(&sb, "    %v,", m.name)
+        for m in t.members {
+            _emit_note(&sb, m.note, "    ")
+            fmt.sbprintfln(&sb, "    %v,", m.name)
+        }
         fmt.sbprintln(&sb, "}")
         if t.is_flags {
             fmt.sbprintfln(&sb, "%vs :: bit_set[%v; u64]", t.name, t.name)
@@ -161,6 +177,23 @@ generate_entity :: proc() {
     _emit_struct_labels(&sb, structs[:])
 
     write_generated(ENTITY_GEN_PATH, strings.to_string(sb))
+}
+
+// A schema `note` as `//` comment lines above the declaration, wrapped at about 100 columns.
+@(private = "file")
+_emit_note :: proc(sb: ^strings.Builder, note, indent: string) {
+    if note == "" do return
+    line := 0
+    fmt.sbprintf(sb, "%s//", indent)
+    for word in strings.fields(note, context.temp_allocator) {
+        if line > 0 && line + 1 + len(word) > 100 - len(indent) {
+            fmt.sbprintf(sb, "\n%s//", indent)
+            line = 0
+        }
+        fmt.sbprintf(sb, " %s", word)
+        line += 1 + len(word)
+    }
+    fmt.sbprintln(sb)
 }
 
 // ---- entity_apply_defaults: literal assignments ----

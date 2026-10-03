@@ -40,6 +40,12 @@ entity_drawn :: proc(e: ^Entity) -> bool {
     return .Renderable in e.basic_static_flags && entity_editor_visible(e)
 }
 
+// What takes part in the bake: drawn, static, and not opted out (Cast Indirect). Geometry blocks and
+// bounces light; a light has its bounce baked, scaled by its `indirect`.
+entity_bakes :: proc(e: ^Entity) -> bool {
+    return entity_drawn(e) && .Static in e.basic_static_flags && .Cast_Indirect in e.basic_static_flags
+}
+
 // An entity's asset references as interned keys (asset_intern), so they outlive whatever arena they were
 // read into (a level, the clipboard, a remote command) and survive an asset reload. Call after reading
 // fields from text.
@@ -91,23 +97,25 @@ entity_count_blocks :: proc(text: string) -> (n: int) {
 
 ENTITY_SECTION :: "entity"   // the [entity] block: levels, the clipboard, templates
 
-// Routes one INI `key = value` onto Entity field `key` (dotted paths descend into nested structs).
-// Skips fields tagged `noserialize` or any tag in `skip_tags` (identity/placement, for paste-over).
-// The generic value codec lives in serialize.odin; this is the Entity-aware router around it.
-deserialize_field :: proc(e: ^Entity, key: string, val: string, skip_tags: []string = {}) {
-    // Guard: never write a noserialize top-level field (e.g. handle), even if a hand-edited
-    // scene lists it. Nested keys carry a '.'; their top segment is the entity field.
-    top := key
-    if d := strings.index_byte(key, '.'); d >= 0 do top = key[:d]
+// The live slot of `e`'s field at `path` (a name, or a dotted path into nested structs), for code that
+// writes a field it names at runtime: levels and the clipboard (deserialize_field), blimpctl set, Lua's
+// Entity.set_*. Refuses `noserialize` fields (the handle, the selection flag) — even if a hand-edited file
+// lists one — and any field tagged with one of `skip_tags`. Nested paths are checked by their top field.
+entity_writable_field :: proc(e: ^Entity, path: string, skip_tags: []string = {}) -> (v: any, ok: bool) {
+    top := path
+    if d := strings.index_byte(path, '.'); d >= 0 do top = path[:d]
     for i in 0 ..< reflect.struct_field_count(Entity) {
         field := reflect.struct_field_at(Entity, i)
-        if field.name == top {
-            if field_has_tag(field.tag, "noserialize") do return
-            for st in skip_tags do if field_has_tag(field.tag, st) do return
-            break
-        }
+        if field.name != top do continue
+        if field_has_tag(field.tag, "noserialize") do return
+        for st in skip_tags do if field_has_tag(field.tag, st) do return
+        break
     }
-    if v, ok := struct_field_by_path(e^, key); ok {
-        deserialize_value(v, val)
-    }
+    return struct_field_by_path(e^, path)
+}
+
+// Routes one INI `key = value` onto `e`'s field `key` (entity_writable_field), through the value codec in
+// serialize.odin. `skip_tags`: identity/placement, for paste-over.
+deserialize_field :: proc(e: ^Entity, key: string, val: string, skip_tags: []string = {}) {
+    if v, ok := entity_writable_field(e, key, skip_tags); ok do deserialize_value(v, val)
 }

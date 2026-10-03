@@ -91,7 +91,7 @@ ui_view_tools :: proc() {
     style := im.GetStyle()
     labels := [?]cstring{tr(.Tool_Space_Global), tr(.Tool_Space_Local), tr(.Tool_Pivot_Center), tr(.Tool_Pivot_Individual)}
     width := im.CalcTextSize(ICON_MOVE).x   // icon glyphs share one advance
-    im.PushFontFloat(nil, 16 * app.dispaly_scale * TOOL_LABEL_SCALE)
+    im.PushFontFloat(nil, ui_font_size() * TOOL_LABEL_SCALE)
     for l in labels do width = max(width, im.CalcTextSize(l).x)
     im.PopFont()
     width += 2 * style.FramePadding.x * TOOL_PAD_SCALE
@@ -147,7 +147,7 @@ TOOL_PAD_SCALE   :: 0.5   // padding around the tool column's content, × style.
 stacked_button :: proc(id: cstring, icon: string, text: cstring, width: f32) -> (clicked: bool) {
     style := im.GetStyle()
     line := im.GetFontSize()
-    small := 16 * app.dispaly_scale * TOOL_LABEL_SCALE
+    small := ui_font_size() * TOOL_LABEL_SCALE
     pad := style.FramePadding.y * TOOL_PAD_SCALE
     clicked = im.Button(id, {width, line + small + 2 * pad})
     mn, mx := im.GetItemRectMin(), im.GetItemRectMax()
@@ -212,7 +212,7 @@ ui_view_lighting_menu :: proc(view: ^Render_View) {
     im.Separator()
     use_probes := !view.probes_off
     if im.Checkbox(tr(.Lighting_Use_Probes), &use_probes) do view.probes_off = !use_probes
-    im.SetNextItemWidth(160 * app.dispaly_scale)
+    im.SetNextItemWidth(160 * app.display_scale)
     im.SliderFloat(tr(.Lighting_Indirect_Scale), &view.indirect_scale, 0, 4, "%.2f")
     if view.indirect_scale != 1 {
         im.SameLine()
@@ -229,7 +229,7 @@ ui_view_lighting_menu :: proc(view: ^Render_View) {
         name := sbuf_str(&light_group_settings(w, g).name)
         label := name != "" ? fmt.ctprintf("%s##group%d", name, g) : fmt.ctprintf("%s##group%d", tr(LIGHT_GROUP_LABEL[g - 1]), g)
         v := light_group_base_scale(w, g)
-        im.SetNextItemWidth(160 * app.dispaly_scale)
+        im.SetNextItemWidth(160 * app.display_scale)
         if im.SliderFloat(label, &v, 0, 2, "%.2f") do w.light_group_override[g] = v
     }
     if overridden && im.SmallButton(tr(.Lighting_Groups_Reset)) do w.light_group_override = {}

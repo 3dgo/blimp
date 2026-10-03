@@ -110,8 +110,3 @@ gpu_timer_frame_resolve :: proc(cmd: dx.Command_List) {
     cmd.handle->ResolveQueryData(gpu_timer.heap, .TIMESTAMP, base, n, gpu_timer.readback, u64(base) * size_of(u64))
 }
 
-// Milliseconds of the scope named `name` in the latest completed frame (0 if absent).
-gpu_timing_ms :: proc(name: string) -> f32 {
-    for &t in gpu_timings do if sbuf_str(&t.name) == name do return t.ms
-    return 0
-}

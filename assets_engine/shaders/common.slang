@@ -5,15 +5,12 @@ public struct FrameConstants {
     public float4x4 projMat;
     public float3   cameraPos;
     public uint     lightCount;
-    public float    time;
-    public uint2    resolution;
     
     public uint     transformBufferSlot;
     public uint     meshInstanceBufferSlot;
     public uint     lightBufferSlot;
     
     public uint     meshBufferSlot;
-    public uint     indexBufferSlot;
     public uint     positionBufferSlot;
     public uint     attributeBufferSlot;
     public uint     materialBufferSlot;

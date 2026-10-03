@@ -46,7 +46,7 @@ entity_get_number :: proc(handle: Entity_Handle, field: string) -> f64 {
 
 @(lua=set_number, table=Entity, lua_zh="设数")
 entity_set_number :: proc(handle: Entity_Handle, field: string, value: f64) {
-    v, ok := entity_field(handle, field)
+    v, ok := entity_field(handle, field, write = true)
     if !ok do return
     #partial switch info in type_info_of(v.id).variant {
     case runtime.Type_Info_Float:   (^f32)(v.data)^ = f32(value)
@@ -69,7 +69,7 @@ entity_get_bool :: proc(handle: Entity_Handle, field: string) -> bool {
 
 @(lua=set_bool, table=Entity, lua_zh="设布尔")
 entity_set_bool :: proc(handle: Entity_Handle, field: string, value: bool) {
-    v, ok := entity_field(handle, field)
+    v, ok := entity_field(handle, field, write = true)
     if !ok do return
     if _, is_b := type_info_of(v.id).variant.(runtime.Type_Info_Boolean); is_b do (^bool)(v.data)^ = value
 }
@@ -87,12 +87,13 @@ entity_get_string :: proc(handle: Entity_Handle, field: string) -> string {
 
 @(lua=set_string, table=Entity, lua_zh="设文本")
 entity_set_string :: proc(handle: Entity_Handle, field: string, value: string) {
-    v, ok := entity_field(handle, field)
+    v, ok := entity_field(handle, field, write = true)
     if !ok do return
     #partial switch _ in type_info_of(v.id).variant {
-    case runtime.Type_Info_String:                       (^string)(v.data)^ = asset_intern(value)
+    case runtime.Type_Info_String:                       (^string)(v.data)^ = asset_intern(value)   // string fields are asset keys
     case runtime.Type_Info_Fixed_Capacity_Dynamic_Array: sbuf_any_set(v, value)
     }
+    if field == "name" do if w, wok := lua_world(); wok do world_fix_duplicate_name(w, handle)   // names stay unique
 }
 
 @(lua=get_vec3, table=Entity, lua_zh="取矢量")
@@ -105,7 +106,7 @@ entity_get_vec3 :: proc(handle: Entity_Handle, field: string) -> vec3 {
 
 @(lua=set_vec3, table=Entity, lua_zh="设矢量")
 entity_set_vec3 :: proc(handle: Entity_Handle, field: string, value: vec3) {
-    v, ok := entity_field(handle, field)
+    v, ok := entity_field(handle, field, write = true)
     if !ok do return
     if a, is_a := type_info_of(v.id).variant.(runtime.Type_Info_Array); is_a && a.count == 3 do (^vec3)(v.data)^ = value
 }
@@ -120,18 +121,20 @@ entity_get_quat :: proc(handle: Entity_Handle, field: string) -> quat {
 
 @(lua=set_quat, table=Entity, lua_zh="设四元数")
 entity_set_quat :: proc(handle: Entity_Handle, field: string, value: quat) {
-    v, ok := entity_field(handle, field)
+    v, ok := entity_field(handle, field, write = true)
     if !ok do return
     if _, is_q := type_info_of(v.id).variant.(runtime.Type_Info_Quaternion); is_q do (^quat)(v.data)^ = value
 }
 
-// The `any` for entity `handle`'s field named `name`, pointing at the live slot (so writes
-// through it hit the entity). `name` may be a dotted path into nested struct fields
-// ("light_groups.group_1.scale" in a settings struct). ok=false if the handle is stale or the path doesn't resolve.
+// The `any` for entity `handle`'s field named `name` in the script's world, pointing at the live slot (so
+// writes through it hit the entity). `name` may be a dotted path into nested struct fields. `write`: only a
+// field code may write (entity_writable_field: not the handle or the selection). ok = false if the handle
+// is stale or the path doesn't resolve.
 @(private = "file")
-entity_field :: proc(handle: Entity_Handle, name: string) -> (v: any, ok: bool) {
+entity_field :: proc(handle: Entity_Handle, name: string, write := false) -> (v: any, ok: bool) {
     w := lua_world() or_return
     e := entity_get(w, handle) or_return
+    if write do return entity_writable_field(e, name)
     return struct_field_by_path(e^, name)
 }
 

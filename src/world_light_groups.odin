@@ -46,7 +46,6 @@ light_group_find :: proc(w: ^World, name: string) -> int {
     return 0
 }
 
-// The scale before its flicker: the runtime override, else the saved value.
 // Sets group `name`'s runtime scale over the saved one (Lua, the Lighting menu); false if no group has that name.
 light_group_set_override :: proc(w: ^World, name: string, scale: f32) -> bool {
     g := light_group_find(w, name)
@@ -55,14 +54,18 @@ light_group_set_override :: proc(w: ^World, name: string, scale: f32) -> bool {
     return true
 }
 
+// The scale before its flicker: the runtime override, else the saved value.
 light_group_base_scale :: proc(w: ^World, g: int) -> f32 {
     if g == 0 do return 1
     if s, ok := w.light_group_override[g].?; ok do return s
     return light_group_settings(w, g).scale
 }
 
-// Every group's scale this frame, indexed by group number (scales[0] = 1). `time` drives the patterns.
-light_group_scales :: proc(w: ^World, time: f64) -> (scales: [MAX_LIGHT_GROUPS + 1]f32) {
+// Every group's scale this frame, indexed by group number (scales[0] = 1). The patterns run on the frame's
+// wall-clock time (timer_sec_since_start, the same for every caller in a frame), so they animate in the
+// editor too.
+light_group_scales :: proc(w: ^World) -> (scales: [MAX_LIGHT_GROUPS + 1]f32) {
+    time := timer_sec_since_start()
     scales[0] = 1
     for g in 1..=MAX_LIGHT_GROUPS {
         scales[g] = light_group_base_scale(w, g) * light_pattern_value(sbuf_str(&light_group_settings(w, g).pattern), time)

@@ -4,7 +4,7 @@ import "dx"
 import "core:mem"
 import "core:math"
 import "core:math/linalg"
- 
+
 MAX_DEBUG_LINE_VERTS :: 65536   // the probe view takes 12 per probe
 
 Debug_Line_Vertex :: struct { pos: vec4, color: vec4 }
@@ -52,23 +52,13 @@ debug_line :: proc(a, b: vec3, color := vec4{1, 1, 1, 1}) {
     append(&debug_draw.verts, Debug_Line_Vertex{{b.x, b.y, b.z, 1}, color})
 }
 
-debug_axes :: proc(origin := vec3{0, 0, 0}, size: f32 = 1) {
-    debug_line(origin, origin + {size, 0, 0}, {1, 0, 0, 1})
-    debug_line(origin, origin + {0, size, 0}, {0, 1, 0, 1})
-    debug_line(origin, origin + {0, 0, size}, {0, 0, 1, 1})
+debug_box :: proc(center: vec3, half: vec3, color := vec4{1, 1, 1, 1}) {
+    debug_box_corners(box_corners(mat4(1), center - half, center + half), color)
 }
 
-debug_box :: proc(center: vec3, half: vec3, color := vec4{1, 1, 1, 1}) {
-    c := [8]vec3{}
-    for i in 0..<8 {
-        c[i] = center + {
-            (i & 1) != 0 ? half.x : -half.x,
-            (i & 2) != 0 ? half.y : -half.y,
-            (i & 4) != 0 ? half.z : -half.z,
-        }
-    }
-    edges := [12][2]int{ {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} }
-    for e in edges do debug_line(c[e[0]], c[e[1]], color)
+// The 12 edges of a box given by its corners (box_corners order): a transformed box.
+debug_box_corners :: proc(c: [8]vec3, color := vec4{1, 1, 1, 1}) {
+    for e in BOX_EDGES do debug_line(c[e[0]], c[e[1]], color)
 }
 
 // A circle in the plane spanned by the unit vectors `a` and `b`.
@@ -95,7 +85,7 @@ debug_sphere :: proc(center: vec3, radius: f32, color := vec4{1, 1, 1, 1}, rotat
 // circle, four side lines and two arcs over the cap through the tip. `cap = false` leaves the arcs out,
 // for a cone drawn inside another of the same length (their arcs would lie on each other and z-fight).
 debug_cone :: proc(apex, dir: vec3, length, half_angle: f32, color := vec4{1, 1, 1, 1}, cap := true) {
-    u := linalg.normalize(linalg.cross(abs(dir.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, dir))
+    u := perpendicular(dir)
     v := linalg.cross(dir, u)
     debug_circle(apex + dir * (length * math.cos(half_angle)), u, v, length * math.sin(half_angle), color)
     SEGMENTS :: 16
@@ -119,7 +109,7 @@ debug_cone :: proc(apex, dir: vec3, length, half_angle: f32, color := vec4{1, 1,
 // A cylinder from `base` along unit `dir`: its two end circles and four side lines (what a cylinder
 // light lights).
 debug_cylinder :: proc(base, dir: vec3, length, radius: f32, color := vec4{1, 1, 1, 1}) {
-    u := linalg.normalize(linalg.cross(abs(dir.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, dir))
+    u := perpendicular(dir)
     v := linalg.cross(dir, u)
     tip := base + dir * length
     debug_circle(base, u, v, radius, color)
@@ -133,7 +123,7 @@ debug_arrow :: proc(from, to: vec3, color := vec4{1, 1, 1, 1}, head: f32 = 0.2) 
     dir := to - from
     if linalg.length(dir) < 1e-5 do return
     dir = linalg.normalize(dir)
-    side := linalg.normalize(linalg.cross(abs(dir.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, dir))
+    side := perpendicular(dir)
     debug_line(to, to - dir * head + side * head * 0.5, color)
     debug_line(to, to - dir * head - side * head * 0.5, color)
 }
@@ -166,9 +156,8 @@ debug_axes_of :: proc(rotation: quat) -> (right, up, forward: vec3) {
            linalg.quaternion_mul_vector3(rotation, vec3{0, 0, 1})
 }
 
-// The frame's lines are one list: gameplay lines first (debug_line from anywhere — drawn in the
-// game world's views), then each view's editor overlay appended as its own range. Upload once,
-// then each view draws just the ranges that belong to it, then clear.
+// The frame's lines are one list: each view's editor lines appended as its own range before the frame
+// (ui_view_debug_lines). Upload once, then each view draws just its range, then clear.
 
 // Copies this frame's lines into the flight's mapped buffer. Call after every line is appended,
 // before the frame is submitted.

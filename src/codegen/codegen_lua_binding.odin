@@ -132,7 +132,7 @@ parse_file :: proc(path: string) {
         
         #partial switch expr in val.values[0].derived_expr {
             case ^ast.Struct_Type: {
-                if struct_info, struct_ok := parse_struct(name_id, expr, attr_map); struct_ok {
+                if struct_info, struct_ok := parse_struct(name_id, expr); struct_ok {
                     codegen.structs[struct_info.name] = struct_info
                 }
             }
@@ -147,7 +147,7 @@ parse_file :: proc(path: string) {
     }
 }
 
-parse_struct :: proc(struct_name: ^ast.Ident, struct_type: ^ast.Struct_Type, attributes: map[string]string) -> (Struct_Info, bool) {
+parse_struct :: proc(struct_name: ^ast.Ident, struct_type: ^ast.Struct_Type) -> (Struct_Info, bool) {
     struct_info: Struct_Info
 
     // Struct names
@@ -298,33 +298,11 @@ generate_struct :: proc(sb: ^strings.Builder, info: Struct_Info) {
     fmt.sbprintfln(sb, "_lua_push_table_%v :: proc(L: ^lua.State, v: %v) {{", struct_name, struct_name)
     fmt.sbprintfln(sb, "    lua.createtable(L, 0, %v)", len(info.fields))
     for field in info.fields {
-        switch field.type {
-            case "f32", "f64": {
-                fmt.sbprintfln(sb, "    lua.pushnumber(L, lua.Number(v.%v))", field.name)
-            }
-            case "int", "i32", "i64", "u32", "u64": {
-                fmt.sbprintfln(sb, "    lua.pushinteger(L, lua.Integer(v.%v))", field.name)
-            }
-            case "bool": {
-                fmt.sbprintfln(sb, "    lua.pushboolean(L, b32(v.%v))", field.name)
-            }
-            case "string": {
-                fmt.sbprintfln(sb, "    lua.pushstring(L, strings.clone_to_cstring(v.%v, context.temp_allocator))", field.name)
-            }
-            case: {
-                if field.type in codegen.ffi_types {
-                    fmt.sbprintfln(sb, "    _lua_push_ffi_%v(L, v.%v)", field.type, field.name)
-                } else if field.type in codegen.flag_types {
-                    fmt.sbprintfln(sb, "    lua.pushinteger(L, lua.Integer(transmute(u64)v.%v))", field.name)
-                } else if field.type in codegen.enum_types {
-                    fmt.sbprintfln(sb, "    lua.pushinteger(L, lua.Integer(v.%v))", field.name)
-                } else if bt, is_int := codegen.int_types[field.type]; is_int {
-                    fmt.sbprintfln(sb, "    lua.pushinteger(L, lua.Integer(transmute(%v)v.%v))", bt, field.name)
-                } else {
-                    fmt.sbprintfln(sb, "    lua.pushnil(L) // unsupported struct field type: %s", field.type)
-                    log.errorf("Codegen: Not supported struct field type: %v", field.type)
-                }
-            }
+        if code, ok := lua_push_code(field.type, fmt.tprintf("v.%v", field.name)); ok {
+            fmt.sbprintfln(sb, "    %v", code)
+        } else {
+            fmt.sbprintfln(sb, "    lua.pushnil(L) // unsupported struct field type: %s", field.type)
+            log.errorf("Codegen: Not supported struct field type: %v", field.type)
         }
         fmt.sbprintfln(sb, "    lua.setfield(L, -2, \"%v\")", field.name)
     }
@@ -344,33 +322,11 @@ generate_struct :: proc(sb: ^strings.Builder, info: Struct_Info) {
     fmt.sbprintfln(sb, "    v: %v", struct_name)
     for field in info.fields {
         fmt.sbprintfln(sb, "    lua.getfield(L, idx, \"%v\")", field.name)
-        switch field.type {
-            case "f32", "f64": {
-                fmt.sbprintfln(sb, "    v.%v = %v(lua.L_checknumber(L, -1))", field.name, field.type)
-            }
-            case "int", "i32", "i64", "u32", "u64": {
-                fmt.sbprintfln(sb, "    v.%v = %v(lua.L_checkinteger(L, -1))", field.name, field.type)
-            }
-            case "bool": {
-                fmt.sbprintfln(sb, "    v.%v = bool(lua.toboolean(L, -1))", field.name)
-            }
-            case "string": {
-                fmt.sbprintfln(sb, "    v.%v = %v(lua.L_checkstring(L, -1))", field.name, field.type)
-            }
-            case: {
-                if field.type in codegen.ffi_types {
-                    fmt.sbprintfln(sb, "    v.%v = (cast(^%v)lua.topointer(L, -1))^", field.name, field.type)
-                } else if field.type in codegen.flag_types {
-                    fmt.sbprintfln(sb, "    v.%v = transmute(%v)u64(lua.L_checkinteger(L, -1))", field.name, field.type)
-                } else if field.type in codegen.enum_types {
-                    fmt.sbprintfln(sb, "    v.%v = %v(lua.L_checkinteger(L, -1))", field.name, field.type)
-                } else if bt, is_int := codegen.int_types[field.type]; is_int {
-                    fmt.sbprintfln(sb, "    v.%v = transmute(%v)%v(lua.L_checkinteger(L, -1))", field.name, field.type, bt)
-                } else {
-                    fmt.sbprintfln(sb, "    // unsupported field type: %v", field.type)
-                    log.errorf("Codegen: Not supported struct field type: %v", field.type)
-                }
-            }
+        if code, ok := lua_read_code(field.type, "-1"); ok {
+            fmt.sbprintfln(sb, "    v.%v = %v", field.name, code)
+        } else {
+            fmt.sbprintfln(sb, "    // unsupported field type: %v", field.type)
+            log.errorf("Codegen: Not supported struct field type: %v", field.type)
         }
         fmt.sbprintln(sb, "    lua.pop(L, 1)")
     }
@@ -384,47 +340,24 @@ generate_proc :: proc(sb: ^strings.Builder, info: Proc_Info) {
     fmt.sbprintfln(sb, "%v :: proc \"c\" (L: ^lua.State) -> c.int {{", info.odin_wrapper_name)
     fmt.sbprintfln(sb, `    context = app.g_context`)
 
-    // Read paramters
+    // Read parameters. One with a default is optional: a number reads with the default when absent; an FFI
+    // value (Vec3…) keeps the default unless one was passed.
     for param, i in info.params {
-        switch param.type {
-            case "f32", "f64": {
-                if param.default != "" do fmt.sbprintfln(sb, "    %v := %v(lua.L_optnumber(L, %v, %v))", param.name, param.type, i+1, param.default)
-                else do fmt.sbprintfln(sb, "    %v := %v(lua.L_checknumber(L, %v))", param.name, param.type, i+1)
-            }
-            case "int", "i32", "i64", "u32", "u64": {
-                if param.default != "" do fmt.sbprintfln(sb, "    %v := %v(lua.L_optinteger(L, %v, %v))", param.name, param.type, i+1, param.default)
-                else do fmt.sbprintfln(sb, "    %v := %v(lua.L_checkinteger(L, %v))", param.name, param.type, i+1)
-            }
-            case "bool": {
-                fmt.sbprintfln(sb, "    %v := bool(lua.toboolean(L, %v))", param.name, i+1)
-            }
-            case "string": {
-                fmt.sbprintfln(sb, "    %v := %v(lua.L_checkstring(L, %v))", param.name, param.type, i+1)
-            }
-            case: {
-                if param.type in codegen.ffi_types {
-                    // An FFI cdata argument. Missing (or not cdata): the default if there is one, else a Lua error,
-                    // never a nil dereference.
-                    if param.default != "" {
-                        fmt.sbprintfln(sb, "    %v: %v = %v", param.name, param.type, param.default)
-                        fmt.sbprintfln(sb, "    if p := cast(^%v)lua.topointer(L, %v); p != nil do %v = p^", param.type, i+1, param.name)
-                    } else {
-                        fmt.sbprintfln(sb, "    p%v := cast(^%v)lua.topointer(L, %v)", i+1, param.type, i+1)
-                        fmt.sbprintfln(sb, `    if p%v == nil do lua.L_argerror(L, %v, "expected %v")`, i+1, i+1, codegen.ffi_types[param.type].lua_global)
-                        fmt.sbprintfln(sb, "    %v := p%v^", param.name, i+1)
-                    }
-                } else if param.type in codegen.structs {
-                    fmt.sbprintfln(sb, "    %v := _lua_read_table_%v(L, %v)", param.name, param.type, i+1)
-                } else if param.type in codegen.flag_types {
-                    fmt.sbprintfln(sb, "    %v := transmute(%v)u64(lua.L_checkinteger(L, %v))", param.name, param.type, i+1)
-                } else if param.type in codegen.enum_types {
-                    fmt.sbprintfln(sb, "    %v := %v(lua.L_checkinteger(L, %v))", param.name, param.type, i+1)
-                } else if bt, is_int := codegen.int_types[param.type]; is_int {
-                    fmt.sbprintfln(sb, "    %v := transmute(%v)%v(lua.L_checkinteger(L, %v))", param.name, param.type, bt, i+1)
-                } else {
-                    fmt.sbprintfln(sb, "    // Unsupported type %v", param.type)
-                    log.errorf("Codegen: Not supported proc param type %v in %v", param.type, info.odin_proc_name)
-                }
+        idx := fmt.tprintf("%v", i + 1)
+        switch {
+        case param.default != "" && (param.type == "f32" || param.type == "f64"):
+            fmt.sbprintfln(sb, "    %v := %v(lua.L_optnumber(L, %v, %v))", param.name, param.type, idx, param.default)
+        case param.default != "" && slice.contains(LUA_INT_TYPES, param.type):
+            fmt.sbprintfln(sb, "    %v := %v(lua.L_optinteger(L, %v, %v))", param.name, param.type, idx, param.default)
+        case param.default != "" && param.type in codegen.ffi_types:
+            fmt.sbprintfln(sb, "    %v: %v = %v", param.name, param.type, param.default)
+            fmt.sbprintfln(sb, "    if !lua.isnoneornil(L, %v) do %v = _lua_read_ffi_%v(L, %v)", idx, param.name, param.type, idx)
+        case:
+            if code, ok := lua_read_code(param.type, idx); ok {
+                fmt.sbprintfln(sb, "    %v := %v", param.name, code)
+            } else {
+                fmt.sbprintfln(sb, "    // Unsupported type %v", param.type)
+                log.errorf("Codegen: Not supported proc param type %v in %v", param.type, info.odin_proc_name)
             }
         }
     }
@@ -450,35 +383,11 @@ generate_proc :: proc(sb: ^strings.Builder, info: Proc_Info) {
 
     // Pushes return values
     for ret, i in info.returns {
-        switch ret.type {
-            case "f32", "f64": {
-                fmt.sbprintfln(sb, "    lua.pushnumber(L, lua.Number(r%v))", i)
-            }
-            case "int", "i32", "i64", "u32", "u64": {
-                fmt.sbprintfln(sb, "    lua.pushinteger(L, lua.Integer(r%v))", i)
-            }
-            case "bool": {
-                fmt.sbprintfln(sb, "    lua.pushboolean(L, b32(r%v))", i)
-            }
-            case "string": {
-                fmt.sbprintfln(sb, "    lua.pushstring(L, strings.clone_to_cstring(r%v, context.temp_allocator))", i)
-            }
-            case: {
-                if ret.type in codegen.ffi_types {
-                    fmt.sbprintfln(sb, "    _lua_push_ffi_%v(L, r%v)", ret.type, i)
-                } else if ret.type in codegen.structs {
-                    fmt.sbprintfln(sb, "    _lua_push_table_%v(L, r%v)", ret.type, i)
-                } else if ret.type in codegen.flag_types {
-                    fmt.sbprintfln(sb, "    lua.pushinteger(L, lua.Integer(transmute(u64)r%v))", i)
-                } else if ret.type in codegen.enum_types {
-                    fmt.sbprintfln(sb, "    lua.pushinteger(L, lua.Integer(r%v))", i)
-                } else if bt, is_int := codegen.int_types[ret.type]; is_int {
-                    fmt.sbprintfln(sb, "    lua.pushinteger(L, lua.Integer(transmute(%v)r%v))", bt, i)
-                } else {
-                    fmt.sbprintfln(sb, "    lua.pushnil(L) // unsupported return type: %s", ret.type)
-                    log.errorf("Codegen: Not supported proc return type: %v in %v", ret.type, info.odin_proc_name)
-                }
-            }
+        if code, ok := lua_push_code(ret.type, fmt.tprintf("r%v", i)); ok {
+            fmt.sbprintfln(sb, "    %v", code)
+        } else {
+            fmt.sbprintfln(sb, "    lua.pushnil(L) // unsupported return type: %s", ret.type)
+            log.errorf("Codegen: Not supported proc return type: %v in %v", ret.type, info.odin_proc_name)
         }
     }
 
@@ -586,8 +495,51 @@ generate_ffi_push :: proc(sb: ^strings.Builder) {
             fmt.sbprintfln(sb, `_lua_push_ffi_%v :: proc(L: ^lua.State, v: %v) {{ _lua_push_arr(L, "%v", v) }}`,
                 info.name, info.name, info.lua_global)
         }
+        // The cdata at idx; anything else is a Lua argument error, never a nil dereference.
+        fmt.sbprintfln(sb, `_lua_read_ffi_%v :: proc(L: ^lua.State, idx: c.int) -> %v {{`, info.name, info.name)
+        fmt.sbprintfln(sb, `    p := cast(^%v)lua.topointer(L, idx)`, info.name)
+        fmt.sbprintfln(sb, `    if p == nil {{ lua.L_argerror(L, idx, "expected %v"); return {{}} }}`, info.lua_global)
+        fmt.sbprintln(sb, `    return p^`)
+        fmt.sbprintln(sb, `}`)
     }
     fmt.sbprintln(sb, "")
+}
+
+LUA_INT_TYPES :: []string{"int", "i32", "i64", "u32", "u64"}
+
+// Code pushing the Odin expression `v` of type `type` onto the Lua stack. Every push the bindings make goes
+// through this (proc returns, struct fields), so a type is marshalled the same way everywhere.
+// ok = false for a type the bindings can't marshal.
+lua_push_code :: proc(type, v: string) -> (code: string, ok: bool) {
+    switch {
+    case type == "f32" || type == "f64":       return fmt.tprintf("lua.pushnumber(L, lua.Number(%v))", v), true
+    case slice.contains(LUA_INT_TYPES, type):  return fmt.tprintf("lua.pushinteger(L, lua.Integer(%v))", v), true
+    case type == "bool":                       return fmt.tprintf("lua.pushboolean(L, b32(%v))", v), true
+    case type == "string":                     return fmt.tprintf("lua.pushstring(L, strings.clone_to_cstring(%v, context.temp_allocator))", v), true
+    case type in codegen.ffi_types:            return fmt.tprintf("_lua_push_ffi_%v(L, %v)", type, v), true
+    case type in codegen.structs:              return fmt.tprintf("_lua_push_table_%v(L, %v)", type, v), true
+    case type in codegen.flag_types:           return fmt.tprintf("lua.pushinteger(L, lua.Integer(transmute(u64)%v))", v), true
+    case type in codegen.enum_types:           return fmt.tprintf("lua.pushinteger(L, lua.Integer(%v))", v), true
+    }
+    if bt, is_int := codegen.int_types[type]; is_int do return fmt.tprintf("lua.pushinteger(L, lua.Integer(transmute(%v)%v))", bt, v), true
+    return "", false
+}
+
+// An expression reading Lua stack slot `idx` as `type`, raising a Lua error if it isn't one. Every read
+// goes through this (proc params, struct fields). ok = false for a type the bindings can't marshal.
+lua_read_code :: proc(type, idx: string) -> (code: string, ok: bool) {
+    switch {
+    case type == "f32" || type == "f64":       return fmt.tprintf("%v(lua.L_checknumber(L, %v))", type, idx), true
+    case slice.contains(LUA_INT_TYPES, type):  return fmt.tprintf("%v(lua.L_checkinteger(L, %v))", type, idx), true
+    case type == "bool":                       return fmt.tprintf("bool(lua.toboolean(L, %v))", idx), true
+    case type == "string":                     return fmt.tprintf("string(lua.L_checkstring(L, %v))", idx), true
+    case type in codegen.ffi_types:            return fmt.tprintf("_lua_read_ffi_%v(L, %v)", type, idx), true
+    case type in codegen.structs:              return fmt.tprintf("_lua_read_table_%v(L, %v)", type, idx), true
+    case type in codegen.flag_types:           return fmt.tprintf("transmute(%v)u64(lua.L_checkinteger(L, %v))", type, idx), true
+    case type in codegen.enum_types:           return fmt.tprintf("%v(lua.L_checkinteger(L, %v))", type, idx), true
+    }
+    if bt, is_int := codegen.int_types[type]; is_int do return fmt.tprintf("transmute(%v)%v(lua.L_checkinteger(L, %v))", type, bt, idx), true
+    return "", false
 }
 
 // A map's values in key order. Map iteration order is random; emitting in name order means the generated

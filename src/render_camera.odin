@@ -5,7 +5,7 @@ import "core:math/linalg"
 
 // A view's free camera (Render_View.camera; a game view renders through a camera entity instead, below).
 // Orbit-style: looks at `pivot` from `distance` away along yaw/pitch, so every editor navigation mode edits
-// the same few numbers (editor_camera.odin, editor_view.odin). World up is always +Y (pitch is kept short of
+// the same few numbers (editor_camera.odin). World up is always +Y (pitch is kept short of
 // vertical), so there's no stored up vector. Here: what rendering and picking need from it.
 Camera :: struct {
     pivot:      vec3,

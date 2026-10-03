@@ -86,7 +86,7 @@ sound_shutdown :: proc() {
     s.ok = false
 }
 
-// Hot reload (asset_hot_reload.odin): a sound file changed. Every voice stops; clips load again.
+// Hot reload (app_hot_reload.odin): a sound file changed. Every voice stops; clips load again.
 sound_reload :: proc() {
     if !sound_system.ok do return
     sound_unload_clips()
@@ -205,13 +205,6 @@ sound_play :: proc(w: ^World, key: string, p: Sound_Params) -> Sound_Handle {
     return {u32(slot), v.generation}
 }
 
-// Stops a voice; a stale handle (that voice finished, or was stolen) does nothing.
-sound_stop :: proc(h: Sound_Handle) {
-    if h == {} || int(h.index) >= MAX_VOICES do return
-    v := &sound_system.voices[h.index]
-    if v.clip >= 0 && v.generation == h.generation do voice_free(v)
-}
-
 // Plays entity e's own sound in world w (its sound, volume, range and sound flags), attached to it.
 entity_sound_play :: proc(w: ^World, h: Entity_Handle) -> Sound_Handle {
     e, ok := entity_get(w, h)
@@ -231,7 +224,7 @@ entity_sound_stop :: proc(w: ^World, h: Entity_Handle) {
 sound_world_start :: proc(w: ^World) {
     it := hm.iterator_make(&w.entities)
     for e, h in hm.iterate(&it) {
-        if e.sound != "" && .Play_On_Start in e.sound_flags && .Enabled in e.basic_flags do entity_sound_play(w, h)
+        if e.sound != "" && .Play_On_Start in e.sound_flags && entity_enabled(e) do entity_sound_play(w, h)
     }
 }
 

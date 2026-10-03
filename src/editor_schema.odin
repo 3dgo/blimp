@@ -16,7 +16,7 @@ import vmem "core:mem/virtual"
 // The schema file, edited here and consumed by codegen at build time.
 ENTITY_SCHEMA_PATH :: "entity_schema.ini"
 
-EDIT_BUF_LEN :: 128
+EDIT_BUF_LEN :: 512   // a note can run to a few sentences
 
 // A fixed, NUL-terminated text buffer suitable for direct use with im.InputText.
 Edit_Buf :: struct {
@@ -42,6 +42,7 @@ Doc_Field :: struct {
     default: Edit_Buf,
     tags:    Edit_Buf,   // preserved verbatim (e.g. "hidden, noserialize")
     section: Edit_Buf,   // inspector section: a member of enum EntitySection, "" = top, above the sections
+    note:    Edit_Buf,   // what it's for, one line: written beside the field in gen_entity.odin
     builtin: bool,       // engine-required: locked in the editor
 }
 
@@ -51,12 +52,14 @@ Doc_Item :: struct {
     en:      Edit_Buf,
     zh:      Edit_Buf,
     default: Edit_Buf,   // struct members only
+    note:    Edit_Buf,
 }
 
 Doc_Type_Kind :: enum { Enum, Flags, Struct }
 
 Doc_Type :: struct {
     name:    Edit_Buf,
+    note:    Edit_Buf,
     kind:    Doc_Type_Kind,
     builtin: bool,
     members: [dynamic]Doc_Item,   // enum/flags: id+en+zh; struct: id+type+en+zh+default
@@ -74,15 +77,16 @@ schema_doc: Schema_Doc
 @(private = "file")
 SCHEMA_HEADER ::
 `# Entity schema — the source of truth for the Entity struct.
-# Build time: codegen emits src/gen_entity.odin. Run time: entity_schema.odin loads
-# labels/defaults. Edited by the in-engine schema editor. Section order = struct/member order.
+# Build time: codegen emits src/gen_entity.odin (the struct, defaults and EN/ZH labels); nothing reads
+# this file at run time. Edited by the in-engine schema editor, which rewrites it whole, so explain things
+# in "note" lines, not comments. Section order = struct/member order.
 #
 # Grammar — INI with TOML-style dotted sections. Every declaration is a [qualified.name]
 # section followed by "key = value" attribute lines:
 #
-#   [field.<id>]                 type / en / zh / default / tags / section / builtin
-#   [enum.<T>] / [flags.<T>]     a type;  [enum.<T>.<member>]   -> en / zh
-#   [struct.<T>]                 a type;  [struct.<T>.<member>] -> type / en / zh / default
+#   [field.<id>]                 type / en / zh / default / tags / section / builtin / note
+#   [enum.<T>] / [flags.<T>]     a type (note);  [enum.<T>.<member>]   -> en / zh / note
+#   [struct.<T>]                 a type (note);  [struct.<T>.<member>] -> type / en / zh / default / note
 #
 # Types: scalars (bool, i32, u32, f32, string, vec2, vec3, vec4, quat), owned inline text
 # (sbuf64 / sbuf128 / sbuf256), the builtin-only Entity_Handle, and qualified refs to authored
@@ -91,6 +95,7 @@ SCHEMA_HEADER ::
 #
 # section = a member of enum.EntitySection: the inspector section the field is drawn under
 # (sections in the enum's member order; fields without one go first, above them).
+# note = what it's for, one line; codegen writes it as a comment beside the generated declaration.
 `
 
 // A category separator comment, e.g.  #================ Fields ================
@@ -132,13 +137,10 @@ schema_doc_load :: proc() {
     Target :: enum { None, Field, Type, Member }
     target := Target.None
 
-    text := string(data)
-    for raw in strings.split_lines_iterator(&text) {
-        line := strings.trim_space(raw)
-        if len(line) == 0 || line[0] == '#' || line[0] == ';' do continue
-
-        if line[0] == '[' && line[len(line) - 1] == ']' {
-            parts := strings.split(strings.trim_space(line[1:len(line) - 1]), ".", context.temp_allocator)
+    r := Ini_Reader{text = string(data)}
+    for line in ini_next(&r) {
+        if line.header {
+            parts := strings.split(line.section, ".", context.temp_allocator)
             kind := parts[0]
             switch {
             case kind == "field" && len(parts) == 2:
@@ -172,11 +174,7 @@ schema_doc_load :: proc() {
             continue
         }
 
-        eq := strings.index_byte(line, '=')
-        if eq < 0 do continue
-        key := strings.trim_space(line[:eq])
-        val := strings.trim_space(line[eq + 1:])
-
+        key, val := line.key, line.value
         switch target {
         case .None:
         case .Field:
@@ -188,11 +186,15 @@ schema_doc_load :: proc() {
             case "default": edit_buf_set(&f.default, val)
             case "tags":    edit_buf_set(&f.tags, val)
             case "section": edit_buf_set(&f.section, val)
+            case "note":    edit_buf_set(&f.note, val)
             case "builtin": f.builtin = val == "true"
             }
         case .Type:
             t := &schema_doc.types[len(schema_doc.types) - 1]
-            if key == "builtin" do t.builtin = val == "true"
+            switch key {
+            case "builtin": t.builtin = val == "true"
+            case "note":    edit_buf_set(&t.note, val)
+            }
         case .Member:
             t := &schema_doc.types[len(schema_doc.types) - 1]
             m := &t.members[len(t.members) - 1]
@@ -201,6 +203,7 @@ schema_doc_load :: proc() {
             case "en":      edit_buf_set(&m.en, val)
             case "zh":      edit_buf_set(&m.zh, val)
             case "default": edit_buf_set(&m.default, val)
+            case "note":    edit_buf_set(&m.note, val)
             }
         }
     }
@@ -222,6 +225,7 @@ schema_doc_save :: proc(path: string) -> bool {
         _doc_write_kv_opt(&b, "en", edit_buf_str(&f.en))
         _doc_write_kv_opt(&b, "zh", edit_buf_str(&f.zh))
         _doc_write_kv_opt(&b, "default", edit_buf_str(&f.default))
+        _doc_write_kv_opt(&b, "note", edit_buf_str(&f.note))
     }
 
     // Types grouped by kind, each group under its own banner (skipped when empty). Grouping is a
@@ -240,12 +244,14 @@ schema_doc_save :: proc(path: string) -> bool {
             name := edit_buf_str(&t.name)
             fmt.sbprintfln(&b, "\n[%s.%s]", kind, name)
             if t.builtin do _doc_write_kv(&b, "builtin", "true")
+            _doc_write_kv_opt(&b, "note", edit_buf_str(&t.note))
             for &m in t.members {
                 fmt.sbprintfln(&b, "\n[%s.%s.%s]", kind, name, edit_buf_str(&m.id))
                 if t.kind == .Struct do _doc_write_kv(&b, "type", edit_buf_str(&m.type))
                 _doc_write_kv_opt(&b, "en", edit_buf_str(&m.en))
                 _doc_write_kv_opt(&b, "zh", edit_buf_str(&m.zh))
                 if t.kind == .Struct do _doc_write_kv_opt(&b, "default", edit_buf_str(&m.default))
+                _doc_write_kv_opt(&b, "note", edit_buf_str(&m.note))
             }
         }
     }

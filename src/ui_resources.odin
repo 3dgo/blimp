@@ -149,7 +149,7 @@ bytes_text :: proc(n: int) -> string {
 }
 
 ui_draw_resources :: proc() {
-    s := app.dispaly_scale
+    s := app.display_scale
     im.SetNextWindowSize({RESOURCES_WINDOW_SIZE.x * s, RESOURCES_WINDOW_SIZE.y * s}, .FirstUseEver)
     if im.Begin(tr(.Win_Resources), &ui.show_resources) {
         items := resource_items()
@@ -301,8 +301,8 @@ resource_treemap :: proc(items: []Resource_Item, focused: bool) {
         im.Text("%s", fmt.ctprintf("%s", it.name))
         im.TextDisabled("%s", fmt.ctprintf("%s · %s · %s", it.owner, trs(KIND_LABEL[it.kind]), bytes_text(it.bytes)))
         im.TextDisabled("%s", fmt.ctprintf("%s", it.detail))
-        if it.atlas != nil do ui_probe_atlas_image(it.atlas, RESOURCE_PREVIEW * app.dispaly_scale)
-        if it.image >= 0 do resource_texture_image(it.image, RESOURCE_PREVIEW * app.dispaly_scale)
+        if it.atlas != nil do ui_probe_atlas_image(it.atlas, RESOURCE_PREVIEW * app.display_scale)
+        if it.image >= 0 do resource_texture_image(it.image, RESOURCE_PREVIEW * app.display_scale)
         if !focused do im.TextDisabled("%s", tr(.Res_Hint_Focus))
         if it.file != "" do im.TextDisabled("%s", tr(.Res_Hint_Explorer))
         im.EndTooltip()

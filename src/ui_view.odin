@@ -99,7 +99,7 @@ VIEW_WINDOW_CASCADE  :: 30                  // per-window offset so several new 
 // one docks into the main window's central node; later ones float, centred on the main window and
 // cascaded, at the default size. After that it's the user's to dock/move/resize.
 ui_next_view_window_placement :: proc(v: ^Render_View) {
-    s := app.dispaly_scale
+    s := app.display_scale
     central := im.DockBuilderGetCentralNode(ui.main_dockspace)
     if ev := editor_view(v); !ev.placed && !ui.first_view_placed && central != nil {
         ev.placed = true
@@ -204,7 +204,7 @@ ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_fl
         // Showing the game: a border in the play colour (amber while paused), so play edits read as such.
         if view.world.play_source != nil {
             col: [4]f32 = view.world.paused ? {0.9, 0.62, 0.2, 1} : im.GetStyleColorVec4(.ButtonActive)^
-            im.DrawList_AddRect(im.GetWindowDrawList(), img_min, img_max, im.GetColorU32ImVec4(col), 0, 2 * app.dispaly_scale)
+            im.DrawList_AddRect(im.GetWindowDrawList(), img_min, img_max, im.GetColorU32ImVec4(col), 0, 2 * app.display_scale)
         }
 
         // Right-click (RMB released without flying): select what's under the cursor unless it's already
@@ -216,14 +216,9 @@ ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_fl
             p := vec2{mp.x, mp.y} - ev.screen_min
             if rp, ok := ev.remote_context.?; ok do p = rp
             ev.remote_context = nil
-            ray := camera_ray(view.camera, p.x, p.y, ev.screen_size.x, ev.screen_size.y)
-            hit, hit_ok := pick_entity(w, ray)
-            target, target_ok := editor_icon_pick(ev, ev.screen_min + p)   // an icon in front wins over the mesh behind
-            if !target_ok do target, target_ok = hit.entity, hit_ok
-            if target_ok && !selection_has(w, target) do selection_only(w, target)
-            paste_at := hit_ok ? hit.point : ray.origin + PASTE_SPAWN_DISTANCE * ray.dir   // as paste_target_point
+            if target, ok := view_pick(ev, ev.screen_min + p); ok && !selection_has(w, target.entity) do selection_only(w, target.entity)
             im.SetNextWindowPos(ev.screen_min + p)   // at the click (the mouse, unless it came from remote)
-            ui_context_menu_open(w, view, paste_at)
+            ui_context_menu_open(w, view, view_paste_point(ev, ev.screen_min + p))
         }
         ui_context_menu()
     }
@@ -243,21 +238,16 @@ ui_view_image :: proc(view: ^Render_View) {
     im.Image(im.TextureRef{_TexID = im.TextureID(gpu.ptr)}, avail)
 }
 
-PASTE_SPAWN_DISTANCE :: 5.0  // units in front of the camera when a paste ray hits nothing
-
-// Where a pasted entity spawns in `view`'s world: raycast through the mouse — or through the view's
-// center if the cursor isn't over it. A surface hit uses that point; a miss drops it
-// PASTE_SPAWN_DISTANCE units in front of the camera along the ray.
+// Where a keyboard paste lands in ev's view: under the mouse, or under the view's centre if the cursor
+// isn't over it (view_paste_point).
 paste_target_point :: proc(ev: ^Editor_View) -> vec3 {
     if ev.screen_size.x <= 0 || ev.screen_size.y <= 0 do return ev.view.camera.pivot
-    px, py := ev.screen_size.x * 0.5, ev.screen_size.y * 0.5   // default: view center
+    p := ev.screen_min + ev.screen_size * 0.5
     if ev.hovered {
         mp := im.GetMousePos()
-        px, py = mp.x - ev.screen_min.x, mp.y - ev.screen_min.y
+        p = {mp.x, mp.y}
     }
-    ray := camera_ray(ev.view.camera, px, py, ev.screen_size.x, ev.screen_size.y)
-    if hit, ok := pick_entity(ev.view.world, ray); ok do return hit.point
-    return ray.origin + PASTE_SPAWN_DISTANCE * ray.dir
+    return view_paste_point(ev, p)
 }
 
 MARQUEE_DRAG_PX :: 4   // a press that moves further than this is a marquee, not a click
@@ -277,7 +267,7 @@ ui_view_selection :: proc(ev: ^Editor_View, gizmo_owns_mouse: bool) {
     }
     if !m.pressing do return
 
-    if !m.dragging && linalg.length(mouse - m.start) > MARQUEE_DRAG_PX * app.dispaly_scale do m.dragging = true
+    if !m.dragging && linalg.length(mouse - m.start) > MARQUEE_DRAG_PX * app.display_scale do m.dragging = true
     lo, hi := linalg.min(m.start, mouse), linalg.max(m.start, mouse)
 
     if im.IsMouseDown(.Left) {
@@ -312,16 +302,15 @@ ui_view_debug_lines :: proc(v: ^Render_View) {
     if editor_view(v).game_view || v == ui.game do return   // G or game mode: none of the editor's lines in this view
     if editor_view(v).show_probes {
         g := &world_level(v.world).probes   // a play world shows its level's, lit by its own group scales
-        probe_grid_debug_lines(g, probe_layer_scales(g, light_group_scales(v.world, timer_sec_since_start())), math.pow(2, v.world.settings.exposure))
+        probe_grid_debug_lines(g, probe_layer_scales(g, light_group_scales(v.world)), math.pow(2, v.world.settings.exposure))
     }
     ui_bake_bounds_lines(world_level(v.world))   // the manual bake box while the Bake window is open (ui_bake.odin)
 
     it := hm.iterator_make(&v.world.entities)
     for e, h in hm.iterate(&it) {
-        // Both bright enough to read on dark scenes; the active one paler (whiter), the rest saturated.
-        sel_color := h == editor_world(v.world).active ? vec4{0.7, 1, 0.7, 1} : vec4{0.15, 0.9, 0.3, 1}
+        sel_color := selection_color(v.world, h)
         editor_entity_shapes(e, e.selected ? sel_color : nil)   // camera frustum / light reach (editor_shapes.odin)
         if !e.selected || !entity_drawn(e) do continue          // hidden / disabled: no box either
-        pick_draw_entity_bounds(e, sel_color)
+        selection_draw_bounds(e, sel_color)
     }
 }

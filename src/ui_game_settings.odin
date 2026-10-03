@@ -12,7 +12,7 @@ GAME_SETTINGS_WINDOW_SIZE :: [2]f32{420, 160}   // first-open size (× display s
 
 ui_draw_game_settings :: proc() {
     if !ui.show_game_settings do return
-    s := app.dispaly_scale
+    s := app.display_scale
     im.SetNextWindowSize({GAME_SETTINGS_WINDOW_SIZE.x * s, GAME_SETTINGS_WINDOW_SIZE.y * s}, .FirstUseEver)
     if im.Begin(tr(.Win_Game_Settings), &ui.show_game_settings) {
         before := game_settings

@@ -17,7 +17,7 @@ EDITOR_SHAPE_LIGHT_COLOR  :: vec4{1, 0.8, 0.35, 1}
 // `selected_color` is nil for an unselected entity, whose shape draws dimmed so a city's worth of reach
 // spheres stays in the background; the selected ones stand out.
 editor_entity_shapes :: proc(e: ^Entity, selected_color: Maybe(vec4)) {
-    if .Enabled not_in e.basic_flags || .Hidden in e.basic_flags do return
+    if !entity_editor_visible(e) do return
     if e.camera_type == .None && e.light_type == .None do return
     right, up, forward := debug_axes_of(e.rotation)
     p := e.position
@@ -81,7 +81,6 @@ editor_light_color :: proc(e: ^Entity) -> vec4 {
     if peak <= 0.001 do return EDITOR_SHAPE_LIGHT_COLOR
     return {e.color.r / peak, e.color.g / peak, e.color.b / peak, 1}
 }
-
 
 // An unselected shape's colour. Debug lines don't blend, so dimming darkens rather than fades.
 EDITOR_SHAPE_DIM :: 0.4

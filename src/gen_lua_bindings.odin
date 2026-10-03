@@ -27,270 +27,61 @@ _lua_push_arr :: proc(L: ^lua.State, global: cstring, v: [$N]$T) {
 }
 
 _lua_push_ffi_ivec2 :: proc(L: ^lua.State, v: ivec2) { _lua_push_arr(L, "IVec2", v) }
+_lua_read_ffi_ivec2 :: proc(L: ^lua.State, idx: c.int) -> ivec2 {
+    p := cast(^ivec2)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected IVec2"); return {} }
+    return p^
+}
 _lua_push_ffi_ivec3 :: proc(L: ^lua.State, v: ivec3) { _lua_push_arr(L, "IVec3", v) }
+_lua_read_ffi_ivec3 :: proc(L: ^lua.State, idx: c.int) -> ivec3 {
+    p := cast(^ivec3)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected IVec3"); return {} }
+    return p^
+}
 _lua_push_ffi_ivec4 :: proc(L: ^lua.State, v: ivec4) { _lua_push_arr(L, "IVec4", v) }
+_lua_read_ffi_ivec4 :: proc(L: ^lua.State, idx: c.int) -> ivec4 {
+    p := cast(^ivec4)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected IVec4"); return {} }
+    return p^
+}
 _lua_push_ffi_mat3 :: proc(L: ^lua.State, v: mat3) { _lua_push_arr(L, "Mat3", transmute([9]f32)v) }
+_lua_read_ffi_mat3 :: proc(L: ^lua.State, idx: c.int) -> mat3 {
+    p := cast(^mat3)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected Mat3"); return {} }
+    return p^
+}
 _lua_push_ffi_mat4 :: proc(L: ^lua.State, v: mat4) { _lua_push_arr(L, "Mat4", transmute([16]f32)v) }
+_lua_read_ffi_mat4 :: proc(L: ^lua.State, idx: c.int) -> mat4 {
+    p := cast(^mat4)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected Mat4"); return {} }
+    return p^
+}
 _lua_push_ffi_quat :: proc(L: ^lua.State, v: quat) { _lua_push_arr(L, "Quat", transmute([4]f32)v) }
+_lua_read_ffi_quat :: proc(L: ^lua.State, idx: c.int) -> quat {
+    p := cast(^quat)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected Quat"); return {} }
+    return p^
+}
 _lua_push_ffi_vec2 :: proc(L: ^lua.State, v: vec2) { _lua_push_arr(L, "Vec2", v) }
+_lua_read_ffi_vec2 :: proc(L: ^lua.State, idx: c.int) -> vec2 {
+    p := cast(^vec2)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected Vec2"); return {} }
+    return p^
+}
 _lua_push_ffi_vec3 :: proc(L: ^lua.State, v: vec3) { _lua_push_arr(L, "Vec3", v) }
+_lua_read_ffi_vec3 :: proc(L: ^lua.State, idx: c.int) -> vec3 {
+    p := cast(^vec3)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected Vec3"); return {} }
+    return p^
+}
 _lua_push_ffi_vec4 :: proc(L: ^lua.State, v: vec4) { _lua_push_arr(L, "Vec4", v) }
-
-//==================== Generate Structs ====================
-
-// Binding odin struct: Cg_Test_Entity to lua table.
-_lua_push_table_Cg_Test_Entity :: proc(L: ^lua.State, v: Cg_Test_Entity) {
-    lua.createtable(L, 0, 4)
-    _lua_push_ffi_vec3(L, v.position)
-    lua.setfield(L, -2, "position")
-    _lua_push_ffi_vec2(L, v.tile)
-    lua.setfield(L, -2, "tile")
-    lua.pushnumber(L, lua.Number(v.speed))
-    lua.setfield(L, -2, "speed")
-    lua.pushboolean(L, b32(v.active))
-    lua.setfield(L, -2, "active")
-    lua.getfield(L, lua.REGISTRYINDEX, "_mt_Cg_Test_Entity")
-    if lua.type(L, -1) != .NIL { lua.setmetatable(L, -2) } else { lua.pop(L, 1) }
-}
-
-_lua_read_table_Cg_Test_Entity :: proc(L: ^lua.State, idx: c.int) -> Cg_Test_Entity {
-    v: Cg_Test_Entity
-    lua.getfield(L, idx, "position")
-    v.position = (cast(^vec3)lua.topointer(L, -1))^
-    lua.pop(L, 1)
-    lua.getfield(L, idx, "tile")
-    v.tile = (cast(^vec2)lua.topointer(L, -1))^
-    lua.pop(L, 1)
-    lua.getfield(L, idx, "speed")
-    v.speed = f32(lua.L_checknumber(L, -1))
-    lua.pop(L, 1)
-    lua.getfield(L, idx, "active")
-    v.active = bool(lua.toboolean(L, -1))
-    lua.pop(L, 1)
-    return v
-}
-
-// Binding odin struct: Test_Struct to lua table.
-_lua_push_table_Test_Struct :: proc(L: ^lua.State, v: Test_Struct) {
-    lua.createtable(L, 0, 4)
-    lua.pushnumber(L, lua.Number(v.a))
-    lua.setfield(L, -2, "a")
-    lua.pushinteger(L, lua.Integer(v.b))
-    lua.setfield(L, -2, "b")
-    lua.pushnumber(L, lua.Number(v.c))
-    lua.setfield(L, -2, "c")
-    lua.pushinteger(L, lua.Integer(v.d))
-    lua.setfield(L, -2, "d")
-}
-
-_lua_read_table_Test_Struct :: proc(L: ^lua.State, idx: c.int) -> Test_Struct {
-    v: Test_Struct
-    lua.getfield(L, idx, "a")
-    v.a = f32(lua.L_checknumber(L, -1))
-    lua.pop(L, 1)
-    lua.getfield(L, idx, "b")
-    v.b = u32(lua.L_checkinteger(L, -1))
-    lua.pop(L, 1)
-    lua.getfield(L, idx, "c")
-    v.c = f64(lua.L_checknumber(L, -1))
-    lua.pop(L, 1)
-    lua.getfield(L, idx, "d")
-    v.d = i32(lua.L_checkinteger(L, -1))
-    lua.pop(L, 1)
-    return v
+_lua_read_ffi_vec4 :: proc(L: ^lua.State, idx: c.int) -> vec4 {
+    p := cast(^vec4)lua.topointer(L, idx)
+    if p == nil { lua.L_argerror(L, idx, "expected Vec4"); return {} }
+    return p^
 }
 
 //==================== Generate Procs ====================
-
-// Binding odin proc: cg_test_add_f32 to lua function: add_f32.
-_lua_cg_test_add_f32 :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    a := f32(lua.L_checknumber(L, 1))
-    b := f32(lua.L_checknumber(L, 2))
-    r0 := cg_test_add_f32(a, b)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_add_int to lua function: add_int.
-_lua_cg_test_add_int :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    a := int(lua.L_checkinteger(L, 1))
-    b := int(lua.L_checkinteger(L, 2))
-    r0 := cg_test_add_int(a, b)
-    lua.pushinteger(L, lua.Integer(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_echo_string to lua function: echo_string.
-_lua_cg_test_echo_string :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    s := string(lua.L_checkstring(L, 1))
-    r0 := cg_test_echo_string(s)
-    lua.pushstring(L, strings.clone_to_cstring(r0, context.temp_allocator))
-    return 1
-}
-
-// Binding odin proc: cg_test_entity_active_speed to lua function: entity_active_speed.
-_lua_cg_test_entity_active_speed :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    e := _lua_read_table_Cg_Test_Entity(L, 1)
-    r0 := cg_test_entity_active_speed(e)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_entity_echo to lua function: entity_echo.
-_lua_cg_test_entity_echo :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    e := _lua_read_table_Cg_Test_Entity(L, 1)
-    r0 := cg_test_entity_echo(e)
-    _lua_push_table_Cg_Test_Entity(L, r0)
-    return 1
-}
-
-// Binding odin proc: cg_test_entity_m_active_speed to lua function: active_speed.
-_lua_cg_test_entity_m_active_speed :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    e := _lua_read_table_Cg_Test_Entity(L, 1)
-    r0 := cg_test_entity_m_active_speed(e)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_entity_m_pos_lensq to lua function: pos_lensq.
-_lua_cg_test_entity_m_pos_lensq :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    e := _lua_read_table_Cg_Test_Entity(L, 1)
-    r0 := cg_test_entity_m_pos_lensq(e)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_entity_pos_lensq to lua function: entity_pos_lensq.
-_lua_cg_test_entity_pos_lensq :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    e := _lua_read_table_Cg_Test_Entity(L, 1)
-    r0 := cg_test_entity_pos_lensq(e)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_ivec2_echo to lua function: ivec2_echo.
-_lua_cg_test_ivec2_echo :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    p1 := cast(^ivec2)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected IVec2")
-    v := p1^
-    r0 := cg_test_ivec2_echo(v)
-    _lua_push_ffi_ivec2(L, r0)
-    return 1
-}
-
-// Binding odin proc: cg_test_ivec2_manhattan to lua function: ivec2_manhattan.
-_lua_cg_test_ivec2_manhattan :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    p1 := cast(^ivec2)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected IVec2")
-    v := p1^
-    r0 := cg_test_ivec2_manhattan(v)
-    lua.pushinteger(L, lua.Integer(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_mat3_echo to lua function: mat3_echo.
-_lua_cg_test_mat3_echo :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    p1 := cast(^mat3)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected Mat3")
-    v := p1^
-    r0 := cg_test_mat3_echo(v)
-    _lua_push_ffi_mat3(L, r0)
-    return 1
-}
-
-// Binding odin proc: cg_test_mat3_trace to lua function: mat3_trace.
-_lua_cg_test_mat3_trace :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    p1 := cast(^mat3)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected Mat3")
-    v := p1^
-    r0 := cg_test_mat3_trace(v)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_mat4_echo to lua function: mat4_echo.
-_lua_cg_test_mat4_echo :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    p1 := cast(^mat4)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected Mat4")
-    v := p1^
-    r0 := cg_test_mat4_echo(v)
-    _lua_push_ffi_mat4(L, r0)
-    return 1
-}
-
-// Binding odin proc: cg_test_mat4_trace to lua function: mat4_trace.
-_lua_cg_test_mat4_trace :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    p1 := cast(^mat4)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected Mat4")
-    v := p1^
-    r0 := cg_test_mat4_trace(v)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_negate_bool to lua function: negate_bool.
-_lua_cg_test_negate_bool :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    b := bool(lua.toboolean(L, 1))
-    r0 := cg_test_negate_bool(b)
-    lua.pushboolean(L, b32(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_struct_echo to lua function: struct_echo.
-_lua_cg_test_struct_echo :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    s := _lua_read_table_Test_Struct(L, 1)
-    r0 := cg_test_struct_echo(s)
-    _lua_push_table_Test_Struct(L, r0)
-    return 1
-}
-
-// Binding odin proc: cg_test_vec3_echo to lua function: vec3_echo.
-_lua_cg_test_vec3_echo :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    p1 := cast(^vec3)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected Vec3")
-    v := p1^
-    r0 := cg_test_vec3_echo(v)
-    _lua_push_ffi_vec3(L, r0)
-    return 1
-}
-
-// Binding odin proc: cg_test_vec3_lensq to lua function: vec3_lensq.
-_lua_cg_test_vec3_lensq :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    p1 := cast(^vec3)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected Vec3")
-    v := p1^
-    r0 := cg_test_vec3_lensq(v)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
-
-// Binding odin proc: cg_test_zh_add to lua function: zh_add.
-_lua_cg_test_zh_add :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    a := f32(lua.L_checknumber(L, 1))
-    b := f32(lua.L_checknumber(L, 2))
-    r0 := cg_test_zh_add(a, b)
-    lua.pushnumber(L, lua.Number(r0))
-    return 1
-}
 
 // Binding odin proc: entity_get_bool to lua function: get_bool.
 _lua_entity_get_bool :: proc "c" (L: ^lua.State) -> c.int {
@@ -346,9 +137,7 @@ _lua_entity_get_vec3 :: proc "c" (L: ^lua.State) -> c.int {
 _lua_entity_move_character_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
     handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
-    p2 := cast(^vec3)lua.topointer(L, 2)
-    if p2 == nil do lua.L_argerror(L, 2, "expected Vec3")
-    delta := p2^
+    delta := _lua_read_ffi_vec3(L, 2)
     radius := f32(lua.L_checknumber(L, 3))
     height := f32(lua.L_checknumber(L, 4))
     r0 := entity_move_character_lua(handle, delta, radius, height)
@@ -390,9 +179,7 @@ _lua_entity_set_quat :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
     handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
     field := string(lua.L_checkstring(L, 2))
-    p3 := cast(^quat)lua.topointer(L, 3)
-    if p3 == nil do lua.L_argerror(L, 3, "expected Quat")
-    value := p3^
+    value := _lua_read_ffi_quat(L, 3)
     entity_set_quat(handle, field, value)
     return 0
 }
@@ -412,9 +199,7 @@ _lua_entity_set_vec3 :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
     handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
     field := string(lua.L_checkstring(L, 2))
-    p3 := cast(^vec3)lua.topointer(L, 3)
-    if p3 == nil do lua.L_argerror(L, 3, "expected Vec3")
-    value := p3^
+    value := _lua_read_ffi_vec3(L, 3)
     entity_set_vec3(handle, field, value)
     return 0
 }
@@ -524,30 +309,13 @@ _lua_input_released_lua :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
-// Binding odin proc: my_log to lua function: my_log.
-_lua_my_log :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    msg := string(lua.L_checkstring(L, 1))
-    my_log(msg)
-    return 0
-}
-
-// Binding odin proc: my_log_2 to lua function: my_log_2.
-_lua_my_log_2 :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    msg := string(lua.L_checkstring(L, 1))
-    r0 := my_log_2(msg)
-    lua.pushstring(L, strings.clone_to_cstring(r0, context.temp_allocator))
-    return 1
-}
-
 // Binding odin proc: world_add_lua to lua function: add.
 _lua_world_add_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
     name := string(lua.L_checkstring(L, 1))
     model := string(lua.L_checkstring(L, 2))
     position: vec3 = {0, 0, 0}
-    if p := cast(^vec3)lua.topointer(L, 3); p != nil do position = p^
+    if !lua.isnoneornil(L, 3) do position = _lua_read_ffi_vec3(L, 3)
     r0 := world_add_lua(name, model, position)
     lua.pushinteger(L, lua.Integer(transmute(u32)r0))
     return 1
@@ -576,9 +344,7 @@ _lua_world_light_group_lua :: proc "c" (L: ^lua.State) -> c.int {
 _lua_world_play_sound_at_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
     key := string(lua.L_checkstring(L, 1))
-    p2 := cast(^vec3)lua.topointer(L, 2)
-    if p2 == nil do lua.L_argerror(L, 2, "expected Vec3")
-    position := p2^
+    position := _lua_read_ffi_vec3(L, 2)
     volume := f32(lua.L_optnumber(L, 3, 1))
     r0 := world_play_sound_at_lua(key, position, volume)
     lua.pushboolean(L, b32(r0))
@@ -598,12 +364,8 @@ _lua_world_play_sound_lua :: proc "c" (L: ^lua.State) -> c.int {
 // Binding odin proc: world_raycast_lua to lua function: raycast.
 _lua_world_raycast_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
-    p1 := cast(^vec3)lua.topointer(L, 1)
-    if p1 == nil do lua.L_argerror(L, 1, "expected Vec3")
-    origin := p1^
-    p2 := cast(^vec3)lua.topointer(L, 2)
-    if p2 == nil do lua.L_argerror(L, 2, "expected Vec3")
-    direction := p2^
+    origin := _lua_read_ffi_vec3(L, 1)
+    direction := _lua_read_ffi_vec3(L, 2)
     distance := f32(lua.L_checknumber(L, 3))
     r0, r1, r2, r3 := world_raycast_lua(origin, direction, distance)
     lua.pushboolean(L, b32(r0))
@@ -642,46 +404,6 @@ _lua_world_time_lua :: proc "c" (L: ^lua.State) -> c.int {
 //==================== Register Bindings ====================
 
 _lua_register_all_bindings :: proc(L: ^lua.State) {
-
-    lua.getglobal(L, "CodegenTest")
-    if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
-    lua.pushcfunction(L, _lua_cg_test_add_f32)
-    lua.setfield(L, -2, "add_f32")
-    lua.pushcfunction(L, _lua_cg_test_add_int)
-    lua.setfield(L, -2, "add_int")
-    lua.pushcfunction(L, _lua_cg_test_echo_string)
-    lua.setfield(L, -2, "echo_string")
-    lua.pushcfunction(L, _lua_cg_test_entity_active_speed)
-    lua.setfield(L, -2, "entity_active_speed")
-    lua.pushcfunction(L, _lua_cg_test_entity_echo)
-    lua.setfield(L, -2, "entity_echo")
-    lua.pushcfunction(L, _lua_cg_test_entity_pos_lensq)
-    lua.setfield(L, -2, "entity_pos_lensq")
-    lua.pushcfunction(L, _lua_cg_test_ivec2_echo)
-    lua.setfield(L, -2, "ivec2_echo")
-    lua.pushcfunction(L, _lua_cg_test_ivec2_manhattan)
-    lua.setfield(L, -2, "ivec2_manhattan")
-    lua.pushcfunction(L, _lua_cg_test_mat3_echo)
-    lua.setfield(L, -2, "mat3_echo")
-    lua.pushcfunction(L, _lua_cg_test_mat3_trace)
-    lua.setfield(L, -2, "mat3_trace")
-    lua.pushcfunction(L, _lua_cg_test_mat4_echo)
-    lua.setfield(L, -2, "mat4_echo")
-    lua.pushcfunction(L, _lua_cg_test_mat4_trace)
-    lua.setfield(L, -2, "mat4_trace")
-    lua.pushcfunction(L, _lua_cg_test_negate_bool)
-    lua.setfield(L, -2, "negate_bool")
-    lua.pushcfunction(L, _lua_cg_test_struct_echo)
-    lua.setfield(L, -2, "struct_echo")
-    lua.pushcfunction(L, _lua_cg_test_vec3_echo)
-    lua.setfield(L, -2, "vec3_echo")
-    lua.pushcfunction(L, _lua_cg_test_vec3_lensq)
-    lua.setfield(L, -2, "vec3_lensq")
-    lua.pushcfunction(L, _lua_cg_test_zh_add)
-    lua.setfield(L, -2, "zh_add")
-    lua.pushcfunction(L, _lua_cg_test_zh_add)
-    lua.setfield(L, -2, "相加")
-    lua.setglobal(L, "CodegenTest")
 
     lua.getglobal(L, "Entity")
     if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
@@ -787,14 +509,6 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "松开")
     lua.setglobal(L, "Input")
 
-    lua.getglobal(L, "Blimp")
-    if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
-    lua.pushcfunction(L, _lua_my_log)
-    lua.setfield(L, -2, "my_log")
-    lua.pushcfunction(L, _lua_my_log_2)
-    lua.setfield(L, -2, "my_log_2")
-    lua.setglobal(L, "Blimp")
-
     lua.getglobal(L, "World")
     if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
     lua.pushcfunction(L, _lua_world_add_lua)
@@ -834,17 +548,6 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.pushcfunction(L, _lua_world_time_lua)
     lua.setfield(L, -2, "时间")
     lua.setglobal(L, "World")
-
-    lua.newtable(L) // __index for Cg_Test_Entity methods
-    lua.pushcfunction(L, _lua_cg_test_entity_m_active_speed)
-    lua.setfield(L, -2, "active_speed")
-    lua.pushcfunction(L, _lua_cg_test_entity_m_pos_lensq)
-    lua.setfield(L, -2, "pos_lensq")
-    lua.newtable(L)
-    lua.pushvalue(L, -2)
-    lua.setfield(L, -2, "__index")
-    lua.setfield(L, lua.REGISTRYINDEX, "_mt_Cg_Test_Entity")
-    lua.pop(L, 1) // pop __index table
 
 }
 

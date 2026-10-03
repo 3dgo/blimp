@@ -79,7 +79,7 @@ ui_draw_entity_panel :: proc(p: ^Entity_Panel) {
     base := p.kind == .List ? "entity_list" : "entity_inspector"
     name := p.kind == .List ? tr(.Menu_Entity_List) : tr(.Menu_Entity_Inspector)
     if p.owner == nil {
-        s := app.dispaly_scale
+        s := app.display_scale
         im.SetNextWindowSize({PANEL_WINDOW_SIZE.x * s, PANEL_WINDOW_SIZE.y * s}, .FirstUseEver)
     }
     if im.Begin(fmt.ctprintf("%s — %s###%s%d", name, w != nil ? w.title : "—", base, p.id), &p.open) {
@@ -176,8 +176,8 @@ ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
 
     if !open_menu && im.IsWindowHovered() && im.IsMouseReleased(.Right) do open_menu = true
     if open_menu {
-        v := ui_first_view_of(w)
-        ui_context_menu_open(w, v, v != nil ? paste_target_point(editor_view(v)) : {})
+        ev := editor_view_for_world(w)
+        ui_context_menu_open(w, ev != nil ? ev.view : nil, ev != nil ? paste_target_point(ev) : {})
     }
     ui_context_menu()
 }
@@ -233,7 +233,6 @@ selection_has_anchor :: proc(w: ^World) -> bool {
     _, ok := entity_get(w, editor_world(w).select_anchor)
     return ok
 }
-
 
 @(private="file")
 ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {

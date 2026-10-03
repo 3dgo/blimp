@@ -41,9 +41,9 @@
       It has line, box, axes, circle, sphere, cone, arrow and frustum. Use it for things that live in the
       world, like a light's reach.
     - `overlay_*` (`editor_overlay.odin`): world-space shapes drawn with ImGui on top of one view, crisp and any
-      thickness. Lines are clipped at the near plane. It has line, polyline, circle, box, arrow, disc, a
-      shaded cone and cube, text, and icon (a font-glyph sprite). Use it for tools and markers, such as
-      the gizmo and the camera/light icons.
+      thickness. It has what the editor draws — a shaded cone and cube (gizmo handles) and icon (a font-glyph
+      sprite) — plus `world_to_screen` for anything else drawn on the view's draw list, as the gizmo does.
+      Use it for tools and markers.
       - Use it inside the view's window: `o := overlay_begin(ev); defer overlay_end(o)`.
       - `world_to_screen` lives there too.
   - Shared static asset GPU data lives in `Asset_Buffers` / `asset_buffers`.

@@ -42,7 +42,7 @@ ui_draw_world_settings :: proc() {
     w := settings_ui.world
     if w == nil do return
     open := true
-    s := app.dispaly_scale
+    s := app.display_scale
     im.SetNextWindowSize({WORLD_SETTINGS_WINDOW_SIZE.x * s, WORLD_SETTINGS_WINDOW_SIZE.y * s}, .FirstUseEver)
     if im.Begin(fmt.ctprintf("%s — %s###world_settings", tr(.Win_World_Settings), w.title), &open) {
         ui_world_unsaved_note(w)

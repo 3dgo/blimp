@@ -65,21 +65,27 @@ selection_first :: proc(w: ^World) -> Entity_Handle {
 // has no model or is entirely behind the camera. Used by marquee selection (a crossing test: any
 // overlap selects, as in 3ds Max — on the box, not the exact triangles).
 entity_screen_rect :: proc(ev: ^Editor_View, e: ^Entity) -> (lo, hi: vec2, ok: bool) {
-    model, has := asset_system.models[e.model]
+    corners, has := entity_world_corners(e)
     if !has do return editor_icon_rect(ev, e)   // a camera / light: its icon
     if !entity_drawn(e) do return   // a marquee doesn't catch what isn't drawn
-    mlo, mhi := model_bounds(model)
-    M := entity_transform(e)
     lo, hi = {max(f32), max(f32)}, {min(f32), min(f32)}
-    for i in 0 ..< 8 {
-        corner := vec3{(i & 1) != 0 ? mhi.x : mlo.x, (i & 2) != 0 ? mhi.y : mlo.y, (i & 4) != 0 ? mhi.z : mlo.z}
-        p, front := world_to_screen(ev, transform_point(M, corner))
+    for c in corners {
+        p, front := world_to_screen(ev, c)
         if !front do continue
         lo = linalg.min(lo, p)
         hi = linalg.max(hi, p)
         ok = true
     }
     return
+}
+
+// How the selection draws (boxes, shapes, icon rings): bright enough to read on dark scenes, the active
+// entity paler (whiter), the rest saturated.
+SELECTION_ACTIVE_COLOR :: vec4{0.7, 1, 0.7, 1}
+SELECTION_COLOR        :: vec4{0.15, 0.9, 0.3, 1}
+
+selection_color :: proc(w: ^World, h: Entity_Handle) -> vec4 {
+    return h == editor_world(w).active ? SELECTION_ACTIVE_COLOR : SELECTION_COLOR
 }
 
 // What a viewport click or marquee does to the selection, from the modifiers held at release:
@@ -104,20 +110,13 @@ selection_apply :: proc(w: ^World, h: Entity_Handle, op: Selection_Op) {
     }
 }
 
-// A click at screen point `p` in the view, on what's under it. Replace with nothing under the cursor
-// clears the selection; the other ops leave it alone on a miss.
+// A click at screen point `p` in the view, on what's under it (view_pick). Replace with nothing under the
+// cursor clears the selection; the other ops leave it alone on a miss.
 selection_click :: proc(ev: ^Editor_View, p: vec2, op: Selection_Op) {
     w := ev.view.world
-    // A camera / light icon under the cursor wins: it's drawn in front of every mesh.
-    target, ok := editor_icon_pick(ev, p)
-    if !ok {
-        ray := camera_ray(ev.view.camera, p.x - ev.screen_min.x, p.y - ev.screen_min.y, ev.screen_size.x, ev.screen_size.y)
-        hit: Pick_Result
-        hit, ok = pick_entity(w, ray)
-        target = hit.entity
-    }
+    target, ok := view_pick(ev, p)
     if op == .Replace do selection_clear(w)
-    if ok do selection_apply(w, target, op)
+    if ok do selection_apply(w, target.entity, op)
 }
 
 // A marquee over screen rectangle lo..hi, on every entity whose box touches it (crossing).
@@ -131,7 +130,6 @@ selection_marquee :: proc(ev: ^Editor_View, lo, hi: vec2, op: Selection_Op) {
         selection_apply(w, h, op)
     }
 }
-
 
 // Centre of the selection's combined world bounds (entities without a model count as their position).
 // The gizmo's pivot in Selection Center mode. Origin if nothing is selected.
@@ -162,11 +160,34 @@ selection_duplicate :: proc(w: ^World) -> (count: int) {
     return
 }
 
-
 Pick_Result :: struct {
     entity: Entity_Handle,
     t: f32,
     point: vec3,
+    icon: bool,   // view_pick: it was the entity's icon, not its mesh (t and point unset)
+}
+
+// The ray through screen point `p` (ImGui screen coordinates) of ev's image.
+view_mouse_ray :: proc(ev: ^Editor_View, p: vec2) -> Ray {
+    return camera_ray(ev.view.camera, p.x - ev.screen_min.x, p.y - ev.screen_min.y, ev.screen_size.x, ev.screen_size.y)
+}
+
+// What's under screen point `p` in ev's view — what a click there selects: a camera / light icon wins
+// (it's drawn in front of every mesh), else the nearest drawn mesh along the ray. Every pick goes through
+// this: clicks, the context menu, blimpctl pick.
+view_pick :: proc(ev: ^Editor_View, p: vec2) -> (Pick_Result, bool) {
+    if h, ok := editor_icon_pick(ev, p); ok do return {entity = h, icon = true}, true
+    return pick_entity(ev.view.world, view_mouse_ray(ev, p))
+}
+
+PASTE_SPAWN_DISTANCE :: 5.0  // units in front of the camera when a paste ray hits nothing
+
+// Where something pasted at screen point `p` lands: the surface under it, or PASTE_SPAWN_DISTANCE units in
+// front of the camera along the ray when there's none.
+view_paste_point :: proc(ev: ^Editor_View, p: vec2) -> vec3 {
+    ray := view_mouse_ray(ev, p)
+    if hit, ok := pick_entity(ev.view.world, ray); ok do return hit.point
+    return ray.origin + PASTE_SPAWN_DISTANCE * ray.dir
 }
 
 pick_entity :: proc(world: ^World, r: Ray) -> (Pick_Result, bool) {
@@ -189,9 +210,9 @@ pick_entity :: proc(world: ^World, r: Ray) -> (Pick_Result, bool) {
 
         for mesh_idx in model.meshes {
             bvh := &asset_system.mesh_bvhs[mesh_idx]
-            if hit, hit_ok := bvh_closest_hit(bvh, obj_ray); hit_ok && hit.t < best.t {
+            if t, hit_ok := bvh_closest_hit(bvh, obj_ray); hit_ok && t < best.t {
                 best.entity = h
-                best.t = hit.t
+                best.t = t
                 found = true
             }
         }
@@ -200,20 +221,9 @@ pick_entity :: proc(world: ^World, r: Ray) -> (Pick_Result, bool) {
     return best, found
 }
 
-pick_draw_entity_bounds :: proc(e: ^Entity, color := vec4{0.2, 1, 0.3, 1}) {
-    model, ok := asset_system.models[e.model]
-    if !ok do return
-    lo, hi := model_bounds(model)
-    M := entity_transform(e)
-    c: [8]vec3
-    for i in 0 ..< 8 {
-        x := (i & 1) != 0 ? hi.x : lo.x
-        y := (i & 2) != 0 ? hi.y : lo.y
-        z := (i & 4) != 0 ? hi.z : lo.z
-        c[i] = transform_point(M, {x, y, z})
-    }
-    edges := [12][2]int{ {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} }
-    for edge in edges do debug_line(c[edge[0]], c[edge[1]], color)
+// The selection box: `e`'s model box as debug lines.
+selection_draw_bounds :: proc(e: ^Entity, color: vec4) {
+    if c, ok := entity_world_corners(e); ok do debug_box_corners(c, color)
 }
 
 // The editor's delete: moves the active entity off `h` first, then removes it from `w`. (Lua's World.remove
@@ -221,4 +231,26 @@ pick_draw_entity_bounds :: proc(e: ^Entity, color := vec4{0.2, 1, 0.3, 1}) {
 selection_remove_entity :: proc(w: ^World, h: Entity_Handle) {
     selection_set(w, h, false)
     world_remove(w, h)
+}
+
+// The editor's paste: adds the [entity] blocks in `text` to `w` as one undo step and selects them. Every
+// paste — Ctrl+V, the context menu, a template, blimpctl — places the same way:
+// - at a point: one block lands there, keeping its rotation and scale (a spot light still points down);
+//   several keep their layout, moved as a group so their centre lands there;
+// - no point (blimpctl paste): exactly where the text says.
+// Returns how many entities it added.
+selection_paste :: proc(w: ^World, text: string, at: Maybe(vec3) = nil) -> int {
+    if entity_count_blocks(text) == 0 do return 0
+    undo_push(w)
+    handles := make([dynamic]Entity_Handle, context.temp_allocator)
+    scene_load_from_text(w, text, &handles)
+    if pos, ok := at.?; ok {
+        centre: vec3
+        for h in handles do if e, eok := entity_get(w, h); eok do centre += e.position
+        centre /= f32(max(len(handles), 1))
+        for h in handles do if e, eok := entity_get(w, h); eok do e.position = pos + (e.position - centre)
+    }
+    selection_clear(w)
+    for h in handles do selection_set(w, h, true)
+    return len(handles)
 }

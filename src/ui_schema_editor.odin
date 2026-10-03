@@ -21,7 +21,7 @@ ui_draw_schema_editor :: proc() {
         // ---- Fields ----
         im.SeparatorText(tr(.Schema_Fields))
         im.TextDisabled("%s", tr(.Schema_Rename_Hint))
-        im.Dummy({0, 4 * app.dispaly_scale})
+        im.Dummy({0, 4 * app.display_scale})
 
         remove_field := -1
         for &f, i in schema_doc.fields {
@@ -32,15 +32,16 @@ ui_draw_schema_editor :: proc() {
                 f.builtin ? fmt.tprintf("      [%s]", trs(.Schema_Builtin)) : "", i)
             if im.CollapsingHeader(head) {
                 im.Indent()
-                im.Dummy({0, 2 * app.dispaly_scale})
+                im.Dummy({0, 2 * app.display_scale})
                 ui_form_input(tr(.Schema_Prop_Id), "id", &f.id, f.builtin)
                 ui_form_type_combo(tr(.Schema_Prop_Type), "type", &f.type, f.builtin)
                 ui_form_section_combo(&f.section)   // presentation only, so builtin fields can move too
                 ui_form_input(tr(.Schema_Prop_English), "en", &f.en)
                 ui_form_input(tr(.Schema_Prop_Chinese), "zh", &f.zh)
                 ui_form_input(tr(.Schema_Prop_Default), "default", &f.default)
+                ui_form_input(tr(.Schema_Prop_Note), "note", &f.note)
 
-                im.Dummy({0, 4 * app.dispaly_scale})
+                im.Dummy({0, 4 * app.display_scale})
                 if ui_move_buttons(len(schema_doc.fields), i) != 0 {
                     j := i + ui_move_buttons_last
                     schema_doc.fields[i], schema_doc.fields[j] = schema_doc.fields[j], schema_doc.fields[i]
@@ -50,7 +51,7 @@ ui_draw_schema_editor :: proc() {
                     if im.SmallButton(tr(.Schema_Remove)) do remove_field = i
                 }
                 im.Unindent()
-                im.Dummy({0, 8 * app.dispaly_scale})
+                im.Dummy({0, 8 * app.display_scale})
             }
             im.PopID()
         }
@@ -63,11 +64,11 @@ ui_draw_schema_editor :: proc() {
             append(&schema_doc.fields, f)
         }
 
-        im.Dummy({0, 10 * app.dispaly_scale})
+        im.Dummy({0, 10 * app.display_scale})
 
-        // ---- Types (enum / flags) ----
+        // ---- Types (enum / flags / struct) ----
         im.SeparatorText(tr(.Schema_Types))
-        im.Dummy({0, 4 * app.dispaly_scale})
+        im.Dummy({0, 4 * app.display_scale})
 
         remove_type := -1
         for &t, i in schema_doc.types {
@@ -77,11 +78,12 @@ ui_draw_schema_editor :: proc() {
                 t.builtin ? fmt.tprintf("      [%s]", trs(.Schema_Builtin)) : "", i)
             if im.CollapsingHeader(head) {
                 im.Indent()
-                im.Dummy({0, 2 * app.dispaly_scale})
+                im.Dummy({0, 2 * app.display_scale})
                 ui_form_input(tr(.Schema_Prop_Name), "name", &t.name, t.builtin)
                 ui_form_kind_combo(&t.kind, t.builtin)
+                ui_form_input(tr(.Schema_Prop_Note), "tnote", &t.note)
 
-                im.Dummy({0, 4 * app.dispaly_scale})
+                im.Dummy({0, 4 * app.display_scale})
                 im.SeparatorText(tr(.Schema_Members))
                 // The section enum is builtin (the inspector reads it) but its members are the user's sections.
                 members_locked := t.builtin && edit_buf_str(&t.name) != SCHEMA_SECTION_ENUM
@@ -100,11 +102,12 @@ ui_draw_schema_editor :: proc() {
                     if t.kind == .Struct {
                         ui_form_input(tr(.Schema_Prop_Default), "mdef", &m.default)
                     }
+                    ui_form_input(tr(.Schema_Prop_Note), "mnote", &m.note)
                     if !members_locked {
                         if im.SmallButton(tr(.Schema_Remove)) do remove_member = mi
                     }
                     im.Unindent()
-                    im.Dummy({0, 4 * app.dispaly_scale})
+                    im.Dummy({0, 4 * app.display_scale})
                     im.PopID()
                 }
                 if remove_member >= 0 do ordered_remove(&t.members, remove_member)
@@ -122,7 +125,7 @@ ui_draw_schema_editor :: proc() {
                     if im.SmallButton(tr(.Schema_Remove_Type)) do remove_type = i
                 }
                 im.Unindent()
-                im.Dummy({0, 8 * app.dispaly_scale})
+                im.Dummy({0, 8 * app.display_scale})
             }
             im.PopID()
         }
@@ -173,10 +176,7 @@ ui_schema_toolbar :: proc() {
 // A form row: left-aligned label, then a full-width input starting at a fixed column.
 @(private = "file")
 ui_form_input :: proc(label: cstring, key: string, b: ^Edit_Buf, readonly := false) {
-    im.AlignTextToFramePadding()
-    im.TextUnformatted(label)
-    im.SameLine(FORM_LABEL_W * app.dispaly_scale)
-    im.SetNextItemWidth(-1)
+    ui_param_label(string(label), {label_w = FORM_LABEL_W * app.display_scale})
     im.BeginDisabled(readonly)
     im.InputText(fmt.ctprintf("##%s", key), cstring(raw_data(b.data[:])), EDIT_BUF_LEN)
     im.EndDisabled()
@@ -184,10 +184,7 @@ ui_form_input :: proc(label: cstring, key: string, b: ^Edit_Buf, readonly := fal
 
 @(private = "file")
 ui_form_type_combo :: proc(label: cstring, key: string, b: ^Edit_Buf, readonly: bool) {
-    im.AlignTextToFramePadding()
-    im.TextUnformatted(label)
-    im.SameLine(FORM_LABEL_W * app.dispaly_scale)
-    im.SetNextItemWidth(-1)
+    ui_param_label(string(label), {label_w = FORM_LABEL_W * app.display_scale})
     im.BeginDisabled(readonly)
     cur := edit_buf_str(b)
     if im.BeginCombo(fmt.ctprintf("##%s", key), fmt.ctprintf("%s", cur)) {
@@ -207,10 +204,7 @@ ui_form_type_combo :: proc(label: cstring, key: string, b: ^Edit_Buf, readonly: 
 // above the sections).
 @(private = "file")
 ui_form_section_combo :: proc(b: ^Edit_Buf) {
-    im.AlignTextToFramePadding()
-    im.TextUnformatted(tr(.Schema_Prop_Section))
-    im.SameLine(FORM_LABEL_W * app.dispaly_scale)
-    im.SetNextItemWidth(-1)
+    ui_param_label(string(tr(.Schema_Prop_Section)), {label_w = FORM_LABEL_W * app.display_scale})
     cur := edit_buf_str(b)
     sections := schema_doc_sections()
     shown := cur
@@ -233,10 +227,7 @@ ui_form_section_combo :: proc(b: ^Edit_Buf) {
 // A form row selecting a type's kind (enum / flags / struct).
 @(private = "file")
 ui_form_kind_combo :: proc(kind: ^Doc_Type_Kind, readonly: bool) {
-    im.AlignTextToFramePadding()
-    im.TextUnformatted(tr(.Schema_Kind))
-    im.SameLine(FORM_LABEL_W * app.dispaly_scale)
-    im.SetNextItemWidth(-1)
+    ui_param_label(string(tr(.Schema_Kind)), {label_w = FORM_LABEL_W * app.display_scale})
     im.BeginDisabled(readonly)
     labels := [Doc_Type_Kind]cstring{ .Enum = tr(.Schema_Kind_Enum), .Flags = tr(.Schema_Kind_Flags), .Struct = tr(.Schema_Kind_Struct) }
     if im.BeginCombo("##kind", labels[kind^]) {
@@ -274,7 +265,7 @@ ui_move_buttons :: proc(count, i: int) -> int {
 
 @(private = "file")
 _sep :: proc() {
-    im.Dummy({0, 4 * app.dispaly_scale})
+    im.Dummy({0, 4 * app.display_scale})
     im.Separator()
-    im.Dummy({0, 4 * app.dispaly_scale})
+    im.Dummy({0, 4 * app.display_scale})
 }

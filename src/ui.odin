@@ -11,7 +11,6 @@ import "dx"
 UI :: struct {
     io: ^im.IO,
 
-    show_demo_window: bool,
     show_stats: bool,   // F3: the stats overlay (ui_draw_stats)
     show_schema_editor: bool,
     show_worlds: bool,
@@ -61,8 +60,8 @@ ui_init :: proc() {
     // Once imgui.ini exists, ImGui loads the user's layout and we leave it alone.
     ui.build_default_layout = ui.io.IniFilename == nil || !os.exists(string(ui.io.IniFilename))
 
-    ui_apply_theme(app.dispaly_scale)   // VS Code-style dark theme (ui_theme.odin)
-    
+    ui_apply_theme(app.display_scale)   // VS Code-style dark theme (ui_theme.odin)
+
     im_sdl3.InitForD3D(app.window)
 
     init_info := im_dx12.InitInfo {
@@ -78,7 +77,7 @@ ui_init :: proc() {
     im_dx12.Init(&init_info)
 
     // Fonts
-    font_size := 16 * app.dispaly_scale
+    font_size := ui_font_size()
     fonts := ui.io.Fonts
     font_config := im.FontConfig{
         FontDataOwnedByAtlas = true,
@@ -95,11 +94,9 @@ ui_init :: proc() {
     ui_add_font(fonts, "assets_engine/fonts/Roboto-Regular.ttf", "assets_engine/fonts/NotoSansSC-Regular.ttf", font_config)
     ui.font_bold = ui_add_font(fonts, "assets_engine/fonts/Roboto-Bold.ttf", "assets_engine/fonts/NotoSansSC-Bold.ttf", font_config)
 
-    ui.show_demo_window = false
     // Open on first launch; after that imgui.ini remembers which windows were open (ui_saved_state.odin).
     ui.show_worlds = true      // open a scene or kit from it
     ui.show_templates = true   // docked above Worlds (ui_build_default_layout)
-    ui.show_stats = false
 }
 
 // One UI font: Latin, with the editor icons and Chinese merged in.
@@ -124,6 +121,18 @@ ui_add_font :: proc(fonts: ^im.FontAtlas, latin, cjk: cstring, config: im.FontCo
     merge_config.ExtraSizeScale = 1.35  // CJK reads smaller than Latin at the same point size; enlarge the merged glyphs
     im.FontAtlas_AddFontFromFileTTF(fonts, cjk, font_size, &merge_config)
     return font
+}
+
+UI_FONT_SIZE :: 16   // points at display scale 1: the body text; titles and labels scale from it
+UI_LABEL_GAP :: 16   // pixels (× display scale) between a form's label column and its inputs
+
+ui_font_size :: proc() -> f32 { return UI_FONT_SIZE * app.display_scale }
+
+// Where a form's inputs start: past its widest label, plus the gap. Measured per form, so rows line up in
+// either language (ZH labels are wider).
+ui_label_column :: proc(labels: []Loc_ID) -> (x: f32) {
+    for id in labels do x = max(x, im.CalcTextSize(tr(id)).x)
+    return x + UI_LABEL_GAP * app.display_scale
 }
 
 // A window showing one world's settings (World Settings, Retro Look, Bake): which world, and whether an
@@ -260,11 +269,8 @@ ui_update :: proc() {
         ui_draw_stats()
     }
 
-    if ui.show_demo_window {
-        im.ShowDemoWindow(&ui.show_demo_window)
-    }
     ui_saved_state_update()
-    
+
     im.Render()
 }
 
@@ -298,7 +304,7 @@ menu_section :: proc(label: cstring) {
     line_col.w = 0.35
     im.Unindent()
     im.Dummy({0, style.ItemSpacing.y * 0.5})
-    im.PushFontFloat(nil, 16 * app.dispaly_scale * MENU_SECTION_SCALE)
+    im.PushFontFloat(nil, ui_font_size() * MENU_SECTION_SCALE)
     im.PushStyleColorImVec4(.Text, style.Colors[im.Col.TextDisabled])
     im.PushStyleColorImVec4(.Separator, line_col)
     im.PushStyleVarImVec2(.SeparatorTextPadding, {0, 0})

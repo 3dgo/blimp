@@ -28,10 +28,8 @@ Param_UI_Options :: struct {
     min:          f32,
     max:          f32,
     format:       string,
-    slider_flags: im.SliderFlags,
-    combo_flags:  im.ComboFlags,
-    path:         string,   // serialized key of the item being drawn ("model", "transform.position"); "" = top struct
-    filter:       string,   // search text, lowercase: only fields whose id or label (any language) contains it; top struct only
+    path:         string,   // serialized key of the item being drawn ("model", "light_groups.group_1.scale"); "" = top struct
+    filter:       string,   // search text (search_matches: any case, pinyin): only fields whose id or label (any language) contains it; top struct only
     defaults:     rawptr,   // the struct's default value, or nil
     others:       []rawptr, // other values edited along with this one (the rest of a multi-selection)
     // Per field, set by ui_param_struct for the widget's label:
@@ -88,7 +86,7 @@ Asset_Kind :: enum { Model, Texture, Sound }
 // survives an asset reload.
 //
 // A paste button sits beside it: takes this field's value from the clipboard — the matching
-// `key = value` line of a copied entity (copy a car in a kit, paste just its model onto another
+// `key = value` line of a copied entity (copy an entity in a kit, paste just its model onto another
 // entity), or a bare key on its own — and applies it only if it names a loaded asset. Greyed out
 // when the clipboard doesn't resolve to one.
 ui_param_asset_picker :: proc(name: string, value: ^string, kind: Asset_Kind, options := DEFAULT_PARAM_UI_OPTIONS) {
@@ -178,7 +176,7 @@ ui_param_f32 :: proc(name: string, value: ^f32, options := DEFAULT_PARAM_UI_OPTI
     cformat := strings.clone_to_cstring(options.format, context.temp_allocator)
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
-    im.DragFloat(fmt.ctprintf("##%s", name), value, options.speed, options.min, options.max, cformat, options.slider_flags)
+    im.DragFloat(fmt.ctprintf("##%s", name), value, options.speed, options.min, options.max, cformat)
     im.EndDisabled()
 }
 
@@ -186,7 +184,7 @@ ui_param_vec2 :: proc(name: string, value: ^vec2, options := DEFAULT_PARAM_UI_OP
     cformat := strings.clone_to_cstring(options.format, context.temp_allocator)
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
-    im.DragFloat2(fmt.ctprintf("##%s", name), value, options.speed, options.min, options.max, cformat, options.slider_flags)
+    im.DragFloat2(fmt.ctprintf("##%s", name), value, options.speed, options.min, options.max, cformat)
     im.EndDisabled()
 }
 
@@ -194,7 +192,7 @@ ui_param_vec3 :: proc(name: string, value: ^vec3, options := DEFAULT_PARAM_UI_OP
     cformat := strings.clone_to_cstring(options.format, context.temp_allocator)
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
-    im.DragFloat3(fmt.ctprintf("##%s", name), value, options.speed, options.min, options.max, cformat, options.slider_flags)
+    im.DragFloat3(fmt.ctprintf("##%s", name), value, options.speed, options.min, options.max, cformat)
     im.EndDisabled()
 }
 
@@ -202,7 +200,7 @@ ui_param_vec4 :: proc(name: string, value: ^vec4, options := DEFAULT_PARAM_UI_OP
     cformat := strings.clone_to_cstring(options.format, context.temp_allocator)
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
-    im.DragFloat4(fmt.ctprintf("##%s", name), value, options.speed, options.min, options.max, cformat, options.slider_flags)
+    im.DragFloat4(fmt.ctprintf("##%s", name), value, options.speed, options.min, options.max, cformat)
     im.EndDisabled()
 }
 
@@ -212,7 +210,7 @@ ui_param_quat :: proc(name: string, value: ^quat, options := DEFAULT_PARAM_UI_OP
     im.BeginDisabled(options.readonly)
     // Normalized only when dragged: a write every frame would count as an edit (an undo step, and under
     // multi-edit the active rotation copied onto the whole selection) whenever rounding moved a bit.
-    if im.DragFloat4(fmt.ctprintf("##%s", name), cast(^vec4)value, options.speed, options.min, options.max, cformat, options.slider_flags) {
+    if im.DragFloat4(fmt.ctprintf("##%s", name), cast(^vec4)value, options.speed, options.min, options.max, cformat) {
         value^ = linalg.quaternion_normalize(value^)
     }
     im.EndDisabled()
@@ -225,7 +223,7 @@ ui_param_enum :: proc(name: string, type: typeid, value: ^u64, options := DEFAUL
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
     // Compare against raw member names; display the localized label.
-    if im.BeginCombo(fmt.ctprintf("##%s", name), fmt.ctprintf("%s", param_member_label(type_name, selected_enum_name)), options.combo_flags) {
+    if im.BeginCombo(fmt.ctprintf("##%s", name), fmt.ctprintf("%s", param_member_label(type_name, selected_enum_name))) {
         for enum_name in enum_type.names {
             is_selected := selected_enum_name == enum_name
             if im.Selectable(fmt.ctprintf("%s##%s", param_member_label(type_name, enum_name), enum_name), is_selected) {
@@ -336,14 +334,14 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
         if w > col do col = w
     }
     im.PopFont()
-    col += 16 * app.dispaly_scale
+    col += UI_LABEL_GAP * app.display_scale
 
     // Fields without a section, then one header per section. While searching, sections are plain
     // separators (so nothing found stays folded away), and a section whose name matches shows all its fields.
     param_struct_fields(type, value, options, owner_type, "", false, col)
     for section in reflect.enum_field_names(EntitySection) {
         label := param_member_label("EntitySection", section)
-        whole := options.filter != "" && param_text_matches(label, options.filter)
+        whole := options.filter != "" && search_matches(label, options.filter)
         any_shown := false
         for i in 0 ..< attr_count {
             tags := param_field_tags(struct_tags[i])
@@ -468,7 +466,7 @@ param_struct_fields :: proc(type: typeid, value: any, options: Param_UI_Options,
             im.EndPopup()
         }
         im.PopID()
-        im.Dummy({0, 3 * app.dispaly_scale})
+        im.Dummy({0, 3 * app.display_scale})
     }
 }
 
@@ -477,10 +475,10 @@ param_struct_fields :: proc(type: typeid, value: any, options: Param_UI_Options,
 param_field_shown :: proc(owner_type: string, field: reflect.Struct_Field, value: any, tags: []string, filter: string) -> bool {
     if contains(tags, "hidden") do return false
     if filter == "" do return true
-    if param_text_matches(field.name, filter) do return true
-    if param_text_matches(param_field_label(owner_type, field.name, tags), filter) do return true
+    if search_matches(field.name, filter) do return true
+    if search_matches(param_field_label(owner_type, field.name, tags), filter) do return true
     if owner_type == "" {
-        for l in entity_field_labels(field.name) do if l != "" && param_text_matches(l, filter) do return true
+        for l in entity_field_labels(field.name) do if l != "" && search_matches(l, filter) do return true
     }
     return param_value_matches(field.type, rawptr(uintptr(value.data) + field.offset), filter)
 }
@@ -492,10 +490,10 @@ param_field_shown :: proc(owner_type: string, field: reflect.Struct_Field, value
 param_value_matches :: proc(ti: ^runtime.Type_Info, data: rawptr, filter: string) -> bool {
     #partial switch v in runtime.type_info_base(ti).variant {
     case runtime.Type_Info_String:
-        return param_text_matches((^string)(data)^, filter)
+        return search_matches((^string)(data)^, filter)
     case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
         text, ok := sbuf_any_str(any{data, ti.id})
-        return ok && param_text_matches(text, filter)
+        return ok && search_matches(text, filter)
     case runtime.Type_Info_Enum:
         name, _ := reflect.enum_name_from_value_any(any{data, ti.id})
         return param_member_matches(param_type_name(ti), name, filter)
@@ -511,14 +509,9 @@ param_value_matches :: proc(ti: ^runtime.Type_Info, data: rawptr, filter: string
 
 @(private="file")
 param_member_matches :: proc(type_name, member, filter: string) -> bool {
-    if param_text_matches(member, filter) do return true
-    for l in entity_flag_item_labels(type_name, member) do if l != "" && param_text_matches(l, filter) do return true
+    if search_matches(member, filter) do return true
+    for l in entity_flag_item_labels(type_name, member) do if l != "" && search_matches(l, filter) do return true
     return false
-}
-
-@(private="file")
-param_text_matches :: proc(text, filter: string) -> bool {
-    return search_matches(text, filter)
 }
 
 // Whether two values of type `ti` are the same as the user sees them: text by content (a string's

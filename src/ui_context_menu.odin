@@ -19,28 +19,9 @@ ui_copy_selection :: proc(w: ^World) {
     if strings.builder_len(b) > 0 do im.SetClipboardText(strings.to_cstring(&b))
 }
 
-// Pastes the clipboard as new entities at `pos`, and selects what it made. One entity: the clipboard
-// transform is ignored (rotation/scale default, position = pos). Several: they keep their layout —
-// positions, rotations and scales as copied — moved as a group so their centre lands on pos.
+// Pastes the clipboard as new entities at `pos`, and selects what it made (selection_paste).
 ui_paste_at :: proc(w: ^World, pos: vec3) {
-    clip := string(im.GetClipboardText())
-    blocks := entity_count_blocks(clip)
-    if blocks == 0 do return
-    undo_push(w)
-    handles := make([dynamic]Entity_Handle, context.temp_allocator)
-    skip := blocks == 1 ? []string{"placement"} : []string{}
-    scene_load_from_text(w, clip, &handles, skip)
-    centre: vec3
-    if blocks > 1 {
-        for h in handles do if e, ok := entity_get(w, h); ok do centre += e.position
-        centre /= f32(max(len(handles), 1))
-    }
-    selection_clear(w)
-    for h in handles {
-        e := entity_get(w, h) or_continue
-        e.position = blocks == 1 ? pos : pos + (e.position - centre)
-        selection_set(w, h, true)
-    }
+    selection_paste(w, string(im.GetClipboardText()), pos)
 }
 
 // Copies the selection in place and selects the copies (Unity's Ctrl+D).
@@ -144,12 +125,6 @@ ui_context_menu :: proc() {
     im.Separator()
     if item(ICON_HIDE,       .Ctx_Hide,       nil,      n > 0)               do ui_hide_selection(w)
     if item(ICON_SHOW,       .Ctx_Unhide_All, nil,      world_any_hidden(w)) do ui_unhide_all(w)
-}
-
-// The first view showing `w`, or nil.
-ui_first_view_of :: proc(w: ^World) -> ^Render_View {
-    for v in views do if v.world == w do return v
-    return nil
 }
 
 // Override: make every selected entity look/behave like the clipboard entity WITHOUT becoming it or

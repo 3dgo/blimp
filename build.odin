@@ -22,10 +22,8 @@ GAME_DIR :: "out/game"
 GAME_EXE :: "out/game/game.exe"
 GAME_SKIP_EXTS :: [?]string{".max", ".psd", ".blend", ".bak", ".luacn", ".kra", ".xcf"}   // sources, not loaded at runtime
 
-BLIMPCTL_SRC :: "tools/blimpctl"   // remote-control CLI for a running debug build (src/editor_remote.odin)
+BLIMPCTL_SRC :: "tools/blimpctl"   // remote-control CLI for a running debug build (src/app_remote.odin)
 BLIMPCTL_OUT :: "bin/blimpctl.exe"
-SHADER_PATH_ENGINE :: "assets_engine/shaders/src"
-SHADER_PATH_GAME :: "assets/shaders/src"
 
 CUSTOM_ATTRIBUTES :[7]string : {"lua", "lua_zh", "table", "method", "lua_ffi", "as", "lua_int"}
 
@@ -51,20 +49,6 @@ main :: proc() {
     run_str(fmt.aprintf("odin build %v -vet -out:%v", BLIMPCTL_SRC, BLIMPCTL_OUT, allocator = context.temp_allocator))
 
     if slice.contains(os.args, "run") do run_str(OUT)
-    /*engine_shader_files, _ := os.read_all_directory_by_path(SHADER_PATH_ENGINE, context.temp_allocator)
-    game_shader_files, _ := os.read_all_directory_by_path(SHADER_PATH_GAME, context.temp_allocator)
-    all_shader_files := make([dynamic]os.File_Info, context.temp_allocator)
-    
-    append_elems(&all_shader_files, ..engine_shader_files[:])
-    append_elems(&all_shader_files, ..game_shader_files[:])
-    for file in all_shader_files {
-        ext := filepath.ext(file.fullpath)
-        if ext == ".vert" || ext == ".frag" {
-            if !strings.contains(file.fullpath, "common") {
-                compile_glsl(file)
-            }
-        }
-    }*/
 }
 
 build_game :: proc() {
@@ -127,16 +111,6 @@ copy_or_exit :: proc(dst, src: string) {
 join :: proc(parts: []string) -> string {
     p, _ := filepath.join(parts, context.temp_allocator)
     return p
-}
-
-compile_glsl :: proc(file: os.File_Info) {
-    basename := filepath.stem(file.name)
-    ext := filepath.ext(file.name)
-    output_path, _ := filepath.join({filepath.dir(file.fullpath), "..", "out"}, context.temp_allocator)
-    spv_path, _ := filepath.join({output_path, strings.concatenate({basename, ext, ".spv"})}, context.temp_allocator)
-    json_path, _ := filepath.join({output_path, strings.concatenate({basename, ext, ".json"})}, context.temp_allocator)
-    run({"glslc", file.fullpath, "-o", spv_path})
-    run({"spirv-cross", spv_path, "--reflect", "--output", json_path})
 }
 
 run_str :: proc(cmd: string) {

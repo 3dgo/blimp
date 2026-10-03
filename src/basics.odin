@@ -8,7 +8,6 @@ import "core:math/linalg"
 import "core:os"
 import "core:sync"
 import "core:thread"
-import vmem "core:mem/virtual"
 
 @(lua_ffi="Vec2")  vec2 :: common.vec2
 @(lua_ffi="Vec3")  vec3 :: common.vec3
@@ -20,19 +19,12 @@ import vmem "core:mem/virtual"
 
 uvec2 :: common.uvec2
 uvec3 :: common.uvec3
-uvec4 :: common.uvec4
 
 @(lua_ffi="Mat3", as="[9]f32")  mat3 :: common.mat3
 @(lua_ffi="Mat4", as="[16]f32") mat4 :: common.mat4
 @(lua_ffi="Quat", as="[4]f32")  quat :: common.quat
 
-rgb_u8   :: common.rgb_u8  
-rgba_u8  :: common.rgba_u8 
-rgb_f32  :: common.rgb_f32
 rgba_f32 :: common.rgba_f32
-
-irect_from_wh   :: common.irect_from_wh
-rect_from_wh    :: common.rect_from_wh
 
 // A small inline string buffer. `[dynamic; N]u8` stores its bytes inside the struct
 // and is inline-addressed (slicing recomputes the pointer from the value's own
@@ -78,11 +70,8 @@ sbuf_any_cap :: proc(v: any) -> int {
 
 Ray :: common.Ray
 
-
-
 /* ------------------------------- Containers ------------------------------- */
 contains :: common.contains
-contains_all :: common.contains_all
 keys :: common.keys
 values :: common.values
 
@@ -128,21 +117,6 @@ panic_on_fail_proc :: proc(
     return data, err
 }
 
-frame_allocator :: proc(a: ^App_Allocators) -> runtime.Allocator {
-    return {procedure = frame_alloc_proc, data = a}
-}
-
-frame_alloc_proc :: proc(data: rawptr, mode: runtime.Allocator_Mode,
-                         size, alignment: int, old_mem: rawptr, old_size: int,
-                         loc := #caller_location) -> ([]byte, runtime.Allocator_Error) {
-    a := (^App_Allocators)(data)
-    backing := vmem.arena_allocator(&a.frame_arena)
-    result, err := backing.procedure(backing.data, mode, size, alignment, old_mem, old_size, loc)
-    if err != nil && err != .Mode_Not_Implemented {
-        panic(fmt.tprintf("frame arena exhausted: %v (size %d)", err, size), loc)
-    }
-    return result, err
-}
 // One colour channel between sRGB (display) encoding and linear: the exact piecewise curve, as the GPU's
 // _SRGB formats decode it and the tonemap pass encodes it.
 srgb_to_linear :: proc(c: f32) -> f32 {
@@ -210,3 +184,9 @@ box_transformed_bounds :: proc(M: mat4, lo, hi: vec3) -> (out_lo, out_hi: vec3) 
 
 // The 12 edges of a box_corners box, as corner index pairs.
 BOX_EDGES :: [12][2]int{{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}}
+
+// A unit vector perpendicular to the unit vector `dir` (any one, stable as dir turns): a basis for drawing
+// circles and cones around it.
+perpendicular :: proc(dir: vec3) -> vec3 {
+    return linalg.normalize(linalg.cross(abs(dir.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, dir))
+}

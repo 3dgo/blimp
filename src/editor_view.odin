@@ -45,16 +45,21 @@ editor_view :: proc(v: ^Render_View) -> ^Editor_View {
 editor_view_forget :: proc(v: ^Render_View) {
     for ev, i in editor_views {
         if ev.view != v do continue
-        delete(ev.gizmo.members)
-        free(ev)
+        editor_view_free(ev)
         unordered_remove(&editor_views, i)
         return
     }
 }
 
 editor_views_shutdown :: proc() {
-    for ev in editor_views { delete(ev.gizmo.members); free(ev) }
+    for ev in editor_views do editor_view_free(ev)
     delete(editor_views)
+}
+
+@(private="file")
+editor_view_free :: proc(ev: ^Editor_View) {
+    delete(ev.gizmo.members)
+    free(ev)
 }
 
 // The view to act in for world `w` (a level or its play copy) from outside any viewport — the entity

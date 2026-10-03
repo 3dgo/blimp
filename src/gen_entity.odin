@@ -4,8 +4,14 @@ package blimp
 
 Entity :: struct {
     handle: Entity_Handle `hidden, noserialize`,
+    // Editor selection. On the entity so undo snapshots carry it and delete/paste need no
+    // bookkeeping; never saved or copied (noserialize), never shown (hidden). (editor_selection.odin,
+    // editor_world.odin)
     selected: bool `hidden, noserialize`,
     name: sbuf64 `identity`,
+    // Editor icon in the entity and template lists: the hex codepoint of a Material Symbols glyph
+    // (e.g. E835; the codepoints are in Google's .codepoints list, as in editor_icons.odin). Empty: a
+    // light or camera shows its type's icon, anything else none.
     icon: sbuf64 `widget:icon`,
     basic_static_flags: EntityBasicStaticFlags,
     basic_flags: EntityBasicFlags,
@@ -13,28 +19,67 @@ Entity :: struct {
     rotation: quat `placement, section:Transform`,
     scale: vec3 `placement, section:Transform`,
     model: string `widget:model, section:Render`,
+    // How the model's surfaces take light (the ShadingModel members; shading.slang). Default: the
+    // level's World Settings → Shading.
     shading: EntityShading `section:Render`,
+    // How the model's pixels combine with what's behind them. Alpha and Additive don't write depth or
+    // cast shadows, and draw after everything opaque in entity order, unsorted.
     blend: EntityBlend `section:Render`,
+    // Camera and light, flat on the entity. A kind is which type is set; the shared fields mean what
+    // they mean for that kind. Something that needs both (a flashlight on a camera) is two entities.
+    // No aspect: a camera takes it from the target it renders into, and shadow maps are square.
     camera_type: EntityCameraType `section:Camera_Light`,
     light_type: EntityLightType `section:Camera_Light`,
+    // Light colour, stored linear; the picker shows and edits it as sRGB (like Unity's).
     color: vec3 `widget:linear_color, section:Render`,
     intensity: f32 `section:Render`,
+    // Degrees. Perspective camera: vertical field of view. Spot light: cone angle (also its shadow
+    // frustum).
     fov: f32 `section:Dimensions`,
+    // Degrees. Spot light: inner cone angle — full intensity inside it, fading to zero at fov
+    // (Unity's inner spot angle; Unreal's inner cone angle, but as a full angle). Clamped to fov.
     inner_fov: f32 `section:Dimensions`,
+    // Cylinder light: a spot light with a cylinder-shaped beam instead of a cone. Parallel rays from
+    // a disc at the entity along its +Z; radius is the beam's, full intensity inside inner_radius and
+    // fading to zero at radius (as fov / inner_fov do for a spot). Inner is clamped to radius.
     radius: f32 `section:Dimensions`,
     inner_radius: f32 `section:Dimensions`,
+    // How a point / spot / cylinder light fades over its range (see range).
     falloff: EntityLightFalloff `section:Camera_Light`,
+    // The box the entity's projection or volume covers. Orthographic camera: y = view height (the
+    // width comes from the target's aspect). Directional light: x, y = shadow area, z = its depth.
+    // Later: trigger, fog and other volumes.
     size: vec3 `section:Dimensions`,
+    // Near, far. Camera: clip planes. Point / spot / cylinder light: inner, outer distance of its
+    // falloff — zero at y. Linear and Smooth are full intensity inside x. Inverse Square is
+    // intensity / d² (intensity is the light at 1 unit), held flat inside x (the source's radius)
+    // and windowed to zero at y. A cylinder's distance is along its beam, from its disc.
     range: vec2 `section:Dimensions`,
     shadow: bool `section:Camera_Light`,
+    // Which light group the light belongs to (World Settings → Light Groups): 0 = static, always
+    // on; 1–4 can be dimmed or switched off at runtime (Lua World.set_light_group), realtime and
+    // baked light together.
     light_group: i32 `section:Camera_Light`,
+    // Light: scales its baked bounce (the probes) without touching its direct light. Whether it bakes
+    // at all is Static + Cast Indirect in its static flags, as for geometry.
     indirect: f32 `section:Camera_Light`,
+    // Sound (world_sound.odin): a sound file's project path (.wav .ogg .mp3 .flac under assets/,
+    // loaded at startup). The entity plays it in play mode: when the game starts if Play On Start, or
+    // when Lua calls Entity.play_sound. While it plays it follows the entity. Positional: full volume
+    // within range.x, fading linearly to silent at range.y; otherwise the same everywhere (music,
+    // UI).
     sound: string `widget:sound, section:Sound`,
     volume: f32 `section:Sound`,
     sound_flags: EntitySoundFlags `section:Sound`,
+    // What the entity collides as while playing (world_physics.odin; claude/gameplay.md → Physics),
+    // cheapest first. Box: the model's bounds. Collision Mesh: the kit's <model>_col mesh, authored
+    // in the DCC (Play warns when the model has none). Render Mesh: the model's own triangles, every
+    // one of them. Static entities are static bodies; anything else follows its entity every frame
+    // (kinematic), so a gate a script moves still blocks. Needs a model.
     collision: EntityCollision `section:Physics`,
+    // Metres per second, for game code: Lua reads and writes it (a character's fall and jump speed
+    // between frames, since Lua keeps no state). Nothing in the engine moves an entity by it.
     velocity: vec3 `noserialize, section:Physics`,
-    触发: bool,
 }
 
 EntitySection :: enum u64 {
@@ -68,19 +113,31 @@ EntityLightType :: enum u64 {
 }
 
 EntityLightFalloff :: enum u64 {
+    // Physical: intensity / d², windowed to zero at range.y (Unreal, Unity URP).
     Inverse_Square,
+    // Full inside range.x, straight down to zero at range.y.
     Linear,
+    // Full inside range.x, smoothstep down to zero at range.y: no visible edge at either end.
     Smooth,
 }
 
+// A level's shading (World Settings) and what an entity's shading resolves to. Cheapest first; member
+// order is SHADING_* in shading.slang.
 ShadingModel :: enum u64 {
+    // Texture × colour, no light.
     Unlit,
+    // Lit per vertex, interpolated across the face, diffuse only: the PS1's. Shadows per pixel.
     Gouraud,
+    // Lit per pixel with the mesh's smooth normals, diffuse only: Gouraud without the vertex
+    // artifacts.
     Lambert,
+    // Lit per pixel with the face's normal, diffuse only: faceted.
     Flat,
+    // Lit per pixel, with a specular highlight.
     Phong,
 }
 
+// ShadingModel plus Default (the level's).
 EntityShading :: enum u64 {
     Default,
     Unlit,
@@ -90,8 +147,11 @@ EntityShading :: enum u64 {
     Phong,
 }
 
+// Draw order is member order: each is a draw bucket with its own PSO (render_dx.odin).
 EntityBlend :: enum u64 {
     Opaque,
+    // Opaque, but pixels under half alpha are cut out (fences, foliage). Shadows still see the whole
+    // quad.
     Cutout,
     Alpha,
     Additive,
@@ -100,6 +160,9 @@ EntityBlend :: enum u64 {
 EntityBasicStaticFlag :: enum u64 {
     Static,
     Renderable,
+    // Static geometry that blocks and bounces light in the probe bake (claude/rendering.md, Baker).
+    // Off for clutter that would only add noise; entities without Static never bake whatever this
+    // says.
     Cast_Indirect,
 }
 EntityBasicStaticFlags :: bit_set[EntityBasicStaticFlag; u64]
@@ -144,7 +207,6 @@ entity_apply_defaults :: proc(e: ^Entity) {
     e.sound_flags = {.Positional}
     e.collision = .Collision_Mesh
     e.velocity = {0, 0, 0}
-    e.触发 = false
 }
 
 // A field's label in every language (empty where it has none).
@@ -179,7 +241,6 @@ entity_field_labels :: proc(name: string) -> (l: [Lang]string) {
     case "sound_flags": l = {.EN = "Sound Flags", .ZH = "声音标志"}
     case "collision": l = {.EN = "Collision", .ZH = "碰撞"}
     case "velocity": l = {.EN = "Velocity", .ZH = "速度"}
-    case "触发": l = {.EN = "trigger", .ZH = "触发"}
     }
     return
 }

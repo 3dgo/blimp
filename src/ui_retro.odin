@@ -21,7 +21,7 @@ ui_draw_retro :: proc() {
     w := retro_ui.world
     if w == nil do return
     open := true
-    s := app.dispaly_scale
+    s := app.display_scale
     im.SetNextWindowSize({RETRO_WINDOW_SIZE.x * s, RETRO_WINDOW_SIZE.y * s}, .FirstUseEver)
     defer if !open do retro_ui.world = nil
     defer im.End()
@@ -42,8 +42,7 @@ ui_retro_settings :: proc(r: ^Retro_Settings) {
         .Retro_Luma_Blur, .Retro_Chroma_Blur, .Retro_Scanlines, .Retro_Strength, .Retro_Beam_Dark,
         .Retro_Beam_Bright, .Retro_Mask, .Retro_Bloom, .Retro_Radius, .Retro_Gamma, .Retro_Brightness}
     o := DEFAULT_PARAM_UI_OPTIONS
-    for id in labels do o.label_w = max(o.label_w, im.CalcTextSize(tr(id)).x)
-    o.label_w += im.GetStyle().IndentSpacing + 16 * app.dispaly_scale   // amounts are indented under their effect
+    o.label_w = ui_label_column(labels[:]) + im.GetStyle().IndentSpacing   // amounts are indented under their effect
 
     p := &r.ps1
     im.SeparatorText(tr(.Retro_PS1))

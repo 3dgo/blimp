@@ -43,7 +43,7 @@ ui_draw_bake :: proc() {
     w := bake_ui.world
     if w == nil do return
     open := true
-    s := app.dispaly_scale
+    s := app.display_scale
     im.SetNextWindowSize({BAKE_WINDOW_SIZE.x * s, BAKE_WINDOW_SIZE.y * s}, .FirstUseEver)
     defer if !open do bake_ui.world = nil
     defer im.End()
@@ -96,8 +96,7 @@ ui_bake_settings :: proc(w: ^World) {
     labels := [?]Loc_ID{.Bake_Quality, .Bake_Rays, .Bake_Bounces, .Bake_Sky, .World_Sky_Color, .World_Sky_Intensity,
         .World_Probe_Spacing, .Bake_Bounds, .Bake_Bounds_Min, .Bake_Bounds_Max}
     o := DEFAULT_PARAM_UI_OPTIONS
-    for id in labels do o.label_w = max(o.label_w, im.CalcTextSize(tr(id)).x)
-    o.label_w += 16 * app.dispaly_scale
+    o.label_w = ui_label_column(labels[:])
 
     im.SeparatorText(tr(.Bake_Section_Quality))
     ui_param_label(string(tr(.Bake_Quality)), o)
@@ -157,7 +156,7 @@ ui_bake_settings :: proc(w: ^World) {
     else do im.TextDisabled("%s", text)
 }
 
-// The manual grid box as scene lines in the level's views (pick_view_debug_lines), while the Bake window
+// The manual grid box as scene lines in the level's views (ui_view_debug_lines), while the Bake window
 // shows that level.
 ui_bake_bounds_lines :: proc(level: ^World) {
     if bake_ui.world != level || level.settings.bake.bounds != .Manual do return
@@ -189,10 +188,10 @@ ui_probe_atlas_image :: proc(w: ^World, width: f32) {
     x := i32(in_x / PROBE_ATLAS_TILE)
     z := g.dims.z - 1 - i32(in_y / PROBE_ATLAS_TILE)
     p := probe_position(g, x, y, z)
-    up := probe_eval(g, probe_index(g, x, y, z), {0, 1, 0}, probe_layer_scales(g, light_group_scales(w, timer_sec_since_start())))
+    up := probe_eval(g, probe_index(g, x, y, z), {0, 1, 0}, probe_layer_scales(g, light_group_scales(w)))
 
     tile := origin + scale * [2]f32{f32(col * (bw + PROBE_ATLAS_GAP) + int(x) * PROBE_ATLAS_TILE), f32(row * (bh + PROBE_ATLAS_GAP) + int(g.dims.z - 1 - z) * PROBE_ATLAS_TILE)}
-    im.DrawList_AddRect(im.GetWindowDrawList(), tile, tile + scale * PROBE_ATLAS_TILE, im.GetColorU32ImVec4(PROBE_HIGHLIGHT_COLOR), 0, 2 * app.dispaly_scale)
+    im.DrawList_AddRect(im.GetWindowDrawList(), tile, tile + scale * PROBE_ATLAS_TILE, im.GetColorU32ImVec4(PROBE_HIGHLIGHT_COLOR), 0, 2 * app.display_scale)
     probe_highlight = {world_level(w), {x, y, z}, im.GetFrameCount()}
     if im.IsMouseDoubleClicked(.Left) {
         if ev := editor_view_for_world(w); ev != nil do camera_fit_bounds(&ev.view.camera, p - g.spacing * 0.5, p + g.spacing * 0.5)
@@ -210,7 +209,7 @@ ui_bake_probe_highlight :: proc(ev: ^Editor_View) {
     p := probe_position(g, hl.probe.x, hl.probe.y, hl.probe.z)
     s, ok := world_to_screen(ev, p)
     if !ok do return
-    scale := app.dispaly_scale
+    scale := app.display_scale
     half := clamp(overlay_pixels_per_unit(ev, p) * g.spacing * 0.15, 6 * scale, 40 * scale)
     o := overlay_begin(ev)
     defer overlay_end(o)

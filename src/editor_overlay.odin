@@ -16,19 +16,17 @@ import im "lib:odin-imgui"
 //
 //     o := overlay_begin(ev)          // inside the view's window, after its image (ui_draw_view)
 //     defer overlay_end(o)
-//     overlay_line(o, a, b, {1, 0, 0, 1}, 2)
 //     overlay_icon(o, e.position, ICON_CAMERA, {1, 1, 1, 1})
 //
-// Lines are clipped at the camera's near plane, so a segment running behind the camera is cut where it
-// crosses it rather than dropped. Filled shapes (disc, cone, cube, icon) skip themselves when any part
-// is behind the camera.
+// The shapes are what the editor draws: a shaded cone and cube (the gizmo's handles) and an icon (camera
+// and light markers). Each skips itself when any part is behind the camera. For anything else, project
+// with world_to_screen and draw on o.dl, as the gizmo does.
 
 Overlay :: struct {
     ev: ^Editor_View,
     dl: ^im.DrawList,
 }
 
-OVERLAY_CIRCLE_SEGMENTS :: 48
 OVERLAY_CONE_SEGMENTS   :: 16
 OVERLAY_ICON_RADIUS     :: 13     // pixels (× display scale): an icon's backing disc
 
@@ -66,77 +64,27 @@ clip_to_screen :: proc(ev: ^Editor_View, clip: vec4) -> vec2 {
     return ev.screen_min + {(ndc.x * 0.5 + 0.5) * ev.screen_size.x, (0.5 - ndc.y * 0.5) * ev.screen_size.y}
 }
 
-// Pixels per world unit at `p`'s depth: for sizing things in world units from a pixel size, or back.
+// World units one pixel covers at view depth 1 (it grows linearly with depth): sizing things in world units
+// from a pixel size, or back.
+overlay_units_per_pixel_at_depth_1 :: proc(ev: ^Editor_View) -> f32 {
+    return 2 * math.tan(ev.view.camera.fov_y * 0.5) / max(ev.screen_size.y, 1)
+}
+
+// Pixels per world unit at `p`'s depth.
 overlay_pixels_per_unit :: proc(ev: ^Editor_View, p: vec3) -> f32 {
     c := ev.view.camera
     depth := linalg.dot(p - camera_eye(c), camera_forward(c))
     if depth <= 1e-4 do return 0
-    return ev.screen_size.y / (2 * depth * math.tan(c.fov_y * 0.5))
-}
-
-/* ---------------------------------- Lines --------------------------------- */
-
-overlay_line :: proc(o: Overlay, a, b: vec3, col: vec4, thickness: f32 = 1) {
-    ca, cb := overlay_clip(o.ev, a), overlay_clip(o.ev, b)
-    if ca.w <= OVERLAY_NEAR_W && cb.w <= OVERLAY_NEAR_W do return
-    // One end behind the camera: move it along the segment to where it crosses the near limit.
-    if ca.w <= OVERLAY_NEAR_W do ca = linalg.lerp(ca, cb, (OVERLAY_NEAR_W - ca.w) / (cb.w - ca.w) + 1e-4)
-    if cb.w <= OVERLAY_NEAR_W do cb = linalg.lerp(cb, ca, (OVERLAY_NEAR_W - cb.w) / (ca.w - cb.w) + 1e-4)
-    im.DrawList_AddLine(o.dl, clip_to_screen(o.ev, ca), clip_to_screen(o.ev, cb), u32_color(col), thickness)
-}
-
-// A connected line through `points`; `closed` joins the last back to the first.
-overlay_polyline :: proc(o: Overlay, points: []vec3, col: vec4, thickness: f32 = 1, closed := false) {
-    for i in 1 ..< len(points) do overlay_line(o, points[i - 1], points[i], col, thickness)
-    if closed && len(points) > 2 do overlay_line(o, points[len(points) - 1], points[0], col, thickness)
-}
-
-// A circle in the plane spanned by the unit vectors `a` and `b`.
-overlay_circle :: proc(o: Overlay, center, a, b: vec3, radius: f32, col: vec4, thickness: f32 = 1) {
-    prev := center + a * radius
-    for i in 1 ..= OVERLAY_CIRCLE_SEGMENTS {
-        t := f32(i) / OVERLAY_CIRCLE_SEGMENTS * math.TAU
-        next := center + (a * math.cos(t) + b * math.sin(t)) * radius
-        overlay_line(o, prev, next, col, thickness)
-        prev = next
-    }
-}
-
-// The 12 edges of a box: `axes` are its (unit) directions, `half` its half-size along each.
-overlay_box :: proc(o: Overlay, center: vec3, axes: [3]vec3, half: vec3, col: vec4, thickness: f32 = 1) {
-    corner :: proc(center: vec3, axes: [3]vec3, half: vec3, i: int) -> vec3 {
-        return center + axes[0] * ((i & 1) != 0 ? half.x : -half.x) + axes[1] * ((i & 2) != 0 ? half.y : -half.y) + axes[2] * ((i & 4) != 0 ? half.z : -half.z)
-    }
-    edges := [12][2]int{{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}}
-    for e in edges do overlay_line(o, corner(center, axes, half, e[0]), corner(center, axes, half, e[1]), col, thickness)
-}
-
-// A line from `from` to `to` with a two-stroke head, `head` world units long.
-overlay_arrow :: proc(o: Overlay, from, to: vec3, col: vec4, thickness: f32 = 1, head: f32 = 0.2) {
-    overlay_line(o, from, to, col, thickness)
-    dir := to - from
-    l := linalg.length(dir)
-    if l < 1e-5 do return
-    dir /= l
-    side := linalg.normalize(linalg.cross(abs(dir.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, dir))
-    overlay_line(o, to, to - dir * head + side * head * 0.5, col, thickness)
-    overlay_line(o, to, to - dir * head - side * head * 0.5, col, thickness)
+    return 1 / (depth * overlay_units_per_pixel_at_depth_1(ev))
 }
 
 /* --------------------------------- Filled --------------------------------- */
-
-// A disc of `radius_px` pixels at world point `p` (a dot that doesn't shrink with distance).
-overlay_disc :: proc(o: Overlay, p: vec3, radius_px: f32, col: vec4) {
-    s, front := world_to_screen(o.ev, p)
-    if !front do return
-    im.DrawList_AddCircleFilled(o.dl, s, radius_px, u32_color(col))
-}
 
 // A shaded 3D cone drawn flat: its base circle and apex projected, the silhouette (their convex hull)
 // filled with `side`, and the base disc on top in `cap` when the camera looks at its underside.
 // `dir` is a unit vector from the base centre toward the apex.
 overlay_cone :: proc(o: Overlay, base, dir: vec3, length, radius: f32, side, cap: vec4) {
-    u := linalg.normalize(linalg.cross(abs(dir.y) < 0.99 ? vec3{0, 1, 0} : vec3{1, 0, 0}, dir))
+    u := perpendicular(dir)
     v := linalg.cross(dir, u)
     pts: [OVERLAY_CONE_SEGMENTS + 1]vec2
     for s in 0 ..< OVERLAY_CONE_SEGMENTS {
@@ -186,24 +134,16 @@ overlay_cube :: proc(o: Overlay, center: vec3, axes: [3]vec3, half: f32, col: ve
 
 /* ------------------------------ Text and icons ----------------------------- */
 
-// Text at world point `p`, centred on it, nudged by `offset_px`.
-overlay_text :: proc(o: Overlay, p: vec3, text: string, col: vec4, offset_px := vec2{0, 0}) {
-    s, front := world_to_screen(o.ev, p)
-    if !front do return
-    t := strings.clone_to_cstring(text, context.temp_allocator)
-    im.DrawList_AddText(o.dl, s + offset_px - im.CalcTextSize(t) * 0.5, u32_color(col), t)
-}
-
 // A sprite-like marker: an icon-font glyph (editor_icons.odin) on a dark disc at world point `p`. `radius_px`
 // sizes the disc (default OVERLAY_ICON_RADIUS) and the glyph scales with it; `col.a` fades the whole
 // icon. `ring` (alpha > 0) outlines the disc, e.g. to show selection.
 overlay_icon :: proc(o: Overlay, p: vec3, icon: string, col: vec4, ring := vec4{}, radius_px: f32 = 0) {
     s, front := world_to_screen(o.ev, p)
     if !front do return
-    full := OVERLAY_ICON_RADIUS * app.dispaly_scale
+    full := OVERLAY_ICON_RADIUS * app.display_scale
     r := radius_px > 0 ? radius_px : full
     im.DrawList_AddCircleFilled(o.dl, s, r, u32_color({0.08, 0.08, 0.1, 0.8 * col.a}))
-    if ring.a > 0 do im.DrawList_AddCircle(o.dl, s, r, u32_color({ring.r, ring.g, ring.b, ring.a * col.a}), 0, 2 * app.dispaly_scale)
+    if ring.a > 0 do im.DrawList_AddCircle(o.dl, s, r, u32_color({ring.r, ring.g, ring.b, ring.a * col.a}), 0, 2 * app.display_scale)
     t := strings.clone_to_cstring(icon, context.temp_allocator)
     k := r / full   // the glyph keeps its proportion to the disc
     size := im.CalcTextSize(t) * k

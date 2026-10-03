@@ -15,7 +15,7 @@ ui_handle_shortcuts :: proc() {
     }
 
     // Copy and paste act on the active world (the viewport last focused), so copying from a kit
-    // into a scene is: click the kit's car, Ctrl+C, click into the scene's viewport, Ctrl+V.
+    // into a scene is: click a model in the kit, Ctrl+C, click into the scene's viewport, Ctrl+V.
     if active_view != nil {
         // The actions are shared with the right-click menu (ui_context_menu.odin).
         w := active_view.world

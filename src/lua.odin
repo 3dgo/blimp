@@ -2,7 +2,6 @@ package blimp
 
 import "core:log"
 import "core:c"
-import "core:math/linalg"
 import lua "vendor:lua/5.1"
 
 Lua_System :: struct {
@@ -32,7 +31,7 @@ lua_init :: proc() {
 LUA_MAIN_SCRIPT :: "assets/scripts/main.lua"
 
 // Runs main.lua and resolves the engine hooks it defines. At init, and again when it changes on disk
-// (asset_hot_reload.odin), which also reruns its start hook.
+// (app_hot_reload.odin), which also reruns its start hook.
 lua_main_load :: proc() {
     L := lua_system.L
     for ref in ([]c.int{lua_system.start, lua_system.update, lua_system.finish}) do if ref > 0 do lua.L_unref(L, lua.REGISTRYINDEX, ref)
@@ -82,22 +81,6 @@ lua_finish :: proc() {
     if lua_system.finish > 0 do lua_hook_call(lua_system.L, lua_system.finish, "engine finish")
 }
 
-//================================ Lua Functions =================================
-lua_vec3_length :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    v := lua_arg_vec3(L, 1)^
-    lua.pushnumber(L, lua.Number(linalg.length(v)))
-    return 1
-}
-
-lua_vec3_dot :: proc "c" (L: ^lua.State) -> c.int {
-    context = app.g_context
-    a := lua_arg_vec3(L, 1)^
-    b := lua_arg_vec3(L, 2)^
-    lua.pushnumber(L, lua.Number(linalg.dot(a, b)))
-    return 1
-}
-
 //================================ Helpers ====================================
 // A registry ref to the function `name_zh` or `name` in the table on top of the stack (lua.NOREF if
 // neither is one); the stack is left as it was. Raw lookups, so a field the table only inherits is
@@ -125,32 +108,9 @@ lua_hook_call :: proc(L: ^lua.State, ref: c.int, what: string, args: ..f64) -> b
     return true
 }
 
-lua_arg_vec3 :: #force_inline proc "c"(L: ^lua.State, idx: c.int) -> ^vec3 {
-    return (^vec3)(lua.topointer(L, idx))
-}
-
 check_luar :: proc(lr: c.int, msg: string, L: ^lua.State, location := #caller_location) {
     if lr != 0 {
         log.errorf("Lua Error: {}: {}", msg, lua.tostring(L, -1), location = location)
         lua.pop(L, 1)
     }
-}
-
-@(lua=my_log, table=Blimp)
-my_log :: proc(msg: string) {
-    log.info(msg)
-}
-
-@(lua, table=Blimp)
-my_log_2 :: proc(msg: string) -> string {
-    log.info(msg)
-    return "hello"
-}
-
-@(lua=Test)
-Test_Struct :: struct {
-    a: f32,
-    b: u32,
-    c: f64,
-    d: i32,
 }
