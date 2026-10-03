@@ -45,6 +45,10 @@ app: App
 
 App_Loggers :: struct {
     console: runtime.Logger,
+    history: runtime.Logger,   // the last lines in memory (log_history.odin)
+    both:    runtime.Logger,   // the one the context uses: console + history
+    sdl:     runtime.Logger,   // SDL's messages: the same two, without the (meaningless) source location
+    sdl_console: runtime.Logger,
 }
 
 App_Allocators :: struct {
@@ -312,9 +316,16 @@ app_shutdown :: proc() {
 
 init_loggers :: proc() {
     app.loggers.console = log.create_console_logger(allocator = context.allocator)
+    app.loggers.history = log_history_logger()
+    app.loggers.both = log.create_multi_logger(app.loggers.console, app.loggers.history, allocator = context.allocator)
+    app.loggers.sdl_console = app.loggers.console
+    app.loggers.sdl_console.options -= {.Short_File_Path, .Line, .Procedure}
+    app.loggers.sdl = log.create_multi_logger(app.loggers.sdl_console, app.loggers.history, allocator = context.allocator)
 }
 
 destroy_loggers :: proc() {
+    log.destroy_multi_logger(app.loggers.sdl, allocator = context.allocator)
+    log.destroy_multi_logger(app.loggers.both, allocator = context.allocator)
     log.destroy_console_logger(app.loggers.console, allocator = context.allocator)
 }
 
@@ -366,15 +377,14 @@ audit_memory :: proc() {
 
 setup_context :: proc() {
     app.g_context = context
-    app.g_context.logger    = app.loggers.console
+    app.g_context.logger    = app.loggers.both
     app.g_context.allocator = app.allocators.perm
     app.g_context.temp_allocator = app.allocators.temp
 }
 
 log_sdl :: proc "c" (userdata: rawptr, category: sdl.LogCategory, priority: sdl.LogPriority, message: cstring) {
-    sdl_log_context := app.g_context
-    sdl_log_context.logger.options -= {.Short_File_Path, .Line, .Procedure}
-    context = sdl_log_context
+    context = app.g_context
+    context.logger = app.loggers.sdl
 
     level: log.Level
     switch priority {

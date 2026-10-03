@@ -15,8 +15,8 @@ import hm "core:container/handle_map"
 // the runtime handle). The [entity] block is also the clipboard payload and the template format
 // (entity.odin), so loading is additive: it merges the text's entities into the world.
 
-// The extension that makes a file a level. Other files in the same format (the entity templates)
-// use another extension, so they never show up as levels.
+// The extension that makes a file a level (assets_engine/templates.level, the starting lights and
+// cameras, is one too: open it and copy from it).
 LEVEL_EXT :: ".level"
 
 // Every scene file the editor can open: LEVEL_EXT files under assets/ or assets_engine/.
@@ -73,7 +73,7 @@ scene_load :: proc(world: ^World, path: string) -> bool {
 }
 
 // Additive: parses [entity] blocks from `text`, adding one entity per block (world_add). Optionally
-// collects the created handles (paste selects them). Backs file load, clipboard paste and templates —
+// collects the created handles (paste selects them). Backs file load and clipboard paste —
 // the block format is identical.
 scene_load_from_text :: proc(world: ^World, text: string, out_handles: ^[dynamic]Entity_Handle = nil) -> (count: int) {
     e: Entity

@@ -57,6 +57,12 @@ public struct FrameConstants {
     public float    bloomRadius;
     public float    gamma;
     public float    brightness;
+
+    public float3   fogColor;         // distance fog (World_Settings.fog): the background colour, display space
+    public float    fogStart;         // metres from the eye: full colour nearer
+    public float    fogEnd;           // all fog colour from here; <= fogStart: fog off
+    public float2   _padFog;
+    public float4x4 invProj;          // this view's projection, inverted: scene depth -> view space
 }
 
 public ConstantBuffer<FrameConstants> gFrame : register(b0, space0);

@@ -46,10 +46,8 @@ Same structure for AI. Effort goes into perception and steering, not decision st
     - **G** (or the toolbar button) toggles a view's game view (`Editor_View.game_view`), like Unreal.
       It hides everything editor-only there: icons, outlines, selection boxes and the gizmo, which then
       can't be clicked either. Gameplay `debug_line`s stay.
-    - Icons scale for a city of lights. Each has a world size, so it shrinks with distance (clamped),
-      fades out with distance, and hides when geometry blocks it.
-    - Blocking is a CPU ray against the picking BVH, up to `EDITOR_ICON_RAYS_PER_FRAME` per view per
-      frame, taking turns. Selected icons always stay faintly visible.
+    - Icons are a constant screen size, drawn in front of everything; G hides them. (Distance scaling,
+      fading and occlusion rays were tried and cut: more code and special cases than they were worth.)
     - The icon is what you click: it wins over a mesh behind it. Marquee tests it, and F frames it.
     - Icons are drawn from the icon font, so they need no textures. A real billboard sprite is only for
       the game's look.
@@ -68,6 +66,10 @@ for AI, not for sound. Odin is authoritative so script reload can't corrupt anyt
 - They act on `lua_world()`, the world whose script is running. There is no hidden world: called from an
   engine hook (`引擎.更新`), World/Entity procs log an error and do nothing; engine hooks are for
   session-level logic and Input.
+- `World.debug_line(from, to [, color])` draws in every view of the script's world, the game view too.
+  The lines live in `World.debug_lines` until the world's next tick (`world_play_tick` clears them), so a
+  script redraws what it wants each update and they hold while paused. Gameplay code in Odin uses
+  `world_debug_line` the same way.
 - `Entity.set_*` write through `entity_writable_field` like files and blimpctl do: no `noserialize`
   fields, string fields are interned asset keys, names stay unique. `World.add` goes through `world_add`.
 

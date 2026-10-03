@@ -7,7 +7,7 @@ import "core:strings"
 import "core:reflect"
 
 // Every text format the engine reads and writes is INI: levels and the clipboard (world_scene.odin,
-// entity.odin), entity templates, game.ini, the entity schema (editor_schema.odin), blimpctl bodies.
+// entity.odin), game.ini, the entity schema (editor_schema.odin), blimpctl bodies.
 // This file is the one place that knows the syntax:
 //
 // - ini_next reads lines: [section] headers and `key = value` pairs, skipping blanks and # ; comments.
@@ -229,21 +229,8 @@ ini_read_section :: proc(text: string, section: string, root: any) {
     }
 }
 
-// The value for `key` in clipboard-style text: from its `key = value` line if the text is INI-style
-// (a copied [entity] block, or any key = value lines), or the text itself if it's one bare line
-// with no `=` (e.g. a pasted asset key). ok=false if neither applies. Returned value slices `text`.
-text_field_value :: proc(text: string, key: string) -> (value: string, ok: bool) {
-    trimmed := strings.trim_space(text)
-    if trimmed == "" do return "", false
-    if strings.index_byte(trimmed, '=') < 0 && strings.index_byte(trimmed, '\n') < 0 do return trimmed, true
-
-    r := Ini_Reader{text = trimmed}
-    for line in ini_next(&r) do if !line.header && line.key == key do return line.value, true
-    return "", false
-}
-
 // True if the comma-separated backtick `tag` string contains `name` (e.g. "noserialize",
-// "identity", "placement"). Used by serialize_struct and the Entity field router.
+// "identity"). Used by serialize_struct, the Entity field writer and multi-edit.
 field_has_tag :: proc(tag: reflect.Struct_Tag, name: string) -> bool {
     for t in strings.split(string(tag), ",", context.temp_allocator) {
         if strings.trim_space(t) == name do return true

@@ -275,7 +275,7 @@ body { margin: 0; }
 </section><section><h2 id="s8"><span class="num">8</span><span>灯光组</span></h2>
 <p>灯光组用来在运行时整体调节一批灯：停电、蜡烛闪烁、窗户的灯一开一关。</p>
 <ul><li>每个关卡最多 <strong>4 个</strong>可切换的组，在<strong>世界设置 → 光源组</strong>里命名，并设置初始强度 <code>scale</code> 和闪烁图案 <code>pattern</code>。</li><li>每盏灯的 <code>light_group</code> 字段指定它属于哪个组（1–4）。0 组永远满强度。</li><li>组的强度同时作用于这些灯的<strong>实时直接光</strong>和<strong>烘焙的间接光</strong>（每个组烘焙在探针的独立一层），所以关灯后墙上的反光也一起消失。</li><li><code>pattern</code> 是 Quake 风格的灯光图案：每个字母持续 0.1 秒，循环；<code>a</code> = 0，<code>m</code> = 1，<code>z</code> ≈ 2；留空表示常亮。城堡的火把组用的是 <code>mmnmmommommnonmmonqnmmo</code>。</li></ul>
-<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>世界.设光源组(名称, 强度)</code></td><td><code>World.set_light_group(name, scale)</code></td><td>0 = 关，1 = 和保存/烘焙时一样。没有这个名称的组时返回假</td></tr><tr><td><code>世界.光源组(名称)</code></td><td><code>World.light_group(name)</code></td><td>当前强度（不含闪烁图案）</td></tr></tbody></table></div>
+<div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>世界.设光源组(名称, 强度)</code></td><td><code>World.set_light_group(name, scale)</code></td><td>0 = 关，1 = 和保存/烘焙时一样。没有这个名称的组时返回假</td></tr><tr><td><code>世界.光源组(名称)</code></td><td><code>World.light_group(name)</code></td><td>当前强度（不含闪烁图案）</td></tr><tr><td><code>世界.调试线(起点, 终点 [, 颜色])</code></td><td><code>World.debug_line(from, to [, color])</code></td><td>画到下一帧</td></tr></tbody></table></div>
 <p>名称不区分大小写。最终亮度 = 组强度 × 闪烁图案当前的值，所以对火把组调用 <code>世界.设光源组(&quot;torches&quot;, 0.5)</code> 后它仍然闪烁，只是整体暗了一半。脚本设置的强度只属于这次运行，不会保存。</p>
 <div class="pair"><figure><img src="images/lua/lights_on.jpg" alt="灯光组全开" loading="lazy"><figcaption>所有组 = 1</figcaption></figure><figure><img src="images/lua/lights_off.jpg" alt="灯光组全关" loading="lazy"><figcaption>所有组 = 0</figcaption></figure></div>
 <p>上图是城堡关卡把 <code>torches</code>、<code>beacon</code>、<code>windows</code> 三组全开和全关的对比：城门两侧的火把、右侧角楼的信标和庭院里的篝火都熄灭了，只剩平行光 <code>sun</code> 和探照灯（都在 0 组）。</p>
@@ -297,7 +297,7 @@ body { margin: 0; }
 <p>游戏画面通过运行世界里<strong>第一个启用的相机实体</strong>（<code>camera_type</code> 不为"无"）来渲染。控制相机就是写它的 <code>position</code> 和 <code>rotation</code>，和任何实体一样。</p>
 <p>城堡的 <code>主相机</code> 在关卡里摆成编辑器的俯瞰视角；脚本在 <code>世界.开始()</code> 里把它转到玩家的朝向，之后每帧放到玩家眼睛的位置。</p>
 </section><section><h2 id="s11"><span class="num">11</span><span>调试</span></h2>
-<ul><li><code>打印(...)</code> 输出到引擎日志。</li><li>调试版引擎可以用 <code>bin/blimpctl.exe</code> 从命令行执行 Lua：<pre class="code"><code>blimpctl worlds                      # 列出世界，运行副本的序号在这里
+<ul><li><code>打印(...)</code> 输出到引擎日志。调试版引擎会把最近几秒的错误和警告显示在窗口左下角，脚本出错时不用去翻控制台；<code>blimpctl log</code> 列出最近的日志。</li><li><code>世界.调试线(起点, 终点 [, 颜色])</code> / <code>World.debug_line(from, to [, color])</code> 在这个世界的所有视口里（包括游戏模式）画一条线，只保留到下一帧，所以要在 <code>世界.更新</code> 里每帧画。暂停时线会保留。适合看射线、路径、触发范围。</li><li>调试版引擎可以用 <code>bin/blimpctl.exe</code> 从命令行执行 Lua：<pre class="code"><code>blimpctl worlds                      # 列出世界，运行副本的序号在这里
 echo print(World.time()) | blimpctl lua 1 -</code></pre><p><code>lua &lt;世界&gt; -</code> 让 <code>World.*</code> / <code>Entity.*</code> 作用于指定的世界，适合在运行中的关卡里测试射线、声音、灯光组。例如在城堡的运行副本里从玩家眼睛向前打一条射线：</p><pre class="code"><code>local p = World.find(&quot;玩家&quot;)
 local hit, pt, n, e = World.raycast(Entity.get_vec3(p, &quot;position&quot;) + Vec3(0, 0.34, 0), Vec3(0, 0, 1), 8)
 print(hit, Entity.get_string(e, &quot;name&quot;), pt)

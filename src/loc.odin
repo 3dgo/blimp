@@ -87,8 +87,6 @@ Loc_ID :: enum {
     Schema_Status_Reloaded,
     Schema_Status_Build_Failed,
 
-    Btn_Paste_Over,
-    Btn_Paste,
     Asset_None,
     Btn_Save_Level,
     Tool_Select,
@@ -119,6 +117,10 @@ Loc_ID :: enum {
     Win_World_Settings,
     World_Background,
     World_Exposure,
+    World_Fog,
+    World_Fog_On,
+    World_Fog_Start,
+    World_Fog_End,
     World_Shading,
     World_Script,
     World_Sky_Color,
@@ -203,23 +205,6 @@ Loc_ID :: enum {
     Win_Game_Settings,
     Menu_Game_Settings,
     Game_Start_Level,
-    // Templates window
-    Win_Templates,
-    Menu_Templates,
-    Templates_Hint,
-    Templates_No_World,
-    Btn_Edit_Templates,
-    // Template names: Template_<name field>, looked up by name (ui_templates.odin)
-    Template_empty,
-    Template_marker,
-    Template_point_light,
-    Template_point_light_shadow,
-    Template_spot_light,
-    Template_spot_light_shadow,
-    Template_cylinder_light,
-    Template_sun,
-    Template_camera,
-    Template_ortho_camera,
     // Entity panels
     Panel_Follow,
     Inspector_Kit_Warning,
@@ -350,8 +335,6 @@ loc_text := [Loc_ID][Lang]cstring {
     .Schema_Status_Reloaded     = { .EN = "Reloaded from disk.",         .ZH = "已从磁盘重新加载。" },
     .Schema_Status_Build_Failed = { .EN = "Build failed — see console.", .ZH = "编译失败 — 请查看控制台。" },
 
-    .Btn_Paste_Over = { .EN = "Paste Over", .ZH = "覆盖粘贴" },
-    .Btn_Paste      = { .EN = "Paste",      .ZH = "粘贴" },   // paste one field from the clipboard
     .Asset_None     = { .EN = "(none)",     .ZH = "（无）" },   // an asset picker's empty choice
     .Btn_Save_Level = { .EN = "Save",       .ZH = "保存" },   // viewport toolbar: write the world to its scene file
     .Tool_Select    = { .EN = "Select",     .ZH = "选择" },   // viewport toolbar tools
@@ -382,6 +365,10 @@ loc_text := [Loc_ID][Lang]cstring {
     .Win_World_Settings = { .EN = "World Settings", .ZH = "世界设置" },
     .World_Background   = { .EN = "Background",     .ZH = "背景色" },
     .World_Exposure     = { .EN = "Exposure (EV)",  .ZH = "曝光 (EV)" },
+    .World_Fog          = { .EN = "Fog",            .ZH = "雾" },
+    .World_Fog_On       = { .EN = "On",             .ZH = "开启" },
+    .World_Fog_Start    = { .EN = "Start (m)",      .ZH = "起始距离（米）" },
+    .World_Fog_End      = { .EN = "End (m)",        .ZH = "结束距离（米）" },
     .World_Shading      = { .EN = "Shading",        .ZH = "着色" },
     .World_Script       = { .EN = "Lua Script",     .ZH = "Lua 脚本" },
     .World_Sky_Color     = { .EN = "Sky Colour",        .ZH = "天空颜色" },
@@ -467,22 +454,6 @@ loc_text := [Loc_ID][Lang]cstring {
     .Menu_Game_Settings = { .EN = "Game Settings",  .ZH = "游戏设置" },
     .Game_Start_Level   = { .EN = "Start Level",    .ZH = "起始关卡" },
 
-    .Win_Templates      = { .EN = "Templates###templates", .ZH = "模板###templates" },
-    .Menu_Templates     = { .EN = "Templates",      .ZH = "模板" },
-    .Templates_Hint     = { .EN = "Click to add to the active world.", .ZH = "点击添加到活动世界。" },
-    .Templates_No_World = { .EN = "No world open — open a scene from the Worlds window.",
-                            .ZH = "没有打开的世界 — 请在“世界”窗口中打开场景。" },
-    .Btn_Edit_Templates = { .EN = "Edit Templates", .ZH = "编辑模板" },
-    .Template_empty              = { .EN = "Empty",              .ZH = "空实体" },
-    .Template_marker             = { .EN = "Marker",             .ZH = "标记" },
-    .Template_point_light        = { .EN = "Point Light",        .ZH = "点光源" },
-    .Template_point_light_shadow = { .EN = "Point Light (Shadow)", .ZH = "点光源（阴影）" },
-    .Template_spot_light         = { .EN = "Spot Light",         .ZH = "聚光灯" },
-    .Template_spot_light_shadow  = { .EN = "Spot Light (Shadow)", .ZH = "聚光灯（阴影）" },
-    .Template_cylinder_light     = { .EN = "Cylinder Light",     .ZH = "圆柱光" },
-    .Template_sun                = { .EN = "Sun",                .ZH = "太阳" },
-    .Template_camera             = { .EN = "Camera",             .ZH = "相机" },
-    .Template_ortho_camera       = { .EN = "Ortho Camera",       .ZH = "正交相机" },
 
     .Panel_Follow              = { .EN = "Follow active",        .ZH = "跟随活动视口" },
     .Panel_No_World            = { .EN = "No world open — open a scene or kit from the Worlds window.",

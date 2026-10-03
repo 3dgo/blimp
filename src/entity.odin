@@ -82,40 +82,32 @@ entity_to_text :: proc(e: ^Entity, allocator := context.allocator) -> string {
     return strings.to_string(b)
 }
 
-// Applies every `key = value` line of `text` (one [entity] block) to `e`. Asset keys it sets are temp
-// until interned (entity_intern_keys; world_add does it).
-entity_apply_text :: proc(e: ^Entity, text: string, skip_tags: []string = {}) {
-    r := Ini_Reader{text = text}
-    for line in ini_next(&r) do if !line.header do deserialize_field(e, line.key, line.value, skip_tags)
-}
-
 entity_count_blocks :: proc(text: string) -> (n: int) {
     r := Ini_Reader{text = text}
     for line in ini_next(&r) do if line.header && line.section == ENTITY_SECTION do n += 1
     return
 }
 
-ENTITY_SECTION :: "entity"   // the [entity] block: levels, the clipboard, templates
+ENTITY_SECTION :: "entity"   // the [entity] block: levels and the clipboard
 
 // The live slot of `e`'s field at `path` (a name, or a dotted path into nested structs), for code that
 // writes a field it names at runtime: levels and the clipboard (deserialize_field), blimpctl set, Lua's
 // Entity.set_*. Refuses `noserialize` fields (the handle, the selection flag) — even if a hand-edited file
-// lists one — and any field tagged with one of `skip_tags`. Nested paths are checked by their top field.
-entity_writable_field :: proc(e: ^Entity, path: string, skip_tags: []string = {}) -> (v: any, ok: bool) {
+// lists one. Nested paths are checked by their top field.
+entity_writable_field :: proc(e: ^Entity, path: string) -> (v: any, ok: bool) {
     top := path
     if d := strings.index_byte(path, '.'); d >= 0 do top = path[:d]
     for i in 0 ..< reflect.struct_field_count(Entity) {
         field := reflect.struct_field_at(Entity, i)
         if field.name != top do continue
         if field_has_tag(field.tag, "noserialize") do return
-        for st in skip_tags do if field_has_tag(field.tag, st) do return
         break
     }
     return struct_field_by_path(e^, path)
 }
 
 // Routes one INI `key = value` onto `e`'s field `key` (entity_writable_field), through the value codec in
-// serialize.odin. `skip_tags`: identity/placement, for paste-over.
-deserialize_field :: proc(e: ^Entity, key: string, val: string, skip_tags: []string = {}) {
-    if v, ok := entity_writable_field(e, key, skip_tags); ok do deserialize_value(v, val)
+// serialize.odin.
+deserialize_field :: proc(e: ^Entity, key: string, val: string) {
+    if v, ok := entity_writable_field(e, key); ok do deserialize_value(v, val)
 }

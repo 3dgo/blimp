@@ -133,8 +133,9 @@ Two entity fields, two different axes (`entity_schema.ini`):
   instance. A shader branch, uniform per draw, not a PSO: one pipeline for every model.
 - **`blend`** — how pixels combine: `Opaque`, `Cutout` (discard below alpha 0.5), `Alpha`,
   `Additive`. Each is a PSO and a draw bucket, drawn in that order. Alpha and Additive test depth
-  but don't write it, don't cast shadows, and aren't sorted (entity order); sort when a scene
-  shows it's needed. A Cutout casts its whole quad, since the shadow pass has no pixel shader.
+  but don't write it and don't cast shadows. Alpha draws are sorted back to front by their mesh bounds'
+  centre, from the eye of the first view showing the world (views share the world's commands, so a second
+  view of the same world gets the first's order). Additive is order-independent and stays in entity order. A Cutout casts its whole quad, since the shadow pass has no pixel shader.
   The alpha is the material's colour × texture × vertex colour.
 
 All lighting lives in `shading.slang`: `light_surface` (everything lighting a point) and one
@@ -320,8 +321,13 @@ is worth more than a 100× speedup.
   and break the look.
 - Point lights use cube maps (6 faces). Cascades are a directional-light technique; 2–3
   cascades for exteriors if needed.
-- **Cache static shadow maps**, re-render only when something dynamic enters range. Biggest
-  available win in this design. **Not done yet**: every slice redraws every frame.
+- **Cache static shadow maps.** Biggest available win in this design. Done simply
+  (`render_shadows_draw`): the map keeps its depth between frames, and a slice is redrawn only when its
+  camera changed (its light moved, or the slice now belongs to another light) or anything that casts
+  changed since the slices were last drawn — `buffers_build_scene` hashes every caster's transform and
+  mesh into `World_Render.shadow_casters`. A still level draws no shadow maps; a moving light redraws only
+  its slices; any moving caster redraws them all (per-slice bounds tests would be the next step). An asset
+  reload clears the cache.
 - **Implementation** (`render_shadows.odin`, `shadow.slang`): one `R32` texture array per world,
   `MAX_SHADOW_SLICES` (32) × 512², shared by its views. Every shadow is a slice with its own
   reversed-Z camera: directional = an ortho box centred on the entity (`size` x, y across, z deep;
@@ -359,6 +365,16 @@ Era tells, most recognizable first:
 filmic (Hill's RRT+ODT fit) after `2^exposure` (world setting, EV), then sRGB-encoded. Quantize in display
 space, not linear — these scenes sit at the bottom of the value range where linear 5-bit
 gives almost no levels.
+
+### Fog
+
+Distance fog, PS1-style (`World_Settings.fog`: on, start, end in metres): geometry fades into the world's
+**background colour**, so far things melt into the clear colour and there's no second colour to keep in
+step. Applied in the post signal pass (`fog_amount` in `post.slang`), after the tonemap and before the
+quantize, so fog bands get the same dither as everything else. The view distance comes from the scene depth
+through `Frame_Constants.inv_proj` (undoing the `sceneCover` squeeze first), so it works for the free camera,
+perspective and ortho camera entities alike. Blended surfaces don't write depth and take the fog of what's
+behind them.
 
 ### Retro look
 

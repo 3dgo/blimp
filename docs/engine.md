@@ -184,7 +184,7 @@ Ctrl+C/V.
 
 The editor keeps its own state beside these, never inside them: an **Editor_World** per world (active
 entity, Shift-click anchor, unsaved state ids) and an **Editor_View** per view (screen rect, navigation,
-gizmo, marquee, icon occlusion, window flags). Both are created on first use and freed when their world
+gizmo, marquee, window flags). Both are created on first use and freed when their world
 or view closes.
 
 ### Entities and the schema
@@ -195,8 +195,7 @@ and flag sets, `entity_apply_defaults`, and the label tables. The schema editor 
 file and rebuilds the engine on Apply.
 
 Tags drive behaviour: `noserialize` (never saved or copied: the handle, the selection flag), `hidden`
-(not in the inspector), `identity` (kept on paste-over: the name), `placement` (kept on paste-over:
-the transform), `widget:model` / `widget:sound` / `widget:icon` (how the inspector edits it).
+(not in the inspector), `identity` (never copied by multi-edit: the name), `widget:model` / `widget:sound` / `widget:icon` (how the inspector edits it).
 
 Entity predicates name the rule each system applies, instead of raw flag tests:
 
@@ -266,19 +265,24 @@ Each walkthrough follows one action through every file it touches.
      slices (`light_shadow_assign`, `render_shadows.odin`);
    - every entity with a model → a transform; each of its meshes → a `Mesh_Instance_Data` with the
      material, the resolved shading model (`entity_shading`) and tint (`entity_tint`);
-   - drawn instances → draw commands, bucketed by blend: Opaque, Cutout, Alpha, Additive.
+   - drawn instances → draw commands, bucketed by blend: Opaque, Cutout, Alpha (sorted back to front),
+     Additive;
+   - a hash of everything that casts shadows, for the shadow cache.
 3. The arrays are staged on the copy queue; per-view `Frame_Constants` are written
    (`render_view_update_constants`): camera (or the camera entity in game mode), buffer slots, retro
-   settings, exposure, probe grid.
-4. **Shadows**: `render_shadows_draw` renders each shadow slice depth-only from the same indirect
-   commands (Opaque and Cutout).
+   settings, exposure, fog, probe grid.
+4. **Shadows**: `render_shadows_draw` renders shadow slices depth-only from the same indirect commands
+   (Opaque and Cutout). Slices are cached: only one whose light moved, or every one when a caster moved,
+   is redrawn; a still level draws none.
 5. **Scene**: `render_view_draw` clears the view's HDR target and runs one `ExecuteIndirect` per blend.
    `scene.slang` reads the instance through the root constant, fetches transform, mesh and material
    bindlessly, applies PS1 vertex snap, and `shading.slang` lights the pixel (direct lights, hard
    shadows, probe irradiance with visibility).
-6. **Post**: `render_post_draw` (`post.slang`) tonemaps and quantizes with dither into the signal,
-   optionally blurs bloom, and upscales (point, or a CRT model) into the display target.
-7. **Debug lines** draw on the display target after post, so their colours stay exact.
+6. **Post**: `render_post_draw` (`post.slang`) tonemaps, fades distant pixels into the background colour
+   (fog, from the scene depth), quantizes with dither into the signal, optionally blurs bloom, and upscales
+   (point, or a CRT model) into the display target.
+7. **Debug lines** draw on the display target after post, so their colours stay exact: the game's own
+   (`World.debug_line`) in every view, the editor's in editor views.
 8. **UI**: the view's display target is an ImGui image in its window; `ui_draw` puts it on screen.
 
 ### An editor edit
@@ -399,6 +403,8 @@ A request (`world_request_close` from the UI or blimpctl) waits for the next fra
   (`entity_writable_field`).
 - **`input.odin`**: per-frame keyboard, mouse and gamepad state, live only in game mode.
 - **`loc.odin`**: every UI string, EN and ZH on one row; `tr(.Key)`.
+- **`log_history.odin`**: the last 256 log lines in memory, beside the console: the on-screen error
+  overlay and `blimpctl log` read it.
 - **`search.odin`** (+ `gen_pinyin.*`): `search_matches`, case-insensitive substring match that also
   matches Chinese by pinyin (full syllables or initials).
 - **`game_settings.odin`**: `game.ini`, settings that belong to the game rather than a world (the start
@@ -429,8 +435,8 @@ on it.
   (world part), close requests, freeing.
 - **`world_play.odin`**: the play copy and its discard, `world_level`, the game camera, pause, step and
   the per-frame tick.
-- **`world_scene.odin`**: `.level` save and load, and loading `[entity]` text (also the clipboard and
-  templates).
+- **`world_scene.odin`**: `.level` save and load, and loading `[entity]` text (also the clipboard).
+  `assets_engine/templates.level` is the starting lights and cameras: open it and copy from it.
 - **`world_physics.odin`** (Box3D): queries only. Play builds a static or kinematic body per enabled
   entity with collision. Kinematic bodies follow their entities. Raycasts and the character mover back
   `World.raycast` and `Entity.move_character`.
@@ -452,7 +458,7 @@ on it.
 - **`render_camera.odin`**: the free orbit camera's maths (eye, view, projection, ray) and camera-entity
   matrices.
 - **`render_shadows.odin`**: the shadow map array per world, slice assignment, light cameras, the shadow
-  pass.
+  pass with its static cache.
 - **`render_post.odin`**: the post pipelines and passes.
 - **`render_probes.odin`**: the GPU copy of a world's probes.
 - **`render_debug_draw.odin`**: the debug line list and shapes, uploaded once and drawn per view range.
@@ -465,7 +471,7 @@ Shaders (`assets_engine/shaders/`, Slang compiled at runtime):
 | `scene.slang` | the scene vertex and pixel shaders: bindless fetch, vertex snap, Gouraud per-vertex light, affine UVs, cutout |
 | `shading.slang` | all lighting: falloffs, spot/cylinder cones, hard shadow lookup, probe irradiance with visibility, the shading models |
 | `shadow.slang` | depth-only shadow vertex shader |
-| `post.slang` | tonemap + quantize/dither, bloom, point or CRT upscale |
+| `post.slang` | tonemap, distance fog, quantize/dither, bloom, point or CRT upscale |
 | `debug_line.slang` | debug lines, depth-tested by hand against the scene depth |
 | `common.slang`, `utils.slang` | shared constants and bindless helpers |
 
@@ -476,7 +482,8 @@ Shaders (`assets_engine/shaders/`, Slang compiled at runtime):
 - **`lua_world_script.odin`**: per-world scripts, each in its own environment, run only in play worlds;
   `lua_world()` (the running world).
 - **`lua_api_world.odin`, `lua_api_entity.odin`, `lua_api_input.odin`**: the whole script API as
-  `@(lua)` procs, thin wrappers over world procs.
+  `@(lua)` procs, thin wrappers over world procs. `World.debug_line` draws a line in the world's views
+  until its next tick.
 - **LuaCN**: Lua with 21 Chinese keywords (`如果`=if, `那么`=then, `本地`=local, …). `.luacn` files are
   transpiled to `.lua` at build time (`src/common/luacn.odin`) and on hot reload. `setup.lua` and
   `stdlib_aliases.lua` give every API table and the standard library Chinese names
@@ -493,7 +500,7 @@ Shaders (`assets_engine/shaders/`, Slang compiled at runtime):
 - **`editor_overlay.odin`**: world-space shapes drawn with ImGui on one view (`world_to_screen`, cone,
   cube, icon).
 - **`editor_icons.odin`**: icon font codepoints, entity icons, and the viewport icon logic (size by
-  distance, fade, occlusion rays, picking).
+  constant screen size, picking).
 - **`editor_shapes.odin`**: camera frustums, light reach and probe spokes as debug lines.
 - **`editor_bake.odin`**: the CPU probe baker.
 - **`editor_schema.odin`**: the schema editor's document: load, validate, save.
@@ -506,19 +513,19 @@ the shared helpers (`Settings_Window`, `ui_font_size`, `ui_label_column`, `ui_re
 
 - viewports and their toolbars: `ui_view`, `ui_view_toolbar`;
 - entity panels: `ui_entity_panels` (list and inspector), `ui_param_inspector` (the reflection
-  inspector), `ui_context_menu` (copy, paste, paste-over, duplicate, delete, hide);
-- browsers: `ui_worlds`, `ui_templates`, `ui_resources` (GPU memory treemap);
+  inspector), `ui_context_menu` (copy, paste, duplicate, delete, hide);
+- browsers: `ui_worlds`, `ui_resources` (GPU memory treemap);
 - settings windows: `ui_world_settings`, `ui_retro`, `ui_bake`, `ui_game_settings`;
 - `ui_schema_editor`;
 - game mode: `ui_game`;
 - small pieces: `ui_shortcuts`, `ui_unsaved` (save prompt), `ui_saved_state` (layout, language, open
-  windows), `ui_stats` (F3), `ui_theme`.
+  windows), `ui_stats` (F3 stats and the recent-errors overlay), `ui_theme`.
 
 ### App drivers (`app_`)
 
 - **`app_lifecycle.odin`**: open, play, stop, close, reload: the cross-layer sequences.
 - **`app_remote.odin`**: the blimpctl server on `127.0.0.1:47800` (debug builds). One text command per
-  connection, run between frames. Use `blimpctl help` for the list.
+  connection, run between frames (`blimpctl log` for recent log lines). Use `blimpctl help` for the list.
 - **`app_hot_reload.odin`**: directory watchers and per-extension reload.
 - **`app_renderdoc.odin`**: in-app RenderDoc captures (`--renderdoc`).
 
@@ -559,6 +566,7 @@ Fastest check: `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib
 | `entity.odin` | Entity handles, predicates, defaults, text round-trip, guarded field writes |
 | `input.odin` | Keyboard, mouse, gamepad per frame |
 | `loc.odin` | EN/ZH string table, `tr` |
+| `log_history.odin` | Recent log lines in memory |
 | `search.odin` | Search with pinyin matching |
 | `game_settings.odin` | `game.ini` |
 | `gen_entity.odin` | *Generated*: `Entity`, enums, defaults, labels |
@@ -581,7 +589,7 @@ Fastest check: `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib
 | `render_buffers.odin` | Asset buffers, world mirrors, scene build, uploads |
 | `render_view.odin` | Views, render modes, frame constants, scene pass |
 | `render_camera.odin` | Camera maths |
-| `render_shadows.odin` | Shadow maps and pass |
+| `render_shadows.odin` | Shadow maps, pass and cache |
 | `render_post.odin` | Post passes |
 | `render_probes.odin` | GPU probe buffers |
 | `render_debug_draw.odin` | Debug lines |
@@ -612,7 +620,6 @@ Fastest check: `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib
 | `ui_param_inspector.odin` | Reflection inspector widgets |
 | `ui_context_menu.odin` | Entity actions and the right-click menu |
 | `ui_worlds.odin` | Worlds browser |
-| `ui_templates.odin` | Templates window |
 | `ui_resources.odin` | GPU resources treemap |
 | `ui_world_settings.odin` | World Settings window |
 | `ui_retro.odin` | Retro Look window |
@@ -623,7 +630,7 @@ Fastest check: `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib
 | `ui_shortcuts.odin` | Editor keyboard shortcuts |
 | `ui_unsaved.odin` | Save / Don't Save / Cancel prompt |
 | `ui_saved_state.odin` | Layout, language and open windows in imgui.ini |
-| `ui_stats.odin` | F3 stats overlay |
+| `ui_stats.odin` | F3 stats and recent-errors overlay |
 | `ui_theme.odin` | ImGui theme |
 | **App drivers** | |
 | `app_lifecycle.odin` | Open, play, stop, close, asset reload |

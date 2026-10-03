@@ -19,8 +19,6 @@ Editor_View :: struct {
     marquee: struct { pressing, dragging, double: bool, start: vec2 },   // left-press selection in progress (ui_view_selection); double: the press was a double-click
     window_open: bool,      // its window's open flag: the user closing the window closes the view
     placed:  bool,          // its window got its first-frame floating placement (ui_next_view_window_placement)
-    icon_hidden: [MAX_ENTITIES]bool,   // camera/light icon blocked by geometry, by handle index (editor_icons_update_occlusion)
-    icon_cursor: int,                  // where the next frame's icon occlusion rays start
     game_view: bool,                   // G: hide everything editor-only here (icons, outlines, selection boxes, gizmo), like Unreal
     show_probes: bool,                 // draw the world's baked probes as debug spokes (probe_grid_debug_lines)
     collapsed: bool,        // its window was collapsed last frame

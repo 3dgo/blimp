@@ -321,6 +321,17 @@ _lua_world_add_lua :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// Binding odin proc: world_debug_line_lua to lua function: debug_line.
+_lua_world_debug_line_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    from := _lua_read_ffi_vec3(L, 1)
+    to := _lua_read_ffi_vec3(L, 2)
+    color: vec4 = {1, 1, 1, 1}
+    if !lua.isnoneornil(L, 3) do color = _lua_read_ffi_vec4(L, 3)
+    world_debug_line_lua(from, to, color)
+    return 0
+}
+
 // Binding odin proc: world_find_lua to lua function: find.
 _lua_world_find_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -515,6 +526,10 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "add")
     lua.pushcfunction(L, _lua_world_add_lua)
     lua.setfield(L, -2, "添加")
+    lua.pushcfunction(L, _lua_world_debug_line_lua)
+    lua.setfield(L, -2, "debug_line")
+    lua.pushcfunction(L, _lua_world_debug_line_lua)
+    lua.setfield(L, -2, "调试线")
     lua.pushcfunction(L, _lua_world_find_lua)
     lua.setfield(L, -2, "find")
     lua.pushcfunction(L, _lua_world_find_lua)

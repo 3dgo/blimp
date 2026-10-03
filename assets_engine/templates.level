@@ -1,30 +1,35 @@
-# Entity templates: the Templates window (Show menu) lists one entry per [entity] block.
-# Same block format as a .level and the clipboard; fields left out take their schema default.
-# icon is a hex Material Symbols codepoint; lights and cameras don't need one. Adding a template
-# keeps its rotation and scale and drops it at the paste point. Not a level (wrong extension), so
-# the Worlds window doesn't list it.
+# Starting entities: lights, cameras, markers. Open this level from the Worlds window, select what you
+# want, Ctrl+C, then Ctrl+V into your level (it lands at the paste point, keeping its rotation and scale).
+# Edit and save it like any level to change or add templates.
+
+[world]
 
 [entity]
-name = empty
+name = 空实体
 icon = E835
+position = 0, 1, 0
 
 [entity]
-name = marker
+name = 标记
 icon = E153
+position = 3, 1, 0
 
 [entity]
-name = point_light
+name = 点光源
+position = 6, 1, 0
 light_type = Point
 range = 0.1, 5
 
 [entity]
-name = point_light_shadow
+name = 点光源（阴影）
+position = 9, 1, 0
 light_type = Point
 range = 0.1, 5
 shadow = true
 
 [entity]
-name = spot_light
+name = 聚光灯
+position = 12, 1, 0
 rotation = 0.70710677, 0, 0, 0.70710677
 light_type = Spot
 fov = 45
@@ -32,7 +37,8 @@ inner_fov = 30
 range = 0.1, 8
 
 [entity]
-name = spot_light_shadow
+name = 聚光灯（阴影）
+position = 15, 1, 0
 rotation = 0.70710677, 0, 0, 0.70710677
 light_type = Spot
 fov = 45
@@ -41,24 +47,28 @@ range = 0.1, 8
 shadow = true
 
 [entity]
-name = cylinder_light
+name = 圆柱光
+position = 18, 1, 0
 rotation = 0.70710677, 0, 0, 0.70710677
 light_type = Cylinder
 range = 0.1, 8
 
 [entity]
-name = sun
+name = 太阳
+position = 21, 1, 0
 rotation = 0.3536, 0.3536, -0.1464, 0.8536
 light_type = Directional
 shadow = true
 
 [entity]
-name = camera
+name = 相机
+position = 24, 1, 0
 camera_type = Perspective
 fov = 55
 range = 0.1, 100
 
 [entity]
-name = ortho_camera
+name = 正交相机
+position = 27, 1, 0
 camera_type = Orthographic
 range = 0.1, 100

@@ -18,10 +18,12 @@ Saved_Window :: struct {
 }
 
 @(private="file")
-saved_windows :: proc() -> [6]Saved_Window {
+SAVED_WINDOW_COUNT :: 5
+
+@(private="file")
+saved_windows :: proc() -> [SAVED_WINDOW_COUNT]Saved_Window {
     return {
         {"worlds",        &ui.show_worlds},
-        {"templates",     &ui.show_templates},
         {"schema_editor", &ui.show_schema_editor},
         {"game_settings", &ui.show_game_settings},
         {"resources", &ui.show_resources},
@@ -30,7 +32,7 @@ saved_windows :: proc() -> [6]Saved_Window {
 }
 
 // As last written or read; a difference marks the ini dirty.
-@(private="file") saved_windows_last: [6]bool
+@(private="file") saved_windows_last: [SAVED_WINDOW_COUNT]bool
 @(private="file") saved_lang_last: Lang
 
 // Registers the handler. Call after CreateContext and before the first NewFrame (which reads the ini).

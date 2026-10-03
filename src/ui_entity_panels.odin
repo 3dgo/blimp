@@ -242,10 +242,6 @@ ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
     if !ok do return
     if n := selection_count(w); n > 1 do im.TextDisabled("%s", fmt.ctprintf(string(tr(.Inspector_Multi)), n))
 
-    single := entity_count_blocks(string(im.GetClipboardText())) == 1
-    im.BeginDisabled(!single)
-    if im.Button(fmt.ctprintf("%s %s", ICON_PASTE, tr(.Btn_Paste_Over))) do ui_paste_over(w)
-    im.EndDisabled()
     ui_panel_search_box(p, tr(.Inspector_Search))
     im.Separator()
 

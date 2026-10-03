@@ -9,7 +9,7 @@
   - Any number of worlds can be open at once. They live in a pointer-stable registry,
     `worlds: [dynamic]^World` (`world_registry.odin`), where each world is individually allocated
     because views, panels and undo hold `^World`.
-  - First launch opens the Worlds window with Templates docked above it. After that imgui.ini keeps the
+  - First launch opens the Worlds window docked on the right. After that imgui.ini keeps the
     layout, the UI language and which project-wide windows are open (`ui_saved_state.odin`); world windows, views and entity
     panels belong to a world and aren't reopened. Worlds lists open worlds, scenes (`.level`
     files under `assets/` and `assets_engine/` only: the extension decides) and kits.
@@ -85,11 +85,11 @@
     Ctrl+D duplicates the selection in place and selects the copies (Unity). Ctrl+A selects all.
   - **Right-click menu** (`ui_context_menu.odin`): in a viewport, an RMB release without flying (under
     `NAV_CLICK_PX` of travel, no WASD) is a click. It and the entity list open one menu: copy, paste at
-    the click, Paste Over, duplicate, delete, select all / deselect, frame, hide / unhide all.
+    the click, duplicate, delete, select all / deselect, frame, hide / unhide all.
     - Right-clicking an unselected entity selects it first, so the menu acts on it.
     - The shortcuts call the same action procs, so the two can't drift.
     Entity list: Shift+click selects a range from `select_anchor`, Ctrl+Shift adds the range.
-  - Operations act on the whole selection: gizmo, copy, delete, Paste Over, F.
+  - Operations act on the whole selection: gizmo, copy, delete, F, and inspector edits (multi-edit).
   - Gizmo: the same change applies to every member. Pivot mode (the tool column left of the viewport): **Selection Center**
     (default) rotates/scales the group about its combined bounds centre; **Individual Pivots** turns
     each about its own pivot.
@@ -156,7 +156,7 @@
   RenderDoc's capture key.
     While playing, the viewport has a border (amber when paused) and the title shows ▶.
 - **World settings** (`World_Settings`) are the scene file's `[world]` section, written before the
-  entities: background colour, exposure, script path, the light groups' starting values (claude/rendering.md → Light groups),
+  entities: background colour, exposure, fog (claude/rendering.md → Fog), script path, the light groups' starting values (claude/rendering.md → Light groups),
   and the probe bake's settings (`bake.*`, hidden here: they're
   edited in the Probe Bake window, claude/rendering.md → Baker; baking isn't an edit — no undo, not unsaved).
   - Only fields something reads; adding one is one line (reflection inspector + serializer).
@@ -182,10 +182,11 @@
   treemap of every GPU resource by owner — assets, each world, each view, engine. Click a group to show
   only it (Back / Backspace returns); texture tooltips show the picture (an ImGui-heap SRV per asset
   texture, `asset_buffers.texture_ui`).
-- **The clipboard is the scene `[entity]` text format** (`entity_to_text` / `entity_apply_text` over
+- **The clipboard is the scene `[entity]` text format** (`entity_to_text` / `scene_load_from_text` over
   the generic codec in `serialize.odin`).
-  - One format backs save, duplicate, instantiate-from-kit and apply-settings. There is no drag
-    and no bespoke asset-placement path.
+  - One format backs save, duplicate and instantiate-from-kit or from the templates level. There is no drag
+    and no bespoke asset-placement path. To make several entities alike, select them and edit in the
+    inspector (multi-edit); there is no "paste over".
   - It uses the OS clipboard (via ImGui), so blocks interchange with `.level` files in a text
     editor and work across worlds.
   - **Ctrl+C** copies the selected entity in the active world.
@@ -194,23 +195,13 @@
     their layout, centred on it. The paste point is the mouse raycast hit in the active view, or the
     viewport-centre ray when the mouse is outside it (`view_paste_point`); a miss lands 5 units in front
     of the camera. blimpctl `paste` passes no point: blocks land where their text says.
-  - **Paste Over** (one button at the top of the inspector) overrides the selected entity in place.
-    It keeps the target's handle, skips `identity` and `placement` fields, snapshots for undo first,
-    and is enabled only for a single-block clipboard. Everything else it touches is controlled by
-    *what you copy*.
-  - **Per-field paste**: the `widget:` picker has a Paste button beside it. It accepts a whole
-    `[entity]` block (and takes that field's value) or a bare key such as
-    `assets/models/car.gltf:police`.
-- **Templates** (`ui_templates.odin`, Show menu) add a light, camera or other starting entity to the active
-  world. They are the `[entity]` blocks of `assets_engine/entity_templates.ini`: the level format, but
-  not a `.level`, so the Worlds window never lists it.
-  - A click is a one-block paste (`selection_paste`) at the paste point, so a spot starts pointing down.
-    Fields a block leaves out take their schema default.
+- **Templates are a level**: `assets_engine/templates.level` holds the starting lights, cameras and
+  markers, laid out in a row. Open it from the Worlds window like any level or kit, copy what you want and
+  paste it into your level (it lands at the paste point keeping its rotation and scale, so a spot still
+  points down). Edit and save it like any level to add templates. No window, file type or code of its own.
   - **Icons**: an entity's `icon` field is a hex Material Symbols codepoint (`E835`), shown in the viewport
-    (where it can be clicked), the entity list, the Templates window and beside the inspector field.
-    Empty means a light or camera shows its type's icon (`entity_icon`) and anything else none.
-  - Edit Templates opens the file as a world, so templates are authored with the editor's own tools.
-    Save it and press Refresh.
+    (where it can be clicked), the entity list and beside the inspector field. Empty means a light or
+    camera shows its type's icon (`entity_icon`) and anything else none.
 - **Undo is whole-world snapshots** (`editor_undo.odin`): before any edit, copy the world's entity map.
   - The map is a fixed-size `Static_Handle_Map` value of plain-data entities, so a snapshot is one
     struct copy. Restoring it brings back exact handles, so no fix-up is needed for deletes or pastes.
@@ -226,15 +217,13 @@
       Save / Don't Save / Cancel (`ui_unsaved.odin`). Kits are never dirty.
     - An edit that bypasses `undo_push` would also bypass this. Every edit path must call it.
 - **Entity names are unique per world.** Every add goes through `world_add` (level load, paste,
-  templates, duplicate, kits, Lua), which interns asset keys and calls `world_unique_name` (`base_1`,
+  duplicate, kits, Lua), which interns asset keys and calls `world_unique_name` (`base_1`,
   `base_2`, …). Writing a field by name (blimpctl `set`, Lua `Entity.set_*`) goes through
   `entity_writable_field`, which refuses `noserialize` fields. The inspector re-checks once no
   item is active, not per keystroke.
 - Backtick tags drive the above alongside `noserialize`/`hidden`/`readonly`:
-  - **`identity`**: kept on any override, e.g. `name`.
-  - **`placement`**: the entity's placement and relationships in the scene. Today that's the
-    transform; later it covers fields like a parent/attach. It is ignored by every paste.
-  - Both are authored per field in the schema; extending them is a tag, not code.
+  - **`identity`**: never copied to the rest of the selection by multi-edit, e.g. `name`.
+  - Authored per field in the schema; extending them is a tag, not code.
 - **Text fields: the type says who owns it.** `sbuf64` / `sbuf128` / `sbuf256` = text the entity owns,
   inline, sized by content (64: names, ids, gameplay tags · 128: labels · 256: paths, descriptions) —
   editable in the inspector by default (`readonly` disables). `string` = a
@@ -261,6 +250,9 @@ screenshot (writes a PNG, replies with its path), sounds (clips and live voices)
   drawn later, so they need `screenshot ui`: the whole main window as shown, copied from the swapchain
   inside the next frame and answered then. Panels dragged out into their own OS window aren't in it.
 
+- `log [count] [warn|error]` prints the last log lines (`log_history.odin` keeps 256 in memory beside the
+  console). Debug builds also show the errors and warnings of the last 8 seconds bottom-left of the main
+  window (`ui_draw_log_overlay`), in the editor and in game mode, so a script error shows where you look.
 - Commands run on the main thread between frames, polled before `ui_update`, with no threads.
 - The reply's first line is `ok` or `error`. Entity text uses the scene `[entity]` format.
 - Use it to verify engine changes yourself, cheapest check first (the ladder in CLAUDE.md): text

@@ -293,12 +293,14 @@ ui_view_selection :: proc(ev: ^Editor_View, gizmo_owns_mouse: bool) {
 }
 
 // Appends `v`'s editor lines to this frame's debug lines and records its range on the view, which the
-// renderer then draws into that view only (app_run calls this for every view before rendering): baked
+// renderer then draws into that view only (app_run calls this for every view before rendering): the
+// world's game lines (World.debug_line, even in the game view), then the editor's: baked
 // probes, the manual bake box, camera/light shapes, and the selection boxes — the active entity pale
 // green, the rest of the selection green.
 ui_view_debug_lines :: proc(v: ^Render_View) {
     v.debug_first = u32(len(debug_draw.verts))
     defer v.debug_count = u32(len(debug_draw.verts)) - v.debug_first
+    for l in v.world.debug_lines do debug_line(l.a, l.b, l.color)   // the game's own lines, in every view, game view too
     if editor_view(v).game_view || v == ui.game do return   // G or game mode: none of the editor's lines in this view
     if editor_view(v).show_probes {
         g := &world_level(v.world).probes   // a play world shows its level's, lit by its own group scales

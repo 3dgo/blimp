@@ -15,9 +15,9 @@ Entity :: struct {
     icon: sbuf64 `widget:icon`,
     basic_static_flags: EntityBasicStaticFlags,
     basic_flags: EntityBasicFlags,
-    position: vec3 `placement, section:Transform`,
-    rotation: quat `placement, section:Transform`,
-    scale: vec3 `placement, section:Transform`,
+    position: vec3 `section:Transform`,
+    rotation: quat `section:Transform`,
+    scale: vec3 `section:Transform`,
     model: string `widget:model, section:Render`,
     // How the model's surfaces take light (the ShadingModel members; shading.slang). Default: the
     // level's World Settings → Shading.

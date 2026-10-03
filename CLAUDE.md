@@ -37,7 +37,7 @@ design notes there.
 - `src/` is one package; files are grouped by prefix: `asset_`, `world_`, `render_`, `lua_`, `editor_`
   (editor logic), `ui_` (ImGui panels), `app_` (drivers: lifecycle, remote control, hot reload,
   RenderDoc), `gen_` (generated). Unprefixed files are the shared foundation (`app`, `basics`, `time`,
-  `serialize`, `entity`, `input`, `loc`, `search`, `game_settings`).
+  `serialize`, `entity`, `input`, `loc`, `search`, `game_settings`, `log_history`).
 - **Layers call downward only:** foundation → asset → world → render → lua → editor → ui → app. The
   renderer reads worlds and never writes them; world code never calls render, Lua, editor or UI.
   Sequences that touch every layer (open, play, stop, close, asset reload) are one proc each in

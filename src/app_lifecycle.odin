@@ -139,5 +139,6 @@ app_reload_assets :: proc() {
     asset_system_reload()
     asset_buffers_create()
     asset_buffers_upload()
+    for w in worlds do w.render.shadow_drawn = {}   // cached shadow slices hold the old geometry
     for w in worlds do if w.play_source != nil do physics_world_start(w)
 }

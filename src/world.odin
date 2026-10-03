@@ -19,7 +19,8 @@ World :: struct {
     script:   Lua_World_Script,   // its Lua script's loaded state (lua_world_script.odin) — runtime, never saved
     physics:  Physics_World,      // play worlds: Box3D's copy of the static collision (world_physics.odin) — runtime
     probes:   Probe_Grid,         // baked indirect light (world_probes.odin); loaded from and baked to the level's .probes sidecar, not undoable
-    light_group_override: [MAX_LIGHT_GROUPS + 1]Maybe(f32),   // runtime scales set by Lua or the Lighting menu, over the saved ones; never saved
+    light_group_override: [MAX_LIGHT_GROUPS + 1]Maybe(f32),
+    debug_lines: [dynamic]World_Debug_Line,   // drawn by game code (Lua World.debug_line) this tick, in every view of the world   // runtime scales set by Lua or the Lighting menu, over the saved ones; never saved
 
     // Play mode (world_play.odin): a level points at its running copy, the copy back at its level.
     play_world:  ^World,
@@ -30,17 +31,38 @@ World :: struct {
     time:        f64,    // play worlds: game seconds since Play, advanced only on frames that tick (pause and F10 step respected)
 }
 
+// A line game code asked to see (World.debug_line): drawn in every view of its world, the game view too,
+// until the world's next tick — so a script redraws what it wants each update, and lines hold while paused.
+World_Debug_Line :: struct {
+    a, b:  vec3,
+    color: vec4,
+}
+
+world_debug_line :: proc(w: ^World, a, b: vec3, color: vec4) {
+    append(&w.debug_lines, World_Debug_Line{a, b, color})
+}
+
 // Per-world settings, saved as the [world] section at the top of the scene file (before the
 // entities). Only fields something reads today; sky / atmosphere settings join as those
 // systems land — one line each, edited and saved for free (reflection inspector + serializer).
 World_Settings :: struct {
     background: [3]f32 `loc:World_Background, widget:color`,   // the viewport clear colour: display-space (sRGB), shown as picked, not tonemapped
     exposure:   f32 `loc:World_Exposure`,   // stops (EV): the HDR scene is scaled by 2^exposure before the tonemap
+    fog:        Fog_Settings `loc:World_Fog`,   // distance fog into the background colour
     shading:    ShadingModel `loc:World_Shading`,   // what an entity's shading Default means (entity_shading)
     script:     sbuf256 `loc:World_Script`,   // the world's Lua script (start + update hooks, run while playing), e.g. assets/scripts/castle.lua
     light_groups: Light_Groups `loc:World_Light_Groups`,   // where the switchable light groups start (world_light_groups.odin)
     bake:       Bake_Settings `hidden`,   // saved as bake.* keys; edited in the Bake window (ui_bake.odin), not this one
     retro:      Retro_Settings `hidden`,  // saved as retro.* keys; edited in the Retro Look window (ui_retro.odin)
+}
+
+// Distance fog, PS1-style: geometry fades into the world's background colour between `start` and `end`
+// (metres from the eye), so far things melt into the clear colour. Applied in the post signal pass, before
+// the quantize, so fog bands get the same dither as everything else.
+Fog_Settings :: struct {
+    on:    bool `loc:World_Fog_On`,
+    start: f32  `loc:World_Fog_Start`,   // full colour nearer than this
+    end:   f32  `loc:World_Fog_End`,     // all background colour from here on
 }
 
 // The retro look (claude/rendering.md → Retro look): what a view in render mode .Retro does, effect by
@@ -123,6 +145,7 @@ BAKE_QUALITY_PRESETS := [Bake_Quality][2]i32{   // rays, bounces; Custom keeps w
 WORLD_SETTINGS_DEFAULT :: World_Settings{
     background   = {19.0 / 255, 19.0 / 255, 19.0 / 255},   // #131313
     shading      = .Lambert,
+    fog          = {start = 20, end = 60},
     bake         = {quality = .Medium, rays = 256, bounces = 3, sky = true,sky_intensity = 1, probe_spacing = 1},
     light_groups = {group_1 = {scale = 1}, group_2 = {scale = 1}, group_3 = {scale = 1}, group_4 = {scale = 1}},
     retro        = RETRO_SETTINGS_DEFAULT,
@@ -137,9 +160,10 @@ world_init :: proc(world: ^World) {
 
 world_shutdown :: proc(world: ^World) {
     vmem.arena_destroy(&world.probes.arena)
+    delete(world.debug_lines)
 }
 
-// The one way an entity enters a world — level load, paste, templates, duplicate, kits, Lua: interns its
+// The one way an entity enters a world — level load, paste, duplicate, kits, Lua: interns its
 // asset keys (so they outlive whatever text they were read from, and an asset reload), makes its name
 // unique in `world`, and adds it. ok = false if the world is full (MAX_ENTITIES).
 world_add :: proc(world: ^World, e: Entity) -> (Entity_Handle, bool) #optional_ok {

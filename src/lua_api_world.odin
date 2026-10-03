@@ -71,3 +71,10 @@ world_light_group_lua :: proc(name: string) -> f32 {
     g := light_group_find(w, name)
     return g == 0 ? 0 : light_group_base_scale(w, g)
 }
+
+// Draws a line from `from` to `to` in every view of this world (the game view too) until the next frame, so
+// call it each update for as long as you want to see it: rays, paths, triggers. Depth-tested, 1 pixel.
+@(lua=debug_line, table=World, lua_zh="调试线")
+world_debug_line_lua :: proc(from: vec3, to: vec3, color: vec4 = {1, 1, 1, 1}) {
+    if w, ok := lua_world(); ok do world_debug_line(w, from, to, color)
+}

@@ -112,7 +112,6 @@ ui_context_menu :: proc() {
 
     if item(ICON_COPY,       .Ctx_Copy,       "Ctrl+C", n > 0)                do ui_copy_selection(w)
     if item(ICON_PASTE,      .Ctx_Paste,      "Ctrl+V", blocks > 0)           do ui_paste_at(w, context_menu.paste_at)
-    if item(ICON_PASTE_OVER, .Btn_Paste_Over, nil,      blocks == 1 && n > 0) do ui_paste_over(w)
     if item(ICON_DUPLICATE,  .Ctx_Duplicate,  "Ctrl+D", n > 0)                do ui_duplicate_selection(w)
     if item(ICON_RENAME,     .Ctx_Rename,     "F2",     n > 0)                do ui_entity_rename_begin(w)
     if item(ICON_DELETE,     .Ctx_Delete,     "Delete", n > 0)                do ui_delete_selection(w)
@@ -125,17 +124,4 @@ ui_context_menu :: proc() {
     im.Separator()
     if item(ICON_HIDE,       .Ctx_Hide,       nil,      n > 0)               do ui_hide_selection(w)
     if item(ICON_SHOW,       .Ctx_Unhide_All, nil,      world_any_hidden(w)) do ui_unhide_all(w)
-}
-
-// Override: make every selected entity look/behave like the clipboard entity WITHOUT becoming it or
-// moving — identity (name) and placement (transform) are always preserved. One undo step.
-ui_paste_over :: proc(w: ^World) {
-    clip := string(im.GetClipboardText())
-    if entity_count_blocks(clip) != 1 || selection_count(w) == 0 do return
-    undo_push(w)                                                // snapshot FIRST
-    for h in selection_handles(w) {                             // every selected entity
-        e := entity_get(w, h) or_continue
-        entity_apply_text(e, clip, {"identity", "placement"})
-        entity_intern_keys(e)                                   // re-intern the pasted asset keys
-    }
 }

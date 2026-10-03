@@ -28,7 +28,6 @@ Param_UI_Options :: struct {
     min:          f32,
     max:          f32,
     format:       string,
-    path:         string,   // serialized key of the item being drawn ("model", "light_groups.group_1.scale"); "" = top struct
     filter:       string,   // search text (search_matches: any case, pinyin): only fields whose id or label (any language) contains it; top struct only
     defaults:     rawptr,   // the struct's default value, or nil
     others:       []rawptr, // other values edited along with this one (the rest of a multi-selection)
@@ -93,11 +92,6 @@ ui_param_asset_picker :: proc(name: string, value: ^string, kind: Asset_Kind, op
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
 
-    paste_label := fmt.ctprintf("%s", ICON_PASTE)   // icon button; the name is its tooltip
-    style := im.GetStyle()
-    paste_w := im.CalcTextSize(paste_label).x + style.FramePadding.x * 2
-    im.SetNextItemWidth(-(paste_w + style.ItemSpacing.x))   // leave room for the button on this row
-
     if im.BeginCombo(fmt.ctprintf("##%s", name), fmt.ctprintf("%s", value^), {.HeightLarge}) {
         keys := make([dynamic]string, context.temp_allocator)   // gathered only while the dropdown is open
         switch kind {
@@ -113,31 +107,7 @@ ui_param_asset_picker :: proc(name: string, value: ^string, kind: Asset_Kind, op
         im.EndCombo()
     }
 
-    im.SameLine()
-    pasted, has_paste := asset_key_from_clipboard(options.path, kind)
-    im.BeginDisabled(!has_paste)
-    if im.SmallButton(fmt.ctprintf("%s##paste_%s", paste_label, name)) do value^ = pasted
-    im.SetItemTooltip("%s", tr(.Btn_Paste))
     im.EndDisabled()
-
-    im.EndDisabled()
-}
-
-// The clipboard's value for field `key`, as the asset system's own interned key, if it names a
-// loaded model / texture.
-@(private="file")
-asset_key_from_clipboard :: proc(key: string, kind: Asset_Kind) -> (string, bool) {
-    text, ok := text_field_value(string(im.GetClipboardText()), key)
-    if !ok do return "", false
-    switch kind {
-    case .Model:
-        if m, found := asset_system.models[text]; found do return m.key, true
-    case .Texture:
-        if text in asset_system.image_ids do return asset_intern(text), true
-    case .Sound:
-        if text in sound_system.clip_ids do return asset_intern(text), true
-    }
-    return "", false
 }
 
 // Editable inline string (sbuf64/128/256). Each size has a fixed capacity, so a stack buffer one
@@ -380,7 +350,6 @@ param_struct_fields :: proc(type: typeid, value: any, options: Param_UI_Options,
         field_options := DEFAULT_PARAM_UI_OPTIONS
         field_options.readonly = options.readonly || contains(tags, "readonly")
         field_options.label_w  = col
-        field_options.path     = options.path == "" ? field.name : fmt.tprintf("%s.%s", options.path, field.name)   // same dotted key serialize writes
 
         // Against the defaults and the rest of the selection. A mixed number shows a dash instead of the
         // active entity's value; dragging it still starts from that value.

@@ -249,6 +249,9 @@ RenderDoc  (engine started with --renderdoc, or launched from RenderDoc)
   capture                                 capture the next frame; replies with the .rdc path
   captures                                list this session's captures
   rdui [index]                            open a capture in RenderDoc (default: the latest)
+Log
+  log [count] [warn|error]                the last log lines (default 20), oldest first; optionally only
+                                          warnings and errors, or only errors
 Lua
   lua <code...>                           run Lua on the active world; replies with its print()
                                           output, then return values as "=> value"
@@ -610,6 +613,20 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         path, _ := renderdoc_capture_path(idx)
         if _, err := os.process_start({command = {RENDERDOC_UI, path}}); err != nil do return fmt.tprintf("couldn't start %s: %v", RENDERDOC_UI, err)
         fmt.sbprintf(out, "opened %s\n", path)
+
+    case "log":
+        n, min_level := 20, log.Level.Info
+        for a in args {
+            switch a {
+            case "warn", "warning": min_level = .Warning
+            case "error":           min_level = .Error
+            case:
+                v, ok := strconv.parse_int(a)
+                if !ok || v <= 0 do return "usage: log [count] [warn|error]"
+                n = v
+            }
+        }
+        for &e in log_history_recent(n, min_level) do fmt.sbprintfln(out, "%.2fs  %v  %s", e.time, e.level, sbuf_str(&e.text))
 
     case "lua":
         // print() output is captured into the reply while the code runs (and still echoed to the

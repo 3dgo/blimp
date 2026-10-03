@@ -85,6 +85,9 @@ world_play_tick :: proc(dt: f64) {
     for w in worlds {
         w.ticks = w.play_source != nil && (!w.paused || w.step)
         w.step  = false
-        if w.ticks do w.time += dt
+        if w.ticks {
+            w.time += dt
+            clear(&w.debug_lines)   // last tick's game lines; this tick's systems draw them again
+        }
     }
 }

@@ -64,6 +64,7 @@ ui_draw_game :: proc() {
 
     ui_draw_unsaved_prompt()   // closing the window while playing still asks about the level
     if ui.show_stats do ui_draw_stats()
+    ui_draw_log_overlay()
     ui_game_shortcuts()   // last: F8 leaves game mode (ui.game = nil)
 }
 

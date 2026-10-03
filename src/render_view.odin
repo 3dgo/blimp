@@ -1,6 +1,7 @@
 package blimp
 
 import "core:math"
+import "core:math/linalg"
 import "core:mem"
 import "vendor:directx/d3d12"
 import "vendor:directx/dxgi"
@@ -181,6 +182,11 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         frame_constants.view_mat = entity_camera_view(e)
         frame_constants.proj_mat = entity_camera_proj(e, aspect)
         frame_constants.camera_pos = e.position
+    }
+    frame_constants.inv_proj = linalg.inverse(frame_constants.proj_mat)
+    if fog := world.settings.fog; fog.on && fog.end > fog.start {
+        frame_constants.fog_color = world.settings.background   // display space, like the clear: far things melt into it
+        frame_constants.fog_start, frame_constants.fog_end = fog.start, fog.end
     }
     mem.copy(view.frame_constants_ptr[frame_slot], &frame_constants, size_of(Frame_Constants))
 }

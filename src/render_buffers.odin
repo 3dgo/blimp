@@ -2,7 +2,10 @@ package blimp
 
 import "core:log"
 import "core:mem"
+import "core:hash"
 import "core:math"
+import "core:math/linalg"
+import "core:slice"
 import hm "core:container/handle_map"
 import "vendor:directx/d3d12"
 import "vendor:directx/dxgi"
@@ -84,6 +87,11 @@ World_Render :: struct {
     shadow_views_ptr: [FRAMES_IN_FLIGHT]rawptr,
     shadow_views_srv: [FRAMES_IN_FLIGHT]dx.Resource_View,
     shadow_cameras:   [dynamic]mat4,   // this frame's slices in use, rebuilt by buffers_build_scene
+    // Static shadow caching (render_shadows_draw): a slice is redrawn only when its camera changed or
+    // something that casts changed since it was last drawn. Slices keep their depth between frames.
+    shadow_casters:       u64,   // hash of everything that casts this frame (transform + mesh per instance)
+    shadow_casters_drawn: u64,   // the hash the slices were last drawn with
+    shadow_drawn:         [MAX_SHADOW_SLICES]Maybe(mat4),   // the camera each slice holds depth for; nil = must draw
     shadow_missed, shadow_missed_logged: int,   // shadowed lights that got no slices this frame / when last logged
 }
 
@@ -242,12 +250,19 @@ buffers_build_scene :: proc(world: ^World) {
     clear(&r.shadow_cameras)
     r.shadow_missed = 0
     defer light_shadow_report(r)
+    casters := u64(0xcbf29ce484222325)   // FNV-1a offset basis: what casts shadows this frame (shadow caching, render_shadows_draw)
     // Opaque draws go straight into draw_cmd_data; the other blends gather here and follow it in
     // EntityBlend order once every entity is in (deferred, so the MAX_MESH_INSTANCES return does it too).
+    // Alpha draws back to front from sort_eye (blending isn't order-independent); Additive is, and stays in
+    // entity order.
     later: [EntityBlend][dynamic]d3d12.DRAW_INDEXED_ARGUMENTS
     for &d in later do d = make([dynamic]d3d12.DRAW_INDEXED_ARGUMENTS, context.temp_allocator)
+    alpha_depth := make([dynamic]f32, context.temp_allocator)   // per later[.Alpha] command: its distance from sort_eye
+    sort_eye := world_sort_eye(world)
     defer {
+        r.shadow_casters = casters
         r.draw_count[.Opaque] = u32(len(r.draw_cmd_data))
+        alpha_sort(later[.Alpha][:], alpha_depth[:])
         for blend in EntityBlend {
             if blend == .Opaque do continue
             r.draw_first[blend] = u32(len(r.draw_cmd_data))
@@ -306,10 +321,50 @@ buffers_build_scene :: proc(world: ^World) {
                 BaseVertexLocation = 0,
                 StartInstanceLocation = instance_idx,
             }
-            if entity.blend == .Opaque do append(&r.draw_cmd_data, cmd)
-            else do append(&later[entity.blend], cmd)
+            switch entity.blend {
+            case .Opaque:   append(&r.draw_cmd_data, cmd)
+            case .Alpha:
+                append(&later[.Alpha], cmd)
+                append(&alpha_depth, linalg.length(mesh_world_center(mesh_idx, r.transform_data[transform_idx]) - sort_eye))
+            case .Cutout, .Additive: append(&later[entity.blend], cmd)
+            }
+            if entity.blend == .Opaque || entity.blend == .Cutout {   // the casters (render_shadows_draw)
+                m := r.transform_data[transform_idx]
+                casters = hash.fnv64a(mem.ptr_to_bytes(&m), casters)
+                id := mesh_idx
+                casters = hash.fnv64a(mem.ptr_to_bytes(&id), casters)
+            }
         }
     }
+}
+
+// Where Alpha draws are sorted from: the eye of the first view showing `world` (its camera entity's in game
+// mode). Views share the world's draw commands, so other views of the same world get that view's order.
+@(private="file")
+world_sort_eye :: proc(world: ^World) -> vec3 {
+    for v in views do if v.world == world {
+        if e, ok := render_view_camera_entity(v); ok do return e.position
+        return camera_eye(v.camera)
+    }
+    return {}
+}
+
+// The world-space centre of mesh `mesh_idx`'s bounds (its BVH root box) under transform `m`.
+@(private="file")
+mesh_world_center :: proc(mesh_idx: u32, m: mat4) -> vec3 {
+    bvh := &asset_system.mesh_bvhs[mesh_idx]
+    if len(bvh.nodes) == 0 do return transform_point(m, {})
+    return transform_point(m, (bvh.nodes[0].min + bvh.nodes[0].max) * 0.5)
+}
+
+// Sorts `cmds` far to near by `depth` (same length), in place.
+@(private="file")
+alpha_sort :: proc(cmds: []d3d12.DRAW_INDEXED_ARGUMENTS, depth: []f32) {
+    Item :: struct { depth: f32, cmd: d3d12.DRAW_INDEXED_ARGUMENTS }
+    items := make([]Item, len(cmds), context.temp_allocator)
+    for c, i in cmds do items[i] = {depth[i], c}
+    slice.sort_by(items, proc(a, b: Item) -> bool { return a.depth > b.depth })
+    for it, i in items do cmds[i] = it.cmd
 }
 
 // A light entity as the shader sees it. The baker (editor_bake.odin) lights with the same values.

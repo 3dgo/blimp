@@ -67,6 +67,23 @@ float3 quantize_dither(float3 c, uint2 px) {
 // Display-space colour of scene pixel `px` after exposure, the tonemap and the quantize + dither. Alpha 0
 // is the background, which was cleared to the world's display-space (sRGB) colour: shown as picked,
 // untouched by exposure, the tonemap and the dither. The scene writes alpha 1.
+// How far into the fog scene pixel `px` is (0 = clear, 1 = all fog colour): its view distance, from the scene
+// depth through the inverse projection. The scene VS squeezed NDC into the target's sceneCover part, so undo
+// that first. Blended surfaces don't write depth: they take the fog of what's behind them.
+float fog_amount(uint2 px) {
+    Texture2D<float> depthTex = getTexture2dF1(gFrame.depthTextureSlot);
+    uint w, h;
+    depthTex.GetDimensions(w, h);
+    float depth = depthTex.Load(int3(px, 0));
+    float2 uv = (float2(px) + 0.5) / float2(w, h);
+    float2 ndc = float2(uv.x * 2 - 1, 1 - uv.y * 2);
+    float2 cover = gFrame.sceneCover;
+    ndc = float2((ndc.x - (cover.x - 1)) / cover.x, (ndc.y - (1 - cover.y)) / cover.y);
+    float4 v = mul(float4(ndc, depth, 1), gFrame.invProj);
+    float dist = length(v.xyz / v.w);
+    return saturate((dist - gFrame.fogStart) / (gFrame.fogEnd - gFrame.fogStart));
+}
+
 [shader("fragment")]
 float4 frag_signal(VSOut input) : SV_Target {
     Texture2D<float4> hdr = getTexture2dRGBA(gFrame.hdrTextureSlot);
@@ -74,6 +91,7 @@ float4 frag_signal(VSOut input) : SV_Target {
     float4 s = hdr.Load(int3(px, 0));
     if (s.a == 0) return float4(s.rgb, 1);
     float3 c = linear_to_srgb(aces_fitted(max(s.rgb, 0) * gFrame.exposure));
+    if (gFrame.fogEnd > gFrame.fogStart) c = lerp(c, gFrame.fogColor, fog_amount(px));
     if (gFrame.colorLevels > 0) c = quantize_dither(c, px);
     return float4(c, 1);
 }
