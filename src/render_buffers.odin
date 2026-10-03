@@ -94,8 +94,15 @@ Mesh_Instance_Data :: struct {
     mesh: u32,
     material: u32,
     shading: u32,   // u32(ShadingModel): SHADING_* in shading.slang
+    tint: vec4,     // entity_tint, alpha 1: multiplies the albedo
 }
-#assert(size_of(Mesh_Instance_Data) == 16)
+#assert(size_of(Mesh_Instance_Data) == 32)
+
+// An entity's model colour multiplier: its `color` × `intensity` (white × 1 = as authored). A light reads
+// the same two fields as its own colour; one entity doesn't take both roles.
+entity_tint :: proc(entity: ^Entity) -> vec3 {
+    return entity.color * entity.intensity
+}
 
 // What an entity's shading means in `world`: Default is the level's.
 entity_shading :: proc(world: ^World, entity: ^Entity) -> ShadingModel {
@@ -329,6 +336,7 @@ buffers_build_scene :: proc(world: ^World) {
         append(&r.transform_data, entity_transform(entity))
         drawn := entity_drawn(entity)   // instances for every entity, draw commands only for drawn ones
         shading := entity_shading(world, entity)
+        tint := entity_tint(entity)
 
         for mesh_idx in model.meshes {
             if len(r.mesh_instance_data) >= MAX_MESH_INSTANCES {
@@ -343,6 +351,7 @@ buffers_build_scene :: proc(world: ^World) {
                 mesh = mesh_idx,
                 material = mesh.material,
                 shading = u32(shading),
+                tint = {tint.r, tint.g, tint.b, 1},
             })
             if !drawn do continue
             cmd := d3d12.DRAW_INDEXED_ARGUMENTS {

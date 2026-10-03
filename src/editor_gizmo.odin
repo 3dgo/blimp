@@ -147,7 +147,7 @@ gizmo_update :: proc(ev: ^Editor_View, tool: Edit_Tool, space: Gizmo_Space, pivo
             }
         }
         g.hot = g.drag
-    } else if ev.hovered && ev.nav == .None && !ui.io.KeyAlt {
+    } else if ev.hovered && ev.nav.drag == .None && !ui.io.KeyAlt {
         axes := gizmo_axes(tool, space, e.rotation)
         g.hot = gizmo_hit_test(ev, tool, pivot, axes, gizmo_world_length(ev, pivot), mouse)
         if g.hot != .None && im.IsMouseClicked(.Left) do gizmo_begin(ev, g, tool, e^, pivot, axes, mouse)

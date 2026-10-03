@@ -50,6 +50,7 @@ Bake_Stats :: struct {
 @(private="file")
 Bake :: struct {
     scene:  Scene_BVH,
+    tint:   []vec3,               // per scene instance: its entity's entity_tint, × the material albedo
     lights: []GPU_Light,
     light_layer: []u8,            // each light's probe layer (its group's; layer 0 for group 0)
     light_shadow: []bool,         // each light's `shadow`: its shadow ray is cast
@@ -81,6 +82,11 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
 
     b.scene = scene_bvh_build(w, entity_bakes, context.temp_allocator)
     stats.instances = len(b.scene.instances)
+    b.tint = make([]vec3, len(b.scene.instances), context.temp_allocator)
+    for inst, i in b.scene.instances {
+        b.tint[i] = 1
+        if e, found := entity_get(w, inst.entity); found do b.tint[i] = entity_tint(e)
+    }
     if len(b.scene.nodes) == 0 {
         log.errorf("Bake '%v': no static geometry (entities need Static, Cast Indirect and a model)", w.title)
         return
@@ -268,7 +274,7 @@ bake_radiance :: proc(b: ^Bake, r: Ray, back: ^u32, t: ^f32) -> (L: Bake_Layers)
 
     p := r.origin + hit.t * r.dir + n * BAKE_EPSILON
     mesh := asset_system.meshes[b.scene.instances[hit.instance].mesh]
-    albedo := asset_system.material_albedo[mesh.material]
+    albedo := asset_system.material_albedo[mesh.material] * b.tint[hit.instance]
     L = bake_direct(b, p, n)
     for l in 0..<b.layers {
         one: Probe_Layer_Scales

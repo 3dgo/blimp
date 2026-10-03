@@ -38,6 +38,7 @@ UI :: struct {
     game: ^Render_View,               // game mode: this view is the whole window as the game, the editor hidden (ui_game.odin); nil = the editor
     show_game_settings: bool,
     show_templates: bool,             // the Templates window (ui_templates.odin)
+    font_bold: ^im.Font,              // the UI font in bold (the default font is regular)
 }
 ui: UI
 
@@ -88,11 +89,27 @@ ui_init :: proc() {
         OversampleV = 1,
         SizePixels = font_size,
     }
-    font := im.FontAtlas_AddFontFromFileTTF(fonts, "assets_engine/fonts/Roboto-Regular.ttf", 
-        font_size, &font_config)
-    assert(font != nil, "Failed to load Roboto — check working directory")
+    // The first font added is the default. Bold is the same stack in bold (dynamic fonts rasterize glyphs
+    // as they're drawn, so a second CJK face costs nothing until used): PushFont(ui.font_bold, 0).
+    ui_add_font(fonts, "assets_engine/fonts/Roboto-Regular.ttf", "assets_engine/fonts/NotoSansSC-Regular.ttf", font_config)
+    ui.font_bold = ui_add_font(fonts, "assets_engine/fonts/Roboto-Bold.ttf", "assets_engine/fonts/NotoSansSC-Bold.ttf", font_config)
 
-    merge_config := font_config
+    ui.show_demo_window = false
+    // Open on first launch; after that imgui.ini remembers which windows were open (ui_saved_state.odin).
+    ui.show_worlds = true      // open a scene or kit from it
+    ui.show_templates = true   // docked above Worlds (ui_build_default_layout)
+    ui.show_stats = false
+}
+
+// One UI font: Latin, with the editor icons and Chinese merged in.
+@(private="file")
+ui_add_font :: proc(fonts: ^im.FontAtlas, latin, cjk: cstring, config: im.FontConfig) -> ^im.Font {
+    config := config
+    font_size := config.SizePixels
+    font := im.FontAtlas_AddFontFromFileTTF(fonts, latin, font_size, &config)
+    assert(font != nil, "Failed to load the UI font — check working directory")
+
+    merge_config := config
     merge_config.MergeMode = true
 
     // Icons (editor_icons.odin) merged next, so ICON_* codepoints render inline in any label. Slightly larger
@@ -104,14 +121,8 @@ ui_init :: proc() {
     im.FontAtlas_AddFontFromFileTTF(fonts, ICON_FONT_PATH, font_size, &icon_config)
 
     merge_config.ExtraSizeScale = 1.35  // CJK reads smaller than Latin at the same point size; enlarge the merged glyphs
-    im.FontAtlas_AddFontFromFileTTF(fonts, "assets_engine/fonts/NotoSansSC-Regular.ttf",
-        font_size, &merge_config)
-    
-    ui.show_demo_window = false
-    // Open on first launch; after that imgui.ini remembers which windows were open (ui_saved_state.odin).
-    ui.show_worlds = true      // open a scene or kit from it
-    ui.show_templates = true   // docked above Worlds (ui_build_default_layout)
-    ui.show_stats = false
+    im.FontAtlas_AddFontFromFileTTF(fonts, cjk, font_size, &merge_config)
+    return font
 }
 
 ui_process_event :: proc(event: ^sdl3.Event) {

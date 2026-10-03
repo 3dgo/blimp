@@ -70,7 +70,8 @@ design notes there.
   (ImGui on top of one view), not ad hoc ImGui calls.
 - **Lua issues commands and queries state; it never holds state.**
 - **UI text** goes through `tr(.Key)` with EN and ZH on one row in `loc.odin` (default zh). Logs,
-  asserts, keys and paths stay ASCII English. Window titles end in a `###id` suffix.
+  asserts, keys and paths stay ASCII English. Window titles end in a `###id` suffix. Every search box
+  matches through `search_matches` (`search.odin`), so Chinese is also found by pinyin.
 
 ## Build, check, verify
 

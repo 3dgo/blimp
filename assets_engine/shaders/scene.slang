@@ -9,6 +9,7 @@ public struct MeshInstance {
     public uint mesh;
     public uint material;
     public uint shading;   // SHADING_* (shading.slang)
+    public float4 tint;    // the entity's color × intensity (entity_tint), alpha 1: multiplies the albedo
 }
 
 public struct Mesh {
@@ -98,7 +99,7 @@ public VSOut vert_main(VSIn input) {
     }
     output.position = clip;
     output.worldPos = worldPos.xyz;
-    output.color = attributeBuffer[vertexIndex].color;
+    output.color = attributeBuffer[vertexIndex].color * meshInstance.tint;   // constant per draw, so per vertex is per pixel
     output.normal = mul(attributeBuffer[vertexIndex].normal, cofactor) * flip;
     output.uv0 = attributeBuffer[vertexIndex].uv0;
     output.uvAffine = output.uv0;

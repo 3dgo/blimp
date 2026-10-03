@@ -34,7 +34,8 @@ Same structure for AI. Effort goes into perception and steering, not decision st
   - The fields are `camera_type` and `light_type` (enums), plus `color`, `intensity`, `fov` (degrees),
     `size` (vec3) and `range` (near, far), and `shadow`.
   - Shared fields mean what they mean for each kind (`entity_schema.ini` comments). `fov` is the camera
-    fov or the spot cone. `size` is the box the entity's projection or volume covers: ortho view height
+    fov or the spot cone. `color` × `intensity` is a light's colour, and on a model its colour multiplier
+    (`entity_tint`: the per-instance `tint` in the scene shader, and the albedo the probe bake bounces). `size` is the box the entity's projection or volume covers: ortho view height
     in y, the directional shadow area and depth, later volumes. `range` is clip planes, or shadow near and falloff radius.
   - There's no `aspect`: a camera takes it from the target it renders into. `size` never holds model
     bounds, which come from the asset.

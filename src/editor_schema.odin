@@ -41,6 +41,7 @@ Doc_Field :: struct {
     zh:      Edit_Buf,
     default: Edit_Buf,
     tags:    Edit_Buf,   // preserved verbatim (e.g. "hidden, noserialize")
+    section: Edit_Buf,   // inspector section: a member of enum EntitySection, "" = top, above the sections
     builtin: bool,       // engine-required: locked in the editor
 }
 
@@ -79,7 +80,7 @@ SCHEMA_HEADER ::
 # Grammar — INI with TOML-style dotted sections. Every declaration is a [qualified.name]
 # section followed by "key = value" attribute lines:
 #
-#   [field.<id>]                 type / en / zh / default / tags / builtin
+#   [field.<id>]                 type / en / zh / default / tags / section / builtin
 #   [enum.<T>] / [flags.<T>]     a type;  [enum.<T>.<member>]   -> en / zh
 #   [struct.<T>]                 a type;  [struct.<T>.<member>] -> type / en / zh / default
 #
@@ -87,6 +88,9 @@ SCHEMA_HEADER ::
 # (sbuf64 / sbuf128 / sbuf256), the builtin-only Entity_Handle, and qualified refs to authored
 # types: enum.<T> / flags.<T> /
 # struct.<T>. A dot means the same thing in a header and in a type = reference.
+#
+# section = a member of enum.EntitySection: the inspector section the field is drawn under
+# (sections in the enum's member order; fields without one go first, above them).
 `
 
 // A category separator comment, e.g.  #================ Fields ================
@@ -183,6 +187,7 @@ schema_doc_load :: proc() {
             case "zh":      edit_buf_set(&f.zh, val)
             case "default": edit_buf_set(&f.default, val)
             case "tags":    edit_buf_set(&f.tags, val)
+            case "section": edit_buf_set(&f.section, val)
             case "builtin": f.builtin = val == "true"
             }
         case .Type:
@@ -213,6 +218,7 @@ schema_doc_save :: proc(path: string) -> bool {
         _doc_write_kv(&b, "type", edit_buf_str(&f.type))
         if f.builtin do _doc_write_kv(&b, "builtin", "true")
         _doc_write_kv_opt(&b, "tags", edit_buf_str(&f.tags))
+        _doc_write_kv_opt(&b, "section", edit_buf_str(&f.section))
         _doc_write_kv_opt(&b, "en", edit_buf_str(&f.en))
         _doc_write_kv_opt(&b, "zh", edit_buf_str(&f.zh))
         _doc_write_kv_opt(&b, "default", edit_buf_str(&f.default))
@@ -264,6 +270,9 @@ schema_doc_validate :: proc() -> (ok: bool, msg: string) {
         if !_doc_type_resolves(t) {
             return false, strings.concatenate({"field '", id, "' has unknown type: ", t}, context.temp_allocator)
         }
+        if sec := edit_buf_str(&f.section); sec != "" && !schema_doc_is_section(sec) {
+            return false, strings.concatenate({"field '", id, "' has unknown section (not in enum ", SCHEMA_SECTION_ENUM, "): ", sec}, context.temp_allocator)
+        }
     }
     for &t, i in schema_doc.types {
         name := edit_buf_str(&t.name)
@@ -293,6 +302,22 @@ schema_doc_validate :: proc() -> (ok: bool, msg: string) {
 }
 
 /* ------------------------------ helpers ------------------------------ */
+
+// The enum whose members are the inspector's sections (their order is the inspector's order).
+SCHEMA_SECTION_ENUM :: "EntitySection"
+
+// The section enum, or nil if the schema has none.
+schema_doc_sections :: proc() -> ^Doc_Type {
+    for &t in schema_doc.types do if t.kind == .Enum && edit_buf_str(&t.name) == SCHEMA_SECTION_ENUM do return &t
+    return nil
+}
+
+schema_doc_is_section :: proc(member: string) -> bool {
+    t := schema_doc_sections()
+    if t == nil do return false
+    for &m in t.members do if edit_buf_str(&m.id) == member do return true
+    return false
+}
 
 // All scalar types accepted by validation (includes the builtin-only Entity_Handle).
 SCHEMA_SCALAR_TYPES :: [?]string{"bool", "i32", "u32", "f32", "string", "sbuf64", "sbuf128", "sbuf256", "vec2", "vec3", "vec4", "quat", "Entity_Handle"}

@@ -2,6 +2,7 @@ package blimp
 
 import "core:fmt"
 import "core:mem"
+import "core:strings"
 import vmem "core:mem/virtual"
 import hm "core:container/handle_map"
 import im "lib:odin-imgui"
@@ -20,6 +21,7 @@ Entity_Panel :: struct {
                             // ui_view.odin). Layout + lifetime only: what it shows is still `pinned` (starts as that
                             // window's world), re-targetable via the combo like any panel.
     open:   bool,
+    search: [64]u8,   // the search box's text (NUL-terminated): entity names in a list, fields in an inspector
 }
 
 PANEL_WINDOW_SIZE :: [2]f32{360, 480}   // first-open size of a floating panel (× display scale)
@@ -104,7 +106,7 @@ ui_draw_entity_panel :: proc(p: ^Entity_Panel) {
         }
         switch p.kind {
         case .List:      ui_entity_list_body(p, w)
-        case .Inspector: ui_entity_inspector_body(w)
+        case .Inspector: ui_entity_inspector_body(p, w)
         }
     }
     im.End()
@@ -136,6 +138,13 @@ ui_panel_target_combo :: proc(p: ^Entity_Panel) {
 // F2 turns the active entity's row into a text field (ui_entity_rename_begin).
 @(private="file")
 ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
+    ui_panel_search_box(p, tr(.Entity_List_Search))
+    search := string(cstring(&p.search[0]))
+
+    // The rows scroll under the search box, which stays put.
+    im.BeginChild("##rows")
+    defer im.EndChild()
+
     open_menu := false
     it := hm.iterator_make(&w.entities)
     for e, h in hm.iterate(&it) {
@@ -143,6 +152,7 @@ ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
             rename_row(p, w, h)
             continue
         }
+        if !search_matches(sbuf_str(&e.name), search) do continue
         icon, _ := entity_icon(e)
         clicked := ui_icon_selectable(fmt.ctprintf("##e%v", h.idx), icon, sbuf_str(&e.name), e.selected)
         // Double-click frames it in the world's view (the first click already selected it), like F.
@@ -159,12 +169,13 @@ ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
         switch {
         case shift && selection_has_anchor(w):
             if !ctrl do selection_clear(w)
-            // Walk the list: selecting starts at whichever end comes first and stops after the other.
+            // Walk the list: selecting starts at whichever end comes first and stops after the other. Rows
+            // the search hides are skipped.
             ends := 0
             rit := hm.iterator_make(&w.entities)
-            for _, rh in hm.iterate(&rit) {
+            for re, rh in hm.iterate(&rit) {
                 if rh == w.select_anchor || rh == h do ends += w.select_anchor == h ? 2 : 1
-                if ends > 0 do selection_set(w, rh, true)
+                if ends > 0 && search_matches(sbuf_str(&re.name), search) do selection_set(w, rh, true)
                 if ends >= 2 do break
             }
             selection_set(w, h, true)   // the clicked one is active
@@ -239,7 +250,7 @@ selection_has_anchor :: proc(w: ^World) -> bool {
 
 
 @(private="file")
-ui_entity_inspector_body :: proc(w: ^World) {
+ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
     ui_world_unsaved_note(w)
 
     e, ok := entity_get(w, w.active)
@@ -250,10 +261,27 @@ ui_entity_inspector_body :: proc(w: ^World) {
     im.BeginDisabled(!single)
     if im.Button(fmt.ctprintf("%s %s", ICON_PASTE, tr(.Btn_Paste_Over))) do ui_paste_over(w)
     im.EndDisabled()
+    ui_panel_search_box(p, tr(.Inspector_Search))
     im.Separator()
+
+    // The fields scroll under the header (buttons, search), which stays put.
+    im.BeginChild("##fields")
+    defer im.EndChild()
+
+    // The rest of the selection: the inspector shows where they differ, and edits apply to them too.
+    others := make([dynamic]rawptr, context.temp_allocator)
+    for h in selection_handles(w) {
+        if h == w.active do continue
+        if o, found := entity_get(w, h); found do append(&others, o)
+    }
+    defaults: Entity
+    entity_apply_defaults(&defaults)
 
     opts := DEFAULT_PARAM_UI_OPTIONS
     opts.headerless = true
+    opts.filter     = strings.trim_space(string(cstring(&p.search[0])))
+    opts.defaults   = &defaults
+    opts.others     = others[:]
     before := e^
     ui_param_struct("entity", Entity, e^, opts)
 
@@ -264,11 +292,23 @@ ui_entity_inspector_body :: proc(w: ^World) {
     // Undo for inspector edits, detected after the fact (the reflection widgets don't report edits):
     // the first frame the entity changes opens one step holding its pre-edit state, and the step stays
     // open while a widget is held, so a whole drag or a typed name is one Ctrl+Z.
-    if mem.compare_ptrs(&before, e, size_of(Entity)) != 0 && !ui.inspector_editing {
-        undo_push_edited(w, w.active, before)
-        ui.inspector_editing = true
+    if mem.compare_ptrs(&before, e, size_of(Entity)) != 0 {
+        if !ui.inspector_editing {
+            undo_push_edited(w, w.active, before)
+            ui.inspector_editing = true
+        }
+        // Multi-edit, after the snapshot that covers it: just what changed on the active entity this frame
+        // goes to the rest of the selection. Names stay their own.
+        for o in others do param_apply_changes(Entity, o, &before, e, {"identity"})
     }
     if !im.IsAnyItemActive() do ui.inspector_editing = false
+}
+
+// A panel's search box, full width on its own row (search_matches: Chinese also by pinyin).
+@(private="file")
+ui_panel_search_box :: proc(p: ^Entity_Panel, hint: cstring) {
+    im.SetNextItemWidth(-1)
+    im.InputTextWithHint("##search", fmt.ctprintf("%s  %s", ICON_SEARCH, hint), cstring(&p.search[0]), len(p.search))
 }
 
 // Override: make every selected entity look/behave like the clipboard entity WITHOUT becoming it or

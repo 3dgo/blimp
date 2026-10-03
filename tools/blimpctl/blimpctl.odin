@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:net"
 import "core:os"
 import "core:strings"
+import win32 "core:sys/windows"
 
 // Sends one command to a running Blimp editor (debug build) and prints the reply. See src/editor_remote.odin.
 //   blimpctl help
@@ -14,7 +15,7 @@ import "core:strings"
 PORT :: 47800   // must match REMOTE_PORT in src/editor_remote.odin
 
 main :: proc() {
-    args := os.args[1:]
+    args := utf8_args()[1:]
     if len(args) == 0 {
         fmt.eprintln("usage: blimpctl <command> [args...]   (blimpctl help lists commands)")
         os.exit(2)
@@ -66,6 +67,17 @@ main :: proc() {
         fmt.eprintln("blimpctl: no reply (did the engine close?)")
         os.exit(2)
     }
+}
+
+// The arguments as UTF-8. Not os.args: on Windows Odin fills that from the C runtime's ANSI argv, which
+// turns anything outside the code page (every Chinese entity name) into '?'. The UTF-16 command line has them.
+utf8_args :: proc() -> []string {
+    argc: i32
+    argv := win32.CommandLineToArgvW(win32.GetCommandLineW(), &argc)
+    defer win32.LocalFree(argv)
+    args := make([]string, argc)
+    for i in 0 ..< int(argc) do args[i], _ = win32.wstring_to_utf8(argv[i], -1, context.allocator)
+    return args
 }
 
 send_all :: proc(sock: net.TCP_Socket, data: []u8) {

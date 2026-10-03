@@ -18,7 +18,7 @@ ENTITY_SCHEMA_PATH :: "entity_schema.ini"
 ENTITY_GEN_PATH    :: "src/gen_entity.odin"
 
 @(private = "file")
-Schema_Field :: struct { name, type, tags, en, zh, default: string }
+Schema_Field :: struct { name, type, tags, section, en, zh, default: string }
 @(private = "file")
 Schema_Member :: struct { name, en, zh: string }   // enum / flags value
 @(private = "file")
@@ -83,6 +83,7 @@ generate_entity :: proc() {
             switch key {
             case "type":    f.type    = strings.clone(val)
             case "tags":    f.tags    = strings.clone(val)
+            case "section": f.section = strings.clone(val)
             case "en":      f.en      = strings.clone(val)
             case "zh":      f.zh      = strings.clone(val)
             case "default": f.default = strings.clone(val)
@@ -121,11 +122,13 @@ generate_entity :: proc() {
     fmt.sbprintln(&sb, "package blimp")
     fmt.sbprintln(&sb, "")
 
-    // ---- Entity struct ----
+    // ---- Entity struct. A field's `section` is emitted as a `section:<Member>` tag, which the inspector reads. ----
     fmt.sbprintln(&sb, "Entity :: struct {")
     for f in fields {
-        if len(f.tags) > 0 {
-            fmt.sbprintfln(&sb, "    %v: %v `%v`,", f.name, _odin_field_type(f.type), f.tags)
+        tags := f.tags
+        if f.section != "" do tags = fmt.tprintf("%s%ssection:%s", tags, tags != "" ? ", " : "", f.section)
+        if len(tags) > 0 {
+            fmt.sbprintfln(&sb, "    %v: %v `%v`,", f.name, _odin_field_type(f.type), tags)
         } else {
             fmt.sbprintfln(&sb, "    %v: %v,", f.name, _odin_field_type(f.type))
         }
@@ -236,31 +239,30 @@ _flags_literal :: proc(def: string) -> string {
 
 @(private = "file")
 _emit_field_labels :: proc(sb: ^strings.Builder, fields: []Schema_Field) {
+    // Every language at once, for the inspector's search (a field is found by either name).
+    fmt.sbprintln(sb, "// A field's label in every language (empty where it has none).")
+    fmt.sbprintln(sb, "entity_field_labels :: proc(name: string) -> (l: [Lang]string) {")
+    fmt.sbprintln(sb, "    switch name {")
+    for f in fields do if lit, ok := _lang_literal(f.en, f.zh); ok {
+        fmt.sbprintfln(sb, "    case \"%s\": l = %s", f.name, lit)
+    }
+    fmt.sbprintln(sb, "    }")
+    fmt.sbprintln(sb, "    return")
+    fmt.sbprintln(sb, "}")
+    fmt.sbprintln(sb, "")
     fmt.sbprintln(sb, "// Localized field label for the current language; ok=false if none.")
     fmt.sbprintln(sb, "entity_field_label :: proc(name: string) -> (string, bool) {")
-    has := false
-    for f in fields do if _, ok := _lang_literal(f.en, f.zh); ok { has = true; break }
-    if has {
-        fmt.sbprintln(sb, "    l: [Lang]string")
-        fmt.sbprintln(sb, "    switch name {")
-        for f in fields do if lit, ok := _lang_literal(f.en, f.zh); ok {
-            fmt.sbprintfln(sb, "    case \"%s\": l = %s", f.name, lit)
-        }
-        fmt.sbprintln(sb, "    }")
-        fmt.sbprintln(sb, "    s := l[loc_lang]")
-        fmt.sbprintln(sb, "    return s, s != \"\"")
-    } else {
-        fmt.sbprintln(sb, "    return \"\", false")
-    }
+    fmt.sbprintln(sb, "    s := entity_field_labels(name)[loc_lang]")
+    fmt.sbprintln(sb, "    return s, s != \"\"")
     fmt.sbprintln(sb, "}")
     fmt.sbprintln(sb, "")
 }
 
 @(private = "file")
 _emit_flag_labels :: proc(sb: ^strings.Builder, types: []Schema_Type) {
-    fmt.sbprintln(sb, "// Localized enum/flags member label, keyed on the type name; ok=false if none.")
-    fmt.sbprintln(sb, "entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bool) {")
-    fmt.sbprintln(sb, "    l: [Lang]string")
+    // Every language at once, for the inspector's search (a value is found by either name).
+    fmt.sbprintln(sb, "// An enum/flags member's label in every language, keyed on the type name (empty where it has none).")
+    fmt.sbprintln(sb, "entity_flag_item_labels :: proc(enum_type: string, member: string) -> (l: [Lang]string) {")
     fmt.sbprintln(sb, "    switch enum_type {")
     for t in types {
         has := false
@@ -274,7 +276,12 @@ _emit_flag_labels :: proc(sb: ^strings.Builder, types: []Schema_Type) {
         fmt.sbprintln(sb, "        }")
     }
     fmt.sbprintln(sb, "    }")
-    fmt.sbprintln(sb, "    s := l[loc_lang]")
+    fmt.sbprintln(sb, "    return")
+    fmt.sbprintln(sb, "}")
+    fmt.sbprintln(sb, "")
+    fmt.sbprintln(sb, "// Localized enum/flags member label, keyed on the type name; ok=false if none.")
+    fmt.sbprintln(sb, "entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bool) {")
+    fmt.sbprintln(sb, "    s := entity_flag_item_labels(enum_type, member)[loc_lang]")
     fmt.sbprintln(sb, "    return s, s != \"\"")
     fmt.sbprintln(sb, "}")
     fmt.sbprintln(sb, "")

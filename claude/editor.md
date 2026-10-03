@@ -29,8 +29,11 @@
   - **Editor state stays off core structs.** A view's editor side is an `Editor_View`
     (`editor_view.odin`): screen rect, hover, camera navigation, gizmo, marquee and window placement.
     The UI keeps one per view (`editor_view(v)`, freed with the view).
-    - `render_camera.odin` is camera maths only; mouse/keyboard navigation and F-framing live in
-      `editor_view.odin`.
+    - `render_camera.odin` is only what rendering and picking need from a view's free `Camera` (eye, view,
+      projection, ray; camera entities' matrices). Everything the editor does to it is `editor_camera.odin`:
+      placing (a new view's angle and framing, F), the orbit/zoom moves, and navigation (mouse and keyboard →
+      moves; the gesture in progress is `Editor_View.nav.drag`, a `Nav_Drag`). `editor_view.odin` is just the
+      per-view editor state and its lifetime.
     - New editor features add state there, or to other editor-side structs, not to `Render_View`,
       `Camera` or the renderer.
   - **Drawing in a viewport at a 3D position comes in two layers.** Use these rather than ad hoc ImGui calls.
@@ -49,6 +52,20 @@
   - That way undo snapshots carry it, delete and paste need no bookkeeping, and it never reaches
     files or the clipboard. Selection changes don't call `undo_push`, so they don't dirty the world.
   - `World.active` is the selected entity the inspector shows and the gizmo pivots on.
+- **Inspector** (`ui_param_struct` over `Entity`, `ui_entity_inspector_body`): a presentation of the flat
+  entity, not a structure in it. Every field stays shared and always shown; nothing hides by kind.
+  - Sections: a field's schema `section` (a member of `enum.EntitySection`, emitted as a `section:` tag)
+    puts it under that collapsing header. Fields without one come first, then sections in the enum's order.
+    The schema editor picks it per field and can add sections (that builtin enum's members stay editable).
+  - Search (per panel, `search_matches`) matches a field's id, its label in any language or its text value
+    (strings, an enum's choice, set flags; not numbers), or a section's name (which shows all its fields). While searching, sections are separators, not folds. The entity list
+    has the same box over entity names.
+  - A field that differs from its schema default (`entity_apply_defaults`) has a bold label (`ui.font_bold`),
+    colour unchanged; right-clicking a label offers Reset to Default.
+  - Multi-edit: with several selected, the inspector shows the active entity. A field where the others differ
+    has an amber label (numbers show a dash). An edit applies to all of them, but only what changed
+    (`param_apply_changes`): one vector component, the toggled flags, otherwise the whole field. `identity`
+    fields (the name) are skipped. Same undo step.
   - Viewport: click or a crossing marquee replaces the selection; Shift adds, Ctrl+Shift removes,
     Ctrl toggles (`Selection_Op`). Alt stays orbit.
     A plain double-click on an entity, in a viewport or the entity list, frames it like F (from the list: in

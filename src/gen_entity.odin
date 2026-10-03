@@ -9,31 +9,41 @@ Entity :: struct {
     icon: sbuf64 `widget:icon`,
     basic_static_flags: EntityBasicStaticFlags,
     basic_flags: EntityBasicFlags,
-    position: vec3 `placement`,
-    rotation: quat `placement`,
-    scale: vec3 `placement`,
-    model: string `widget:model`,
-    shading: EntityShading,
-    blend: EntityBlend,
-    camera_type: EntityCameraType,
-    light_type: EntityLightType,
-    color: vec3 `widget:linear_color`,
-    intensity: f32,
-    fov: f32,
-    inner_fov: f32,
-    radius: f32,
-    inner_radius: f32,
-    falloff: EntityLightFalloff,
-    size: vec3,
-    range: vec2,
-    shadow: bool,
-    light_group: i32,
-    indirect: f32,
-    sound: string `widget:sound`,
-    volume: f32,
-    sound_flags: EntitySoundFlags,
-    collision: EntityCollision,
-    velocity: vec3 `noserialize`,
+    position: vec3 `placement, section:Transform`,
+    rotation: quat `placement, section:Transform`,
+    scale: vec3 `placement, section:Transform`,
+    model: string `widget:model, section:Render`,
+    shading: EntityShading `section:Render`,
+    blend: EntityBlend `section:Render`,
+    camera_type: EntityCameraType `section:Camera_Light`,
+    light_type: EntityLightType `section:Camera_Light`,
+    color: vec3 `widget:linear_color, section:Render`,
+    intensity: f32 `section:Render`,
+    fov: f32 `section:Dimensions`,
+    inner_fov: f32 `section:Dimensions`,
+    radius: f32 `section:Dimensions`,
+    inner_radius: f32 `section:Dimensions`,
+    falloff: EntityLightFalloff `section:Camera_Light`,
+    size: vec3 `section:Dimensions`,
+    range: vec2 `section:Dimensions`,
+    shadow: bool `section:Camera_Light`,
+    light_group: i32 `section:Camera_Light`,
+    indirect: f32 `section:Camera_Light`,
+    sound: string `widget:sound, section:Sound`,
+    volume: f32 `section:Sound`,
+    sound_flags: EntitySoundFlags `section:Sound`,
+    collision: EntityCollision `section:Physics`,
+    velocity: vec3 `noserialize, section:Physics`,
+    触发: bool,
+}
+
+EntitySection :: enum u64 {
+    Transform,
+    Render,
+    Dimensions,
+    Camera_Light,
+    Sound,
+    Physics,
 }
 
 EntityCollision :: enum u64 {
@@ -134,11 +144,11 @@ entity_apply_defaults :: proc(e: ^Entity) {
     e.sound_flags = {.Positional}
     e.collision = .Collision_Mesh
     e.velocity = {0, 0, 0}
+    e.触发 = false
 }
 
-// Localized field label for the current language; ok=false if none.
-entity_field_label :: proc(name: string) -> (string, bool) {
-    l: [Lang]string
+// A field's label in every language (empty where it has none).
+entity_field_labels :: proc(name: string) -> (l: [Lang]string) {
     switch name {
     case "name": l = {.EN = "Name", .ZH = "名称"}
     case "icon": l = {.EN = "Icon", .ZH = "图标"}
@@ -169,15 +179,29 @@ entity_field_label :: proc(name: string) -> (string, bool) {
     case "sound_flags": l = {.EN = "Sound Flags", .ZH = "声音标志"}
     case "collision": l = {.EN = "Collision", .ZH = "碰撞"}
     case "velocity": l = {.EN = "Velocity", .ZH = "速度"}
+    case "触发": l = {.EN = "trigger", .ZH = "触发"}
     }
-    s := l[loc_lang]
+    return
+}
+
+// Localized field label for the current language; ok=false if none.
+entity_field_label :: proc(name: string) -> (string, bool) {
+    s := entity_field_labels(name)[loc_lang]
     return s, s != ""
 }
 
-// Localized enum/flags member label, keyed on the type name; ok=false if none.
-entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bool) {
-    l: [Lang]string
+// An enum/flags member's label in every language, keyed on the type name (empty where it has none).
+entity_flag_item_labels :: proc(enum_type: string, member: string) -> (l: [Lang]string) {
     switch enum_type {
+    case "EntitySection":
+        switch member {
+        case "Transform": l = {.EN = "Transform", .ZH = "变换"}
+        case "Render": l = {.EN = "Render", .ZH = "渲染"}
+        case "Dimensions": l = {.EN = "Dimensions", .ZH = "尺度"}
+        case "Camera_Light": l = {.EN = "Camera & Light", .ZH = "相机与灯光"}
+        case "Sound": l = {.EN = "Sound", .ZH = "声音"}
+        case "Physics": l = {.EN = "Physics", .ZH = "物理"}
+        }
     case "EntityCollision":
         switch member {
         case "None": l = {.EN = "None", .ZH = "无"}
@@ -247,7 +271,12 @@ entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bo
         case "Positional": l = {.EN = "Positional", .ZH = "空间定位"}
         }
     }
-    s := l[loc_lang]
+    return
+}
+
+// Localized enum/flags member label, keyed on the type name; ok=false if none.
+entity_flag_item_label :: proc(enum_type: string, member: string) -> (string, bool) {
+    s := entity_flag_item_labels(enum_type, member)[loc_lang]
     return s, s != ""
 }
 

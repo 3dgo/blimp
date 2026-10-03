@@ -35,6 +35,7 @@ ui_draw_schema_editor :: proc() {
                 im.Dummy({0, 2 * app.dispaly_scale})
                 ui_form_input(tr(.Schema_Prop_Id), "id", &f.id, f.builtin)
                 ui_form_type_combo(tr(.Schema_Prop_Type), "type", &f.type, f.builtin)
+                ui_form_section_combo(&f.section)   // presentation only, so builtin fields can move too
                 ui_form_input(tr(.Schema_Prop_English), "en", &f.en)
                 ui_form_input(tr(.Schema_Prop_Chinese), "zh", &f.zh)
                 ui_form_input(tr(.Schema_Prop_Default), "default", &f.default)
@@ -82,13 +83,15 @@ ui_draw_schema_editor :: proc() {
 
                 im.Dummy({0, 4 * app.dispaly_scale})
                 im.SeparatorText(tr(.Schema_Members))
+                // The section enum is builtin (the inspector reads it) but its members are the user's sections.
+                members_locked := t.builtin && edit_buf_str(&t.name) != SCHEMA_SECTION_ENUM
                 remove_member := -1
                 for &m, mi in t.members {
                     im.PushIDInt(i32(mi))
                     mname := ui_schema_name(&m.en, &m.zh, &m.id)
                     im.TextUnformatted(fmt.ctprintf("%s  ·  %s", mname, edit_buf_str(&m.id)))
                     im.Indent()
-                    ui_form_input(tr(.Schema_Prop_Id), "mid", &m.id, t.builtin)
+                    ui_form_input(tr(.Schema_Prop_Id), "mid", &m.id, members_locked)
                     if t.kind == .Struct {
                         ui_form_type_combo(tr(.Schema_Prop_Type), "mtype", &m.type, t.builtin)
                     }
@@ -97,7 +100,7 @@ ui_draw_schema_editor :: proc() {
                     if t.kind == .Struct {
                         ui_form_input(tr(.Schema_Prop_Default), "mdef", &m.default)
                     }
-                    if !t.builtin {
+                    if !members_locked {
                         if im.SmallButton(tr(.Schema_Remove)) do remove_member = mi
                     }
                     im.Unindent()
@@ -106,13 +109,15 @@ ui_draw_schema_editor :: proc() {
                 }
                 if remove_member >= 0 do ordered_remove(&t.members, remove_member)
 
-                if !t.builtin {
+                if !members_locked {
                     if im.SmallButton(tr(.Schema_Add_Member)) {
                         item: Doc_Item
                         edit_buf_set(&item.id, t.kind == .Struct ? "new_member" : "Member")
                         if t.kind == .Struct do edit_buf_set(&item.type, "f32")
                         append(&t.members, item)
                     }
+                }
+                if !t.builtin {
                     im.SameLine()
                     if im.SmallButton(tr(.Schema_Remove_Type)) do remove_type = i
                 }
@@ -196,6 +201,33 @@ ui_form_type_combo :: proc(label: cstring, key: string, b: ^Edit_Buf, readonly: 
         im.EndCombo()
     }
     im.EndDisabled()
+}
+
+// A form row picking a field's inspector section: a member of the section enum, or none (drawn first,
+// above the sections).
+@(private = "file")
+ui_form_section_combo :: proc(b: ^Edit_Buf) {
+    im.AlignTextToFramePadding()
+    im.TextUnformatted(tr(.Schema_Prop_Section))
+    im.SameLine(FORM_LABEL_W * app.dispaly_scale)
+    im.SetNextItemWidth(-1)
+    cur := edit_buf_str(b)
+    sections := schema_doc_sections()
+    shown := cur
+    if cur == "" do shown = trs(.Schema_Section_None)
+    else if sections != nil {
+        for &m in sections.members do if edit_buf_str(&m.id) == cur do shown = ui_schema_name(&m.en, &m.zh, &m.id)
+    }
+    if im.BeginCombo("##section", fmt.ctprintf("%s", shown)) {
+        if im.Selectable(tr(.Schema_Section_None), cur == "") do edit_buf_set(b, "")
+        if sections != nil {
+            for &m in sections.members {
+                id := edit_buf_str(&m.id)
+                if im.Selectable(fmt.ctprintf("%s##%s", ui_schema_name(&m.en, &m.zh, &m.id), id), id == cur) do edit_buf_set(b, id)
+            }
+        }
+        im.EndCombo()
+    }
 }
 
 // A form row selecting a type's kind (enum / flags / struct).

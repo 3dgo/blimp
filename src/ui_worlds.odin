@@ -183,7 +183,7 @@ ui_world_focus :: proc(w: ^World) {
 
 @(private="file")
 worlds_matches :: proc(path, filter_lower: string) -> bool {
-    return filter_lower == "" || strings.contains(strings.to_lower(path, context.temp_allocator), filter_lower)
+    return search_matches(path, filter_lower)
 }
 
 // A collapsible section header: icon, title and a dimmed count. Open by default. `refresh` leaves room

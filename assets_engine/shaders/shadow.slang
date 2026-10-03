@@ -19,6 +19,7 @@ struct MeshInstance {
     uint mesh;
     uint material;
     uint shading;
+    float4 tint;
 }
 
 struct Mesh {

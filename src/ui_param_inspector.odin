@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:strings"
 import "core:math/linalg"
+import "core:mem"
 import "core:reflect"
 import "core:slice"
 import im "lib:odin-imgui"
@@ -12,7 +13,12 @@ import im "lib:odin-imgui"
 // so new fields show up in the inspector without hand-wiring UI. Laid out as a form (like the
 // schema editor): a left-aligned label column, then the input filling the rest of the row, with
 // nested structs as indented collapsible sub-sections. Per-field backtick tags control it:
-// `hidden` skips a field, `readonly` disables it.
+// `hidden` skips a field, `readonly` disables it, `section:<Member>` draws it under that EntitySection
+// header (fields without one come first, then the sections in the enum's order).
+//
+// The entity inspector also passes the defaults (a field that differs from its default has a bold label,
+// and right-clicking a label resets it), the other selected entities (a field where they differ is drawn
+// mixed), and the search text.
 
 Param_UI_Options :: struct {
     readonly:     bool,
@@ -25,7 +31,17 @@ Param_UI_Options :: struct {
     slider_flags: im.SliderFlags,
     combo_flags:  im.ComboFlags,
     path:         string,   // serialized key of the item being drawn ("model", "transform.position"); "" = top struct
+    filter:       string,   // search text, lowercase: only fields whose id or label (any language) contains it; top struct only
+    defaults:     rawptr,   // the struct's default value, or nil
+    others:       []rawptr, // other values edited along with this one (the rest of a multi-selection)
+    // Per field, set by ui_param_struct for the widget's label:
+    overridden:   bool,   // differs from its default (bold label)
+    mixed:        bool,
+    resettable:   bool,
 }
+
+PARAM_MIXED_COLOR  :: im.Vec4{1, 0.75, 0.35, 1}
+PARAM_MIXED_FORMAT :: "—"   // a number that differs across the selection shows a dash
 
 DEFAULT_PARAM_UI_OPTIONS :: Param_UI_Options {
     speed  = 0.01,
@@ -33,9 +49,17 @@ DEFAULT_PARAM_UI_OPTIONS :: Param_UI_Options {
 }
 
 // A form-row prefix: left-aligned label, then the next item starts at the shared column, full width.
+// A field that's been set (differs from its default) has a bold label, so it stands out; mixed (differs
+// across the selection) is amber. Right-click opens the field's menu (ui_param_struct draws it).
 ui_param_label :: proc(label: string, options: Param_UI_Options) {
     im.AlignTextToFramePadding()
-    im.TextUnformatted(fmt.ctprintf("%s", label))
+    text := fmt.ctprintf("%s", label)
+    if options.overridden do im.PushFontFloat(ui.font_bold, 0)
+    if options.mixed do im.TextColored(PARAM_MIXED_COLOR, "%s", text)
+    else do im.TextUnformatted(text)
+    if options.overridden do im.PopFont()
+    if options.mixed do im.SetItemTooltip("%s", tr(.Inspector_Mixed))
+    if options.resettable && im.IsItemHovered() && im.IsMouseReleased(.Right) do im.OpenPopup("param_menu")
     im.SameLine(options.label_w)
     im.SetNextItemWidth(-1)
 }
@@ -186,8 +210,11 @@ ui_param_quat :: proc(name: string, value: ^quat, options := DEFAULT_PARAM_UI_OP
     cformat := strings.clone_to_cstring(options.format, context.temp_allocator)
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
-    im.DragFloat4(fmt.ctprintf("##%s", name), cast(^vec4)value, options.speed, options.min, options.max, cformat, options.slider_flags)
-    value^ = linalg.quaternion_normalize(value^)
+    // Normalized only when dragged: a write every frame would count as an edit (an undo step, and under
+    // multi-edit the active rotation copied onto the whole selection) whenever rounding moved a bit.
+    if im.DragFloat4(fmt.ctprintf("##%s", name), cast(^vec4)value, options.speed, options.min, options.max, cformat, options.slider_flags) {
+        value^ = linalg.quaternion_normalize(value^)
+    }
     im.EndDisabled()
 }
 
@@ -297,8 +324,10 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
     struct_tags := reflect.struct_field_tags(type)
 
     // Shared input column for this struct: widest visible label + a gap, so rows line up
-    // regardless of language (labels differ in width between EN and the larger ZH font).
+    // regardless of language (labels differ in width between EN and the larger ZH font). Measured in bold,
+    // the wider of the two, since any label may turn bold.
     col: f32 = 0
+    im.PushFontFloat(ui.font_bold, 0)
     for i in 0 ..< attr_count {
         tags := param_field_tags(struct_tags[i])
         if contains(tags, "hidden") do continue
@@ -306,13 +335,47 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
         w := im.CalcTextSize(fmt.ctprintf("%s", param_field_label(owner_type, field.name, tags))).x
         if w > col do col = w
     }
+    im.PopFont()
     col += 16 * app.dispaly_scale
 
+    // Fields without a section, then one header per section. While searching, sections are plain
+    // separators (so nothing found stays folded away), and a section whose name matches shows all its fields.
+    param_struct_fields(type, value, options, owner_type, "", false, col)
+    for section in reflect.enum_field_names(EntitySection) {
+        label := param_member_label("EntitySection", section)
+        whole := options.filter != "" && param_text_matches(label, options.filter)
+        any_shown := false
+        for i in 0 ..< attr_count {
+            tags := param_field_tags(struct_tags[i])
+            if s, _ := param_tag_value(tags, "section:"); s != section do continue
+            if whole || param_field_shown(owner_type, reflect.struct_field_at(type, i), value, tags, options.filter) {
+                any_shown = true
+                break
+            }
+        }
+        if !any_shown do continue
+        if options.filter != "" {
+            im.SeparatorText(fmt.ctprintf("%s", label))
+        } else if !im.CollapsingHeader(fmt.ctprintf("%s###section_%s", label, section), {.DefaultOpen}) {
+            continue
+        }
+        param_struct_fields(type, value, options, owner_type, section, whole, col)
+    }
+
+    if !options.headerless do im.Unindent()
+}
+
+// One section's fields (`section` "" = those without one). `whole`: the search matched the section itself.
+@(private="file")
+param_struct_fields :: proc(type: typeid, value: any, options: Param_UI_Options, owner_type, section: string, whole: bool, col: f32) {
+    attr_count := reflect.struct_field_count(type)
+    struct_tags := reflect.struct_field_tags(type)
     for i in 0 ..< attr_count {
         tags := param_field_tags(struct_tags[i])
-        if contains(tags, "hidden") do continue
-
+        if s, _ := param_tag_value(tags, "section:"); s != section do continue
         field := reflect.struct_field_at(type, i)
+        if contains(tags, "hidden") || !whole && !param_field_shown(owner_type, field, value, tags, options.filter) do continue
+
         field_type := field.type
         field_value := reflect.struct_field_value(value, field)
 
@@ -320,6 +383,22 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
         field_options.readonly = options.readonly || contains(tags, "readonly")
         field_options.label_w  = col
         field_options.path     = options.path == "" ? field.name : fmt.tprintf("%s.%s", options.path, field.name)   // same dotted key serialize writes
+
+        // Against the defaults and the rest of the selection. A mixed number shows a dash instead of the
+        // active entity's value; dragging it still starts from that value.
+        def: rawptr
+        if options.defaults != nil {
+            def = rawptr(uintptr(options.defaults) + field.offset)
+            field_options.overridden = !param_value_equal(field_type, field_value.data, def)
+            field_options.resettable = !field_options.readonly
+        }
+        for o in options.others {
+            if !param_value_equal(field_type, field_value.data, rawptr(uintptr(o) + field.offset)) {
+                field_options.mixed = true
+                break
+            }
+        }
+        if field_options.mixed do field_options.format = PARAM_MIXED_FORMAT
 
         // Field label (schema-driven for Entity; loc tag fallback otherwise). Enum/bit-set
         // member names are localized inside the widgets via the entity schema.
@@ -358,7 +437,15 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
                     case runtime.Type_Info_Enum:
                         ui_param_enum(label, field_type.id, cast(^u64)field_value.data, field_options)
                     case runtime.Type_Info_Struct:
-                        ui_param_struct(label, base.id, field_value, field_options, typeinfo.name)
+                        // Its members compare against the matching parts of the defaults and the selection.
+                        sub := field_options
+                        sub.defaults = def
+                        if len(options.others) > 0 {
+                            others := make([]rawptr, len(options.others), context.temp_allocator)
+                            for o, j in options.others do others[j] = rawptr(uintptr(o) + field.offset)
+                            sub.others = others
+                        }
+                        ui_param_struct(label, base.id, field_value, sub, typeinfo.name)
                 }
             case runtime.Type_Info_Array:
                 #partial switch _ in typeinfo.elem.variant {
@@ -375,11 +462,123 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
                         }
                 }
         }
+        // The label's right-click menu (opened in ui_param_label).
+        if field_options.resettable && im.BeginPopup("param_menu") {
+            if im.MenuItem(tr(.Inspector_Reset), nil, false, field_options.overridden) do mem.copy(field_value.data, def, field_type.size)
+            im.EndPopup()
+        }
         im.PopID()
         im.Dummy({0, 3 * app.dispaly_scale})
     }
+}
 
-    if !options.headerless do im.Unindent()
+// Whether a field shows: not `hidden`, and matching the search (its id, its label in any language, or its value).
+@(private="file")
+param_field_shown :: proc(owner_type: string, field: reflect.Struct_Field, value: any, tags: []string, filter: string) -> bool {
+    if contains(tags, "hidden") do return false
+    if filter == "" do return true
+    if param_text_matches(field.name, filter) do return true
+    if param_text_matches(param_field_label(owner_type, field.name, tags), filter) do return true
+    if owner_type == "" {
+        for l in entity_field_labels(field.name) do if l != "" && param_text_matches(l, filter) do return true
+    }
+    return param_value_matches(field.type, rawptr(uintptr(value.data) + field.offset), filter)
+}
+
+// A field is also found by its value where that's text: a string or inline text (a name, an asset key), an
+// enum's choice, or the flags that are set, by id or by label in any language. Numbers aren't searched:
+// "1" would match half the fields.
+@(private="file")
+param_value_matches :: proc(ti: ^runtime.Type_Info, data: rawptr, filter: string) -> bool {
+    #partial switch v in runtime.type_info_base(ti).variant {
+    case runtime.Type_Info_String:
+        return param_text_matches((^string)(data)^, filter)
+    case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
+        text, ok := sbuf_any_str(any{data, ti.id})
+        return ok && param_text_matches(text, filter)
+    case runtime.Type_Info_Enum:
+        name, _ := reflect.enum_name_from_value_any(any{data, ti.id})
+        return param_member_matches(param_type_name(ti), name, filter)
+    case runtime.Type_Info_Bit_Set:
+        // Bit j is the enum's j-th member, as ui_param_bitset draws them.
+        for name, j in reflect.enum_field_names(v.elem.id) {
+            if ([^]u8)(data)[j / 8] & (1 << u32(j % 8)) == 0 do continue
+            if param_member_matches(param_type_name(v.elem), name, filter) do return true
+        }
+    }
+    return false
+}
+
+@(private="file")
+param_member_matches :: proc(type_name, member, filter: string) -> bool {
+    if param_text_matches(member, filter) do return true
+    for l in entity_flag_item_labels(type_name, member) do if l != "" && param_text_matches(l, filter) do return true
+    return false
+}
+
+@(private="file")
+param_text_matches :: proc(text, filter: string) -> bool {
+    return search_matches(text, filter)
+}
+
+// Whether two values of type `ti` are the same as the user sees them: text by content (a string's
+// pointer and an inline buffer's unused bytes don't count), structs member by member, anything else
+// byte for byte.
+param_value_equal :: proc(ti: ^runtime.Type_Info, a, b: rawptr) -> bool {
+    #partial switch _ in runtime.type_info_base(ti).variant {
+    case runtime.Type_Info_String:
+        return (^string)(a)^ == (^string)(b)^
+    case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
+        sa, _ := sbuf_any_str(any{a, ti.id})
+        sb, _ := sbuf_any_str(any{b, ti.id})
+        return sa == sb
+    case runtime.Type_Info_Struct:
+        for i in 0 ..< reflect.struct_field_count(ti.id) {
+            f := reflect.struct_field_at(ti.id, i)
+            if !param_value_equal(f.type, rawptr(uintptr(a) + f.offset), rawptr(uintptr(b) + f.offset)) do return false
+        }
+        return true
+    }
+    return mem.compare_ptrs(a, b, ti.size) == 0
+}
+
+// Multi-edit: applies to `dst` what changed between `before` and `after` (the active value, edited this
+// frame), and only that: one component of a vector, the flags that were toggled, a whole field otherwise.
+// So dragging X on several entities leaves their own Y and Z, and toggling one flag leaves the others.
+// Skips `hidden` fields and any with a tag in `skip` (e.g. "identity", so names stay unique).
+param_apply_changes :: proc(type: typeid, dst, before, after: rawptr, skip: []string) {
+    struct_tags := reflect.struct_field_tags(type)
+    fields: for i in 0 ..< reflect.struct_field_count(type) {
+        tags := param_field_tags(struct_tags[i])
+        if contains(tags, "hidden") do continue
+        for t in skip do if contains(tags, t) do continue fields
+
+        f := reflect.struct_field_at(type, i)
+        b := rawptr(uintptr(before) + f.offset)
+        a := rawptr(uintptr(after)  + f.offset)
+        d := rawptr(uintptr(dst)    + f.offset)
+        if param_value_equal(f.type, b, a) do continue
+
+        #partial switch v in runtime.type_info_base(f.type).variant {
+        case runtime.Type_Info_Array:
+            for j in 0 ..< v.count {
+                o := uintptr(j * v.elem_size)
+                if mem.compare_ptrs(rawptr(uintptr(b) + o), rawptr(uintptr(a) + o), v.elem_size) != 0 {
+                    mem.copy(rawptr(uintptr(d) + o), rawptr(uintptr(a) + o), v.elem_size)
+                }
+            }
+        case runtime.Type_Info_Bit_Set:
+            for j in 0 ..< f.type.size {
+                bb := ([^]u8)(b)[j]
+                ab := ([^]u8)(a)[j]
+                db := &([^]u8)(d)[j]
+                changed := ab ~ bb
+                db^ = (db^ &~ changed) | (ab & changed)
+            }
+        case:
+            mem.copy(d, a, f.type.size)
+        }
+    }
 }
 
 // An RGB colour: swatch + picker, always shown and edited as sRGB (what the swatch displays).

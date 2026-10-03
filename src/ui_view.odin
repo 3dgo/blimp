@@ -269,7 +269,7 @@ ui_view_selection :: proc(ev: ^Editor_View, gizmo_owns_mouse: bool) {
     m := &ev.marquee
     mp := im.GetMousePos()
     mouse := vec2{mp.x, mp.y}
-    if ev.hovered && im.IsMouseClicked(.Left) && !ui.io.KeyAlt && !gizmo_owns_mouse && ev.nav == .None {
+    if ev.hovered && im.IsMouseClicked(.Left) && !ui.io.KeyAlt && !gizmo_owns_mouse && ev.nav.drag == .None {
         m.pressing, m.dragging, m.start = true, false, mouse
         m.double = im.IsMouseDoubleClicked(.Left)
     }

@@ -156,7 +156,7 @@ end
 | `basic_static_flags` | 标志 | 位 0 = 静态（Static），位 1 = 可渲染（Renderable），位 2 = 投射间接光（Cast Indirect） |
 | `camera_type` | 枚举 | 0 无，1 透视，2 正交 |
 | `light_type` | 枚举 | 0 无，1 平行光，2 点光源，3 聚光灯，4 圆柱光 |
-| `color` / `intensity` | 矢量 / 数字 | 灯光颜色与强度 |
+| `color` / `intensity` | 矢量 / 数字 | 灯光颜色与强度；在有模型的实体上是模型的颜色乘数（白色 × 1 = 原样） |
 | `fov` / `inner_fov` | 数字 | 相机视角；聚光灯外 / 内锥角（度） |
 | `range` | 矢量（x, y） | 灯光：照射范围；声音：x 以内满音量，到 y 线性衰减为零 |
 | `light_group` | 数字 | 灯光所属的光源组，0 = 不可切换（见第 8 节） |
