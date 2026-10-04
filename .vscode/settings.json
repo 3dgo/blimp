@@ -11,6 +11,9 @@
     "Lua.diagnostics.disable": [
         "duplicate-set-field"
     ],
+    "Lua.runtime.special": {
+        "引入": "require"
+    },
     "Lua.completion.showWord": "Disable",
     "[lua]": {
         "editor.wordBasedSuggestions": "off"

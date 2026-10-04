@@ -58,6 +58,15 @@ Same structure for AI. Effort goes into perception and steering, not decision st
 
 Lua issues commands and queries state. **Lua never holds state** — not for animation, not
 for AI, not for sound. Odin is authoritative so script reload can't corrupt anything.
+World scripts are strict: their env's `__newindex` errors, so assigning an undeclared name stops the script
+(a forgotten `local` would otherwise keep state between frames). LuaCN spells `local` as `令` or `本地`.
+Every script (world scripts and main.lua) loads through `lua_script_load` (lua.odin): its own env falling back
+to _G, its own hook table (`World`/`世界` or `Blimp`/`引擎`), strict, and its own `require` / `引入` taking
+project-relative paths (`assets/characters/player`, anywhere under assets/). Modules run in that env, so the strict
+rule covers them and two playing worlds never share a module's upvalues; cached per script load only. Modules share
+data through entities and parameters passed down, never globals. Any .lua change reruns main.lua and every playing
+world's script (which script loaded which module isn't tracked). .luacn converts on hot reload, at engine start and
+on every Play; the converter skips unchanged output, so those passes don't trigger a reload.
 
 - The whole script API is the `@(lua)` procs in `lua_api_world.odin`, `lua_api_entity.odin` and
   `lua_api_input.odin`: thin wrappers over world-layer procs that take `^World`. World, entity, physics,

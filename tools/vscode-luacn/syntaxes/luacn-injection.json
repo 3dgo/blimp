@@ -6,7 +6,7 @@
         {
             "comment": "Control flow keywords — 否则如果 must appear before 否则",
             "name": "keyword.control.lua",
-            "match": "(?<![\\p{L}\\p{N}_])(否则如果|如果|那么|否则|结束|当|重复|直到|对于|在|做|函数|返回|本地|中断)(?![\\p{L}\\p{N}_])"
+            "match": "(?<![\\p{L}\\p{N}_])(否则如果|如果|那么|否则|结束|当|重复|直到|对于|在|做|函数|返回|本地|令|中断)(?![\\p{L}\\p{N}_])"
         },
         {
             "name": "keyword.operator.lua",

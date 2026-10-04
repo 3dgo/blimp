@@ -41,6 +41,7 @@ luacn_keywords :: proc() -> (keywords: map[string]string) {
 	keywords["函数"]     = "function"
 	keywords["返回"]     = "return"
 	keywords["本地"]     = "local"
+	keywords["令"]       = "local"   // short form of 本地 ("let")
 	keywords["真"]       = "true"
 	keywords["假"]       = "false"
 	keywords["空"]       = "nil"
@@ -85,6 +86,12 @@ luacn_convert_file :: proc(path: string, keywords: ^map[string]string) -> bool {
 	out_path := strings.concatenate({stem, ".lua"})
 	defer delete(out_path)
 
+	// Unchanged output isn't rewritten: Play and engine start convert every .luacn, and a write would make the
+	// hot reload watcher reload every script.
+	if old, old_err := os.read_entire_file(out_path, context.allocator); old_err == nil {
+		defer delete(old)
+		if string(old) == result do return true
+	}
 	write_err := os.write_entire_file(out_path, transmute([]byte)result)
 	if write_err != nil {
 		log.errorf("LuaCN: write error: %v", write_err)

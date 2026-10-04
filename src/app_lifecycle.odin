@@ -1,5 +1,7 @@
 package blimp
 
+import "common"
+
 // Structural changes — opening, playing, stopping and closing worlds and views, and reloading assets —
 // touch nearly every layer: the world lists, the renderer's mirrors, physics, sound, the Lua script, undo
 // and the UI. Each change is one proc here that calls them in order, so the whole sequence reads top to
@@ -47,6 +49,7 @@ app_world_opened :: proc(w: ^World) {
 app_play :: proc(w: ^World) -> ^World {
     level := world_level(w)
     if level.play_world != nil do return level.play_world
+    common.luacn_scan_folder("assets")   // a .luacn hot reload missed (or edited while closed) still plays as written
     p := world_play_copy(level)
     editor_world_copy(level, p)
     world_render_create(p)

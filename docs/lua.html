@@ -199,16 +199,22 @@ body { margin: 0; }
 
     <section><h2 id="s1"><span class="num">1</span><span>核心规则：Lua 发命令、查状态，不保存状态</span></h2>
 <p>这是整个脚本系统的前提，后面每个接口都按它设计：</p>
-<ul><li><strong>游戏状态归引擎所有</strong>。实体的位置、速度、声音都存在 Odin 那一侧；Lua 每帧读取它们，算出结果，再写回去。</li><li><strong>脚本里不留会变的东西</strong>。不要在脚本的全局或 upvalue 里存计时器、状态机、"上一帧的值"。顶层的 <code>本地</code> 只放常量（速度、半径、方向向量）。</li><li>需要随时间变化的东西，有两种写法：<ol><li><strong>写成时间的函数</strong>：<code>世界.时间()</code> 是运行世界的游戏时钟，暂停时停止。城门、旗帜、探照灯都按 <code>世界.时间()</code> 算出当前姿态，不需要任何记忆。</li><li><strong>存进实体字段</strong>：例如玩家的竖直速度存在 <code>玩家</code> 实体的 <code>velocity</code> 字段里。字段不够用就在实体 schema 里加一个（见 <a href="#s4-4">4.4</a>）。</li></ol></li></ul>
+<ul><li><strong>游戏状态归引擎所有</strong>。实体的位置、速度、声音都存在 Odin 那一侧；Lua 每帧读取它们，算出结果，再写回去。</li><li><strong>脚本里不留会变的东西</strong>。不要在脚本的全局或 upvalue 里存计时器、状态机、"上一帧的值"。顶层的 <code>令</code> / <code>本地</code> 只放常量（速度、半径、方向向量）。</li><li>需要随时间变化的东西，有两种写法：<ol><li><strong>写成时间的函数</strong>：<code>世界.时间()</code> 是运行世界的游戏时钟，暂停时停止。城门、旗帜、探照灯都按 <code>世界.时间()</code> 算出当前姿态，不需要任何记忆。</li><li><strong>存进实体字段</strong>：例如玩家的竖直速度存在 <code>玩家</code> 实体的 <code>velocity</code> 字段里。字段不够用就在实体 schema 里加一个（见 <a href="#s4-4">4.4</a>）。</li></ol></li></ul>
 <p>这样做的好处是：<strong>脚本随时可以从头重新执行</strong>。保存脚本时引擎热重载它，游戏不会因此坏掉。</p>
 </section><section><h2 id="s2"><span class="num">2</span><span>脚本文件与运行方式</span></h2>
 <h3 id="s2-1"><span class="num">2.1</span><span>两种脚本</span></h3>
 <div class="tbl"><table><thead><tr><th></th><th>世界脚本</th><th>引擎脚本</th></tr></thead><tbody><tr><td>文件</td><td>关卡的世界设置里的 <code>script</code> 路径，如 <code>assets/scripts/castle.lua</code></td><td>固定为 <code>assets/scripts/main.lua</code></td></tr><tr><td>何时运行</td><td>只在关卡<strong>运行（Play）</strong>时</td><td>引擎启动后整个会话</td></tr><tr><td>回调</td><td><code>世界.开始()</code>、<code>世界.更新(时间差)</code></td><td><code>引擎.开始()</code>、<code>引擎.更新(时间差)</code>、<code>引擎.完结()</code></td></tr><tr><td><code>世界.*</code> / <code>实体.*</code> 作用于</td><td>这个运行中的关卡</td><td>没有世界：调用会在日志里报错，什么也不做</td></tr></tbody></table></div>
 <p><strong>游戏逻辑写在世界脚本里。</strong> 引擎脚本没有世界可以操作，只适合整个会话的逻辑（比如读 <code>输入.*</code>）。</p>
-<p>每个世界脚本运行在自己的环境表里（找不到的名字回落到全局 <code>_G</code>），所以同时打开的两个关卡的脚本互不覆盖全局变量。脚本里的 <code>世界</code> 也是它自己的表，<code>世界.开始</code> 等回调只属于这个关卡。</p>
+<p>两种脚本的加载方式完全一样：每个脚本运行在自己的环境表里（找不到的名字回落到全局 <code>_G</code>），所以同时打开的两个关卡的脚本互不覆盖全局变量。脚本里的 <code>世界</code>（引擎脚本里是 <code>引擎</code>）也是它自己的表，回调只属于这个脚本。下面“变量要先声明”的规则和 2.5 的 <code>引入</code> 对两种脚本都适用。</p>
+<p><strong>每个变量都要先声明。</strong>给没用 <code>令</code>（或 <code>本地</code>）声明过的名字赋值是错误：脚本停下，日志和错误浮层里写明哪一行、哪个名字。忘了声明的变量本来会悄悄留到下一帧，变成脚本里的状态，所以干脆不允许。读全局（<code>打印</code>、<code>数学</code>、<code>世界</code>）和给表的字段赋值（<code>函数 世界.更新(...)</code>）不受影响。</p>
+<pre class="code"><code><span class="t-kw">令</span> 速度 = <span class="t-num">2</span>          <span class="t-com">-- 正确</span>
+<span class="t-kw">函数</span> <span class="t-api">世界</span>.更新(时间差)
+    <span class="t-kw">令</span> t = <span class="t-api">世界</span>.时间()  <span class="t-com">-- 正确</span>
+    距离 = t * 速度      <span class="t-com">-- 错误：assignment to undeclared variable &#x27;距离&#x27;</span>
+<span class="t-kw">结束</span></code></pre>
 <h3 id="s2-2"><span class="num">2.2</span><span>LuaCN：中文关键字的 Lua</span></h3>
 <p>脚本可以写成 <code>.luacn</code>：关键字是中文，构建时（以及编辑器热重载时）转译成同名的 <code>.lua</code>。<strong>关卡引用的是 <code>.lua</code>，但要改的是 <code>.luacn</code></strong>，生成的 <code>.lua</code> 会被覆盖。也可以直接写普通 <code>.lua</code>，所有接口都有英文名。</p>
-<div class="tbl"><table><thead><tr><th>LuaCN</th><th>Lua</th><th>LuaCN</th><th>Lua</th></tr></thead><tbody><tr><td><code>本地</code></td><td><code>local</code></td><td><code>返回</code></td><td><code>return</code></td></tr><tr><td><code>函数</code></td><td><code>function</code></td><td><code>结束</code></td><td><code>end</code></td></tr><tr><td><code>如果</code> / <code>那么</code></td><td><code>if</code> / <code>then</code></td><td><code>否则如果</code> / <code>否则</code></td><td><code>elseif</code> / <code>else</code></td></tr><tr><td><code>当</code> / <code>做</code></td><td><code>while</code> / <code>do</code></td><td><code>对于</code> / <code>在</code></td><td><code>for</code> / <code>in</code></td></tr><tr><td><code>重复</code> / <code>直到</code></td><td><code>repeat</code> / <code>until</code></td><td><code>中断</code></td><td><code>break</code></td></tr><tr><td><code>真</code> / <code>假</code> / <code>空</code></td><td><code>true</code> / <code>false</code> / <code>nil</code></td><td><code>和</code> / <code>或</code> / <code>非</code></td><td><code>and</code> / <code>or</code> / <code>not</code></td></tr></tbody></table></div>
+<div class="tbl"><table><thead><tr><th>LuaCN</th><th>Lua</th><th>LuaCN</th><th>Lua</th></tr></thead><tbody><tr><td><code>令</code> / <code>本地</code></td><td><code>local</code></td><td><code>返回</code></td><td><code>return</code></td></tr><tr><td><code>函数</code></td><td><code>function</code></td><td><code>结束</code></td><td><code>end</code></td></tr><tr><td><code>如果</code> / <code>那么</code></td><td><code>if</code> / <code>then</code></td><td><code>否则如果</code> / <code>否则</code></td><td><code>elseif</code> / <code>else</code></td></tr><tr><td><code>当</code> / <code>做</code></td><td><code>while</code> / <code>do</code></td><td><code>对于</code> / <code>在</code></td><td><code>for</code> / <code>in</code></td></tr><tr><td><code>重复</code> / <code>直到</code></td><td><code>repeat</code> / <code>until</code></td><td><code>中断</code></td><td><code>break</code></td></tr><tr><td><code>真</code> / <code>假</code> / <code>空</code></td><td><code>true</code> / <code>false</code> / <code>nil</code></td><td><code>和</code> / <code>或</code> / <code>非</code></td><td><code>and</code> / <code>or</code> / <code>not</code></td></tr></tbody></table></div>
 <p>常用标准库也有中文别名：<code>打印</code>(print)、<code>转文本</code>(tostring)、<code>转数字</code>(tonumber)、<code>遍历</code>(pairs)、<code>遍历列表</code>(ipairs)、<code>安全调用</code>(pcall)、<code>字符串.格式化</code>(string.format)、<code>表.插入</code>(table.insert) 等，完整列表在 <code>assets_engine/scripts/lua_chinese_defs.lua</code>。</p>
 <h3 id="s2-3"><span class="num">2.3</span><span>给关卡挂脚本</span></h3>
 <ol><li>打开关卡，点视口工具栏上的齿轮按钮打开<strong>世界设置</strong>，在 <code>script</code> 里填脚本路径（项目相对路径，如 <code>assets/scripts/castle.lua</code>）。</li><li>齿轮旁边的 <code>&lt;&gt;</code> 按钮用 VS Code 打开这个脚本；如果它是由 <code>.luacn</code> 生成的，打开的是 <code>.luacn</code>。</li><li>按 <strong>F5</strong> 运行。</li></ol>
@@ -216,7 +222,30 @@ body { margin: 0; }
 <div class="tbl"><table><thead><tr><th>键</th><th>作用</th></tr></thead><tbody><tr><td>F5</td><td>运行：复制一份关卡来运行，脚本执行 <code>世界.开始()</code></td></tr><tr><td>F6</td><td>暂停 / 继续。暂停时 <code>世界.更新</code> 不调用，<code>世界.时间()</code> 不走</td></tr><tr><td>F10</td><td>暂停时单步一帧</td></tr><tr><td>F7</td><td>停止。运行副本被丢弃，编辑中的关卡<strong>从不</strong>被运行修改</td></tr><tr><td>F8</td><td>在游戏模式（整个窗口是游戏画面，通过相机实体看）和编辑器之间切换，游戏继续运行</td></tr></tbody></table></div>
 <p>运行的是关卡的<strong>副本</strong>：脚本把吊桥转了、把玩家移走了，停止后关卡还是原样，也不会被保存。</p>
 <h3 id="s2-4"><span class="num">2.4</span><span>热重载与报错</span></h3>
-<ul><li>运行时保存脚本，引擎会重新加载它，并<strong>重新执行 <code>世界.开始()</code></strong>。因为脚本不保存状态，这总是安全的。</li><li>脚本出错时，错误写进日志，这个关卡的脚本停止运行，直到你修改脚本（热重载）或重新打开关卡。不会每帧刷屏。</li><li><code>打印(...)</code> 输出到引擎日志（控制台）。</li></ul>
+<ul><li>保存任何脚本（关卡脚本、引擎脚本，或它们引入的模块，放在 <code>assets/</code> 下任何位置），所有脚本都会从头重新加载：引擎脚本马上重新执行 <code>引擎.开始()</code>，每个正在运行的关卡<strong>重新执行 <code>世界.开始()</code></strong>。因为脚本不保存状态，这总是安全的。</li><li>脚本出错时，错误写进日志，这个关卡的脚本停止运行，直到你保存修改（热重载）或停止后重新运行。不会每帧刷屏。</li><li><code>打印(...)</code> 输出到引擎日志（控制台）。</li><li><code>.luacn</code> 在保存时（热重载）、引擎启动时和每次按下运行时都会转译成 <code>.lua</code>，所以运行的总是你最后写的版本。</li></ul>
+<h3 id="s2-5"><span class="num">2.5</span><span>拆成多个文件：引入</span></h3>
+<p>关卡脚本和引擎脚本都可以把代码拆到别的文件里，用 <code>引入</code>（英文 <code>require</code>）按<strong>项目相对路径</strong>加载。文件放在 <code>assets/</code> 下任何位置都行，<code>.lua</code> 可以省略：</p>
+<pre class="code"><code><span class="t-com">-- 关卡脚本（世界设置的 script）</span>
+<span class="t-kw">令</span> 玩家模块 = 引入(<span class="t-str">&quot;assets/characters/player&quot;</span>)
+<span class="t-kw">令</span> 敌人模块 = 引入(<span class="t-str">&quot;assets/characters/enemy&quot;</span>)
+<span class="t-kw">令</span> 炮塔模块 = 引入(<span class="t-str">&quot;assets/props/turret&quot;</span>)
+
+<span class="t-kw">函数</span> <span class="t-api">世界</span>.更新(时间差)
+    <span class="t-kw">令</span> 玩家位置 = 玩家模块.更新(时间差)
+    敌人模块.更新(时间差, 玩家位置)
+    炮塔模块.更新(时间差, 玩家位置)
+<span class="t-kw">结束</span></code></pre>
+<p>模块就是一个函数表，最后 <code>返回</code> 它：</p>
+<pre class="code"><code><span class="t-com">-- assets/characters/enemy.luacn</span>
+<span class="t-kw">令</span> 敌人 = {}
+<span class="t-kw">令</span> 速度 = <span class="t-num">1.5</span>          <span class="t-com">-- 顶层只放常量</span>
+
+<span class="t-kw">函数</span> 敌人.更新(时间差, 玩家位置)
+    <span class="t-com">-- 读写实体</span>
+<span class="t-kw">结束</span>
+
+<span class="t-kw">返回</span> 敌人</code></pre>
+<ul><li><strong>数据怎么共享</strong>：不用全局变量。实体上的东西（玩家位置、血量）各个模块直接从实体读；关卡脚本算出来的值当参数传下去；大家都要看、又不属于某个实体的状态（比如警报等级），加成实体字段（见 4.4）。</li><li>同一个模块可以被多个关卡引入。每个运行中的关卡各自加载一份，互不共享；每次运行、每次热重载都重新加载。</li><li>模块和关卡脚本用同一个环境：<code>世界</code>、<code>实体</code> 指的是这个关卡，“变量要先声明”的规则同样适用。</li><li>路径写错、互相引入（A 引入 B，B 又引入 A）都会报错，并指出是哪个文件哪一行。</li></ul>
 </section><section><h2 id="s3"><span class="num">3</span><span>生命周期回调</span></h2>
 <pre class="code"><code><span class="t-kw">function</span> <span class="t-api">世界</span>.开始()
     <span class="t-com">-- 运行开始时执行一次（脚本热重载后也会再执行一次）</span>
@@ -224,7 +253,7 @@ body { margin: 0; }
 
 <span class="t-kw">function</span> <span class="t-api">世界</span>.更新(时间差)
     <span class="t-com">-- 关卡每走一帧调用一次；时间差 是这一帧的秒数</span>
-    <span class="t-kw">本地</span> t = <span class="t-api">世界</span>.时间()   <span class="t-com">-- 自运行开始的游戏秒数，暂停时停止</span>
+    <span class="t-kw">令</span> t = <span class="t-api">世界</span>.时间()   <span class="t-com">-- 自运行开始的游戏秒数，暂停时停止</span>
 <span class="t-kw">end</span></code></pre>
 <p>英文写法是 <code>function World.start()</code> / <code>function World.update(dt)</code> / <code>World.time()</code>。</p>
 <ul><li><code>世界.更新</code> 只在关卡真正前进的帧调用：暂停时不调用，F10 单步时调用一次。</li><li>动画请基于 <code>世界.时间()</code>，不要在 Lua 里自己累加时间。</li></ul>
@@ -234,15 +263,15 @@ body { margin: 0; }
 <div class="tbl"><table><thead><tr><th>中文</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>世界.查找(名称)</code></td><td><code>World.find(name)</code></td><td>按名称找实体，返回 <code>句柄, 是否找到</code></td></tr><tr><td><code>世界.获取(名称)</code></td><td><code>World.get(name)</code></td><td>按名称取一个必须存在的实体，返回句柄；找不到时在日志和错误浮层里警告（每个名称每次加载脚本只警告一次）</td></tr><tr><td><code>实体.有效(句柄)</code></td><td><code>Entity.valid(h)</code></td><td>句柄是否还指向一个存在的实体</td></tr><tr><td><code>世界.添加(名称, 模型, 位置)</code></td><td><code>World.add(name, model, pos)</code></td><td>新建实体，返回句柄。<code>模型</code> 是资产键，如 <code>&quot;assets/models/castle.gltf:flag001&quot;</code>；名称重复时自动改成 <code>name_1</code> 这样的唯一名</td></tr><tr><td><code>世界.移除(句柄)</code></td><td><code>World.remove(h)</code></td><td>删除实体</td></tr></tbody></table></div>
 <p>名称可以是中文（城堡关卡的实体全是中文名），按 UTF-8 存储，最长 64 字节，约 21 个汉字。</p>
 <p><code>世界.查找</code> 很便宜，每帧按名称查找就是推荐写法。找不到时句柄无效，<code>实体.有效</code> 返回假，后续对它的读写都是安全的空操作：</p>
-<pre class="code"><code><span class="t-kw">本地</span> 灯 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;探照灯&quot;</span>)
+<pre class="code"><code><span class="t-kw">令</span> 灯 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;探照灯&quot;</span>)
 <span class="t-kw">如果</span> <span class="t-kw">非</span> <span class="t-api">实体</span>.有效(灯) <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-kw">结束</span></code></pre>
 <p>两者的区别在于找不到时算不算错误。实体应该一直在（城门、玩家、主相机），找不到说明它在编辑器里被改名或删掉了，用 <code>世界.获取</code>，这样按下运行就能看到警告，不会默默失效。找不到本身就是答案（导弹的目标已经死了，改为直飞），用 <code>世界.查找</code>，它不报任何东西：</p>
-<pre class="code"><code><span class="t-kw">本地</span> 目标, 还在 = <span class="t-api">世界</span>.查找(目标名)
+<pre class="code"><code><span class="t-kw">令</span> 目标, 还在 = <span class="t-api">世界</span>.查找(目标名)
 <span class="t-kw">如果</span> 还在 <span class="t-kw">那么</span> <span class="t-com">-- 追踪目标</span>
 <span class="t-kw">否则</span> <span class="t-com">-- 直飞</span>
 <span class="t-kw">结束</span></code></pre>
 <p>关卡里固定的部件（城门、吊桥、探照灯）也可以在 <code>世界.开始</code> 里用 <code>世界.获取</code> 取一次，存进脚本顶层的本地变量，在 <code>世界.更新</code> 里直接用。这样是安全的：实体被删掉后，存着的句柄会变无效（句柄带代数，槽位重用后旧句柄也不会指向新实体）；每次按下运行、每次脚本热重载都会重新执行 <code>世界.开始</code>，重新取句柄。</p>
-<pre class="code"><code><span class="t-kw">本地</span> 闸门
+<pre class="code"><code><span class="t-kw">令</span> 闸门
 
 <span class="t-kw">函数</span> <span class="t-api">世界</span>.开始()
     闸门 = <span class="t-api">世界</span>.获取(<span class="t-str">&quot;闸门&quot;</span>)
@@ -259,13 +288,13 @@ body { margin: 0; }
 <div class="tbl"><table><thead><tr><th>类型</th><th>读</th><th>写</th><th>适用字段</th></tr></thead><tbody><tr><td>数字</td><td><code>实体.取数(e, 字段)</code></td><td><code>实体.设数(e, 字段, 值)</code></td><td><code>f32</code>、整数、枚举（序号）、标志位（位掩码）</td></tr><tr><td>布尔</td><td><code>实体.取布尔(e, 字段)</code></td><td><code>实体.设布尔(e, 字段, 值)</code></td><td><code>bool</code></td></tr><tr><td>文本</td><td><code>实体.取文本(e, 字段)</code></td><td><code>实体.设文本(e, 字段, 值)</code></td><td>名称、模型、声音等字符串</td></tr><tr><td>矢量</td><td><code>实体.取矢量(e, 字段)</code></td><td><code>实体.设矢量(e, 字段, 矢量3)</code></td><td><code>vec3</code></td></tr><tr><td>四元数</td><td><code>实体.取四元数(e, 字段)</code></td><td><code>实体.设四元数(e, 字段, 四元数)</code></td><td><code>quat</code></td></tr></tbody></table></div>
 <p>英文名：<code>Entity.get_number / set_number / get_bool / set_bool / get_string / set_string / get_vec3 / set_vec3 / get_quat / set_quat</code>。</p>
 <p>字段名用 schema 里的<strong>英文 id</strong>（编辑器检查器里显示的是中文标签）。字段名写错或类型不对时，读返回零值，写不生效。</p>
-<pre class="code"><code><span class="t-kw">本地</span> 门 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;闸门&quot;</span>)
-<span class="t-kw">本地</span> 位置 = <span class="t-api">实体</span>.取矢量(门, <span class="t-str">&quot;position&quot;</span>)
+<pre class="code"><code><span class="t-kw">令</span> 门 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;闸门&quot;</span>)
+<span class="t-kw">令</span> 位置 = <span class="t-api">实体</span>.取矢量(门, <span class="t-str">&quot;position&quot;</span>)
 <span class="t-api">实体</span>.设矢量(门, <span class="t-str">&quot;position&quot;</span>, <span class="t-api">矢量3</span>(位置.x, <span class="t-num">0.6</span>, 位置.z))
 <span class="t-api">实体</span>.设数(<span class="t-api">世界</span>.查找(<span class="t-str">&quot;主塔火把&quot;</span>), <span class="t-str">&quot;intensity&quot;</span>, <span class="t-num">2.0</span>)</code></pre>
 <p>位置、朝向、缩放和“隐藏”是每个实体都有的字段，有专门的接口，不用写字段名：</p>
 <div class="tbl"><table><thead><tr><th>读</th><th>写</th><th>英文</th><th>说明</th></tr></thead><tbody><tr><td><code>实体.取位置(e)</code></td><td><code>实体.设位置(e, 矢量3)</code></td><td><code>Entity.get_position / set_position</code></td><td>世界坐标的 <code>position</code></td></tr><tr><td><code>实体.取朝向(e)</code></td><td><code>实体.设朝向(e, 四元数)</code></td><td><code>Entity.get_rotation / set_rotation</code></td><td><code>rotation</code></td></tr><tr><td><code>实体.取缩放(e)</code></td><td><code>实体.设缩放(e, 矢量3)</code></td><td><code>Entity.get_scale / set_scale</code></td><td><code>scale</code></td></tr><tr><td></td><td><code>实体.平移(e, 位移)</code></td><td><code>Entity.translate(e, delta)</code></td><td>位置加上 <code>位移</code>（世界坐标）</td></tr><tr><td></td><td><code>实体.旋转(e, 四元数)</code></td><td><code>Entity.rotate(e, q)</code></td><td>在本地坐标里转：<code>朝向 = 朝向 * q</code></td></tr><tr><td><code>实体.是否隐藏(e)</code></td><td><code>实体.隐藏(e) / 实体.取消隐藏(e)</code></td><td><code>Entity.is_hidden / hide / unhide</code></td><td>基本标志里的“隐藏”：隐藏后不画，碰撞和声音不受影响</td></tr></tbody></table></div>
-<pre class="code"><code><span class="t-kw">本地</span> 门 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;闸门&quot;</span>)
+<pre class="code"><code><span class="t-kw">令</span> 门 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;闸门&quot;</span>)
 <span class="t-api">实体</span>.平移(门, <span class="t-api">矢量3</span>(<span class="t-num">0</span>, 时间差 * <span class="t-num">0.3</span>, <span class="t-num">0</span>))     <span class="t-com">-- 每秒上升 0.3</span>
 <span class="t-api">实体</span>.旋转(<span class="t-api">世界</span>.查找(<span class="t-str">&quot;风车&quot;</span>), <span class="t-api">四元数</span>.轴角(前, 时间差))
 <span class="t-kw">如果</span> 玩家死了 <span class="t-kw">那么</span> <span class="t-api">实体</span>.隐藏(<span class="t-api">世界</span>.查找(<span class="t-str">&quot;玩家&quot;</span>)) <span class="t-kw">结束</span></code></pre>
@@ -273,7 +302,7 @@ body { margin: 0; }
 <h3 id="s4-3"><span class="num">4.3</span><span>常用字段</span></h3>
 <div class="tbl"><table><thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead><tbody><tr><td><code>name</code></td><td>文本</td><td>名称，在一个关卡里唯一</td></tr><tr><td><code>position</code> / <code>rotation</code> / <code>scale</code></td><td>矢量 / 四元数 / 矢量</td><td>变换</td></tr><tr><td><code>model</code></td><td>文本</td><td>模型资产键</td></tr><tr><td><code>basic_flags</code></td><td>标志</td><td>位 0 = 启用（Enabled），位 1 = 隐藏（Hidden）</td></tr><tr><td><code>basic_static_flags</code></td><td>标志</td><td>位 0 = 静态（Static），位 1 = 可渲染（Renderable），位 2 = 投射间接光（Cast Indirect）</td></tr><tr><td><code>camera_type</code></td><td>枚举</td><td>0 无，1 透视，2 正交</td></tr><tr><td><code>light_type</code></td><td>枚举</td><td>0 无，1 平行光，2 点光源，3 聚光灯，4 圆柱光</td></tr><tr><td><code>color</code> / <code>intensity</code></td><td>矢量 / 数字</td><td>灯光颜色与强度</td></tr><tr><td><code>fov</code> / <code>inner_fov</code></td><td>数字</td><td>相机视角；聚光灯外 / 内锥角（度）</td></tr><tr><td><code>range</code></td><td>矢量（x, y）</td><td>灯光：照射范围；声音：x 以内满音量，到 y 线性衰减为零</td></tr><tr><td><code>light_group</code></td><td>数字</td><td>灯光所属的光源组，0 = 不可切换（见第 8 节）</td></tr><tr><td><code>sound</code> / <code>volume</code> / <code>sound_flags</code></td><td>文本 / 数字 / 标志</td><td>实体自带的声音（见第 7 节）</td></tr><tr><td><code>collision</code></td><td>枚举</td><td>0 无，1 包围盒，2 碰撞网格（<code>_col</code>），3 渲染网格</td></tr><tr><td><code>velocity</code></td><td>矢量</td><td>游戏自用的速度，不保存到关卡文件</td></tr></tbody></table></div>
 <p>标志位按位掩码读写，例如隐藏一个实体：</p>
-<pre class="code"><code><span class="t-kw">本地</span> 标志 = <span class="t-api">实体</span>.取数(e, <span class="t-str">&quot;basic_flags&quot;</span>)       <span class="t-com">-- 1 = 只启用</span>
+<pre class="code"><code><span class="t-kw">令</span> 标志 = <span class="t-api">实体</span>.取数(e, <span class="t-str">&quot;basic_flags&quot;</span>)       <span class="t-com">-- 1 = 只启用</span>
 <span class="t-api">实体</span>.设数(e, <span class="t-str">&quot;basic_flags&quot;</span>, 标志 + <span class="t-num">2</span>)          <span class="t-com">-- 加上 Hidden（假设原来没有隐藏）</span></code></pre>
 <p><strong>会被脚本移动的实体不要勾"静态"</strong>。静态实体参与探针烘焙，也是物理里的静态刚体；城堡里的吊桥、闸门、旗帜都只设了 Renderable。</p>
 <h3 id="s4-4"><span class="num">4.4</span><span>自定义字段</span></h3>
@@ -310,12 +339,12 @@ body { margin: 0; }
 <div class="tbl"><table><thead><tr><th><code>collision</code></th><th>形状</th><th>适合</th></tr></thead><tbody><tr><td>无</td><td>不碰撞</td><td>旗子、装饰小物</td></tr><tr><td>包围盒</td><td>模型包围盒 × 缩放</td><td>树、石头，最便宜</td></tr><tr><td>碰撞网格（默认）</td><td>套件里的 <code>&lt;模型&gt;_col</code> 网格</td><td>美术专门做了简化碰撞的模型</td></tr><tr><td>渲染网格</td><td>模型的所有三角形</td><td>低多边形的城墙、地面</td></tr></tbody></table></div>
 <p>勾了"静态"的实体是静态碰撞体；其他的会<strong>跟着实体移动</strong>——脚本转动吊桥，玩家就会被吊桥挡住。</p>
 <h3 id="s9-2"><span class="num">9.2</span><span>角色移动</span></h3>
-<pre class="code"><code><span class="t-kw">本地</span> 着地 = <span class="t-api">实体</span>.角色移动(e, 位移, 半径, 高度)   <span class="t-com">-- Entity.move_character(e, delta, radius, height)</span></code></pre>
+<pre class="code"><code><span class="t-kw">令</span> 着地 = <span class="t-api">实体</span>.角色移动(e, 位移, 半径, 高度)   <span class="t-com">-- Entity.move_character(e, delta, radius, height)</span></code></pre>
 <p>给玩家、NPC 这类在场景里走动的角色用。引擎用物理（Box3D）把实体当成一个站在它 <code>position</code> 上的胶囊体（半径、总高度），移动 <code>位移</code>，沿碰撞面滑动：撞墙停下，斜坡和台阶会走上去。结果直接写进实体的 <code>position</code>。返回值表示结束时是否站在地面上（法线 y ≥ 0.7 的面算地面）。实体自己的碰撞体会被忽略。</p>
 <p>只想直接改位置、不需要碰撞（吊桥、闸门、旗帜）就直接设 <code>position</code> / <code>rotation</code> 字段。</p>
 <p>位移已经乘过 <code>时间差</code>；重力也是位移的一部分。速度要跨帧保留就存进实体字段（见第 10 节玩家的写法）。</p>
 <h3 id="s9-3"><span class="num">9.3</span><span>射线检测</span></h3>
-<pre class="code"><code><span class="t-kw">本地</span> 命中, 点, 法线, 实体号 = <span class="t-api">世界</span>.射线检测(起点, 方向, 距离)   <span class="t-com">-- World.raycast(origin, dir, dist)</span></code></pre>
+<pre class="code"><code><span class="t-kw">令</span> 命中, 点, 法线, 实体号 = <span class="t-api">世界</span>.射线检测(起点, 方向, 距离)   <span class="t-com">-- World.raycast(origin, dir, dist)</span></code></pre>
 <p>沿射线找第一个碰撞（方向不必是单位向量），返回是否命中、命中点、表面法线和命中的实体句柄。</p>
 </section><section><h2 id="s10"><span class="num">10</span><span>相机</span></h2>
 <p>游戏画面通过运行世界里<strong>第一个启用的相机实体</strong>（<code>camera_type</code> 不为"无"）来渲染。控制相机就是写它的 <code>position</code> 和 <code>rotation</code>，和任何实体一样。</p>
@@ -329,31 +358,31 @@ print(hit, Entity.get_string(e, &quot;name&quot;), pt)
 </section><section><h2 id="s12"><span class="num">12</span><span>示例：城堡关卡</span></h2>
 <p><code>assets/scenes/castle.level</code> 的世界设置里 <code>script = assets/scripts/castle.lua</code>，它由 <code>assets/scripts/castle.luacn</code> 生成。脚本做了六件事：城门开关、城门音效、探照灯扫动、旗帜飘动、灯光组变化，以及一个第一人称玩家。所有动画都只是 <code>世界.时间()</code> 的函数；唯一跨帧的状态（玩家的竖直速度）存在实体字段里。</p>
 <h3 id="s12-1"><span class="num">12.1</span><span>常量与工具函数</span></h3>
-<pre class="code"><code><span class="t-kw">本地</span> 上 = <span class="t-api">矢量3</span>(<span class="t-num">0</span>, <span class="t-num">1</span>, <span class="t-num">0</span>)
-<span class="t-kw">本地</span> 右 = <span class="t-api">矢量3</span>(<span class="t-num">1</span>, <span class="t-num">0</span>, <span class="t-num">0</span>)
-<span class="t-kw">本地</span> 前 = <span class="t-api">矢量3</span>(<span class="t-num">0</span>, <span class="t-num">0</span>, <span class="t-num">1</span>)
+<pre class="code"><code><span class="t-kw">令</span> 上 = <span class="t-api">矢量3</span>(<span class="t-num">0</span>, <span class="t-num">1</span>, <span class="t-num">0</span>)
+<span class="t-kw">令</span> 右 = <span class="t-api">矢量3</span>(<span class="t-num">1</span>, <span class="t-num">0</span>, <span class="t-num">0</span>)
+<span class="t-kw">令</span> 前 = <span class="t-api">矢量3</span>(<span class="t-num">0</span>, <span class="t-num">0</span>, <span class="t-num">1</span>)
 
 <span class="t-com">-- 固定部件的句柄，世界.开始 里用 世界.获取 取（找不到会警告）。</span>
-<span class="t-kw">本地</span> 吊桥, 闸门, 探照灯, 城门声, 玩家, 相机
+<span class="t-kw">令</span> 吊桥, 闸门, 探照灯, 城门声, 玩家, 相机
 
-<span class="t-kw">本地</span> <span class="t-kw">函数</span> 平滑(x)
+<span class="t-kw">令</span> <span class="t-kw">函数</span> 平滑(x)
     x = <span class="t-api">数学</span>.截断(x)
     <span class="t-kw">返回</span> x * x * (<span class="t-num">3</span> - <span class="t-num">2</span> * x)
 <span class="t-kw">结束</span></code></pre>
 <p>顶层只有常量、纯函数和固定部件的句柄。句柄在 <code>世界.开始</code> 里取（见 12.7），各个系统直接用，不再每帧查找（见 4.1）。<code>平滑</code> 是 0–1 的 smoothstep 缓动。</p>
 <h3 id="s12-2"><span class="num">12.2</span><span>城门：用时间算出姿态</span></h3>
 <pre class="code"><code><span class="t-com">-- 城门循环，0 = 关闭并升起，1 = 打开并放下：开 6 秒，关闭 2 秒，关 5 秒，打开 2 秒。</span>
-<span class="t-kw">本地</span> <span class="t-kw">函数</span> 城门开度(t)
-    <span class="t-kw">本地</span> p = t % <span class="t-num">15</span>
+<span class="t-kw">令</span> <span class="t-kw">函数</span> 城门开度(t)
+    <span class="t-kw">令</span> p = t % <span class="t-num">15</span>
     <span class="t-kw">如果</span> p &lt; <span class="t-num">6</span>  <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-num">1</span> <span class="t-kw">结束</span>
     <span class="t-kw">如果</span> p &lt; <span class="t-num">8</span>  <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-num">1</span> - 平滑((p - <span class="t-num">6</span>) / <span class="t-num">2</span>) <span class="t-kw">结束</span>
     <span class="t-kw">如果</span> p &lt; <span class="t-num">13</span> <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-num">0</span> <span class="t-kw">结束</span>
     <span class="t-kw">返回</span> 平滑((p - <span class="t-num">13</span>) / <span class="t-num">2</span>)
 <span class="t-kw">结束</span>
 
-<span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新城门(t)
-    <span class="t-kw">本地</span> 开度 = 城门开度(t)
-    <span class="t-kw">本地</span> 朝向 = <span class="t-api">四元数</span>.轴角(上, <span class="t-api">数学</span>.圆周率 / <span class="t-num">2</span>)   <span class="t-com">-- 城门朝 -Z（它的套件部件偏航了 90 度）</span>
+<span class="t-kw">令</span> <span class="t-kw">函数</span> 更新城门(t)
+    <span class="t-kw">令</span> 开度 = 城门开度(t)
+    <span class="t-kw">令</span> 朝向 = <span class="t-api">四元数</span>.轴角(上, <span class="t-api">数学</span>.圆周率 / <span class="t-num">2</span>)   <span class="t-com">-- 城门朝 -Z（它的套件部件偏航了 90 度）</span>
 
     <span class="t-com">-- 吊桥：铰链在原点，沿本地 +X 平放；升起时绕本地 Z 把 +X 往上转。</span>
     <span class="t-kw">如果</span> <span class="t-api">实体</span>.有效(吊桥) <span class="t-kw">那么</span>
@@ -362,7 +391,7 @@ print(hit, Entity.get_string(e, &quot;name&quot;), pt)
 
     <span class="t-com">-- 闸门：城门打开时从拱门里升起（在吊桥放下之前先升）。</span>
     <span class="t-kw">如果</span> <span class="t-api">实体</span>.有效(闸门) <span class="t-kw">那么</span>
-        <span class="t-kw">本地</span> 位置 = <span class="t-api">实体</span>.取位置(闸门)
+        <span class="t-kw">令</span> 位置 = <span class="t-api">实体</span>.取位置(闸门)
         <span class="t-api">实体</span>.设位置(闸门, <span class="t-api">矢量3</span>(位置.x, 平滑(开度 * <span class="t-num">1.5</span>) * <span class="t-num">0.6</span>, 位置.z))
     <span class="t-kw">结束</span>
 <span class="t-kw">结束</span></code></pre>
@@ -371,29 +400,29 @@ print(hit, Entity.get_string(e, &quot;name&quot;), pt)
 <div class="pair"><figure><img src="images/lua/gate_open.jpg" alt="城门打开" loading="lazy"><figcaption>打开（t % 15 &lt; 6）</figcaption></figure><figure><img src="images/lua/gate_closed.jpg" alt="城门关闭" loading="lazy"><figcaption>关闭（8 ≤ t % 15 &lt; 13）</figcaption></figure></div>
 <h3 id="s12-3"><span class="num">12.3</span><span>城门音效：检测"越过"某个时刻</span></h3>
 <pre class="code"><code><span class="t-com">-- 越过 = 这一帧越过了 间隔 的整数倍。</span>
-<span class="t-kw">本地</span> <span class="t-kw">函数</span> 越过(t, 时间差, 间隔)
+<span class="t-kw">令</span> <span class="t-kw">函数</span> 越过(t, 时间差, 间隔)
     <span class="t-kw">返回</span> <span class="t-api">数学</span>.向下取整(t / 间隔) ~= <span class="t-api">数学</span>.向下取整((t - 时间差) / 间隔)
 <span class="t-kw">结束</span>
 
-<span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新城门声音(t, 时间差)
+<span class="t-kw">令</span> <span class="t-kw">函数</span> 更新城门声音(t, 时间差)
     <span class="t-kw">如果</span> 越过(t - <span class="t-num">6</span>, 时间差, <span class="t-num">15</span>) <span class="t-kw">或</span> 越过(t - <span class="t-num">13</span>, 时间差, <span class="t-num">15</span>) <span class="t-kw">那么</span>   <span class="t-com">-- 开始关闭 / 开始打开</span>
         <span class="t-api">实体</span>.播放声音(城门声)
     <span class="t-kw">结束</span>
 <span class="t-kw">结束</span></code></pre>
 <p>不保存"上次播放的时间"，而是比较这一帧的开始和结束是否跨过了 6 秒、13 秒这两个节点。<code>城门声</code> 是放在城门处的一个空实体，它的 <code>sound = assets/sounds/gate.wav</code>、<code>sound_flags = 空间定位</code>、<code>range = 0.5, 10</code>，脚本只管"现在播"，怎么播由实体字段决定。</p>
 <h3 id="s12-4"><span class="num">12.4</span><span>探照灯与旗帜</span></h3>
-<pre class="code"><code><span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新探照灯(t)
+<pre class="code"><code><span class="t-kw">令</span> <span class="t-kw">函数</span> 更新探照灯(t)
     <span class="t-kw">如果</span> <span class="t-kw">非</span> <span class="t-api">实体</span>.有效(探照灯) <span class="t-kw">那么</span> <span class="t-kw">返回</span> <span class="t-kw">结束</span>
-    <span class="t-kw">本地</span> 偏航 = <span class="t-api">数学</span>.圆周率 + <span class="t-api">数学</span>.正弦(t * <span class="t-num">0.5</span>) * <span class="t-api">数学</span>.角度转弧度(<span class="t-num">70</span>)
+    <span class="t-kw">令</span> 偏航 = <span class="t-api">数学</span>.圆周率 + <span class="t-api">数学</span>.正弦(t * <span class="t-num">0.5</span>) * <span class="t-api">数学</span>.角度转弧度(<span class="t-num">70</span>)
     <span class="t-api">实体</span>.设朝向(探照灯, <span class="t-api">四元数</span>.轴角(上, 偏航) * <span class="t-api">四元数</span>.轴角(右, <span class="t-api">数学</span>.角度转弧度(<span class="t-num">38</span>)))
 <span class="t-kw">结束</span>
 
-<span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新旗帜(t)
-    <span class="t-kw">本地</span> i = <span class="t-num">1</span>
+<span class="t-kw">令</span> <span class="t-kw">函数</span> 更新旗帜(t)
+    <span class="t-kw">令</span> i = <span class="t-num">1</span>
     <span class="t-kw">当</span> <span class="t-kw">真</span> <span class="t-kw">做</span>
-        <span class="t-kw">本地</span> 旗 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;旗帜_&quot;</span> .. i)
+        <span class="t-kw">令</span> 旗 = <span class="t-api">世界</span>.查找(<span class="t-str">&quot;旗帜_&quot;</span> .. i)
         <span class="t-kw">如果</span> <span class="t-kw">非</span> <span class="t-api">实体</span>.有效(旗) <span class="t-kw">那么</span> <span class="t-kw">中断</span> <span class="t-kw">结束</span>
-        <span class="t-kw">本地</span> 摆动 = <span class="t-api">数学</span>.正弦(t * <span class="t-num">2.3</span> + i * <span class="t-num">1.7</span>) * <span class="t-num">0.35</span> + <span class="t-api">数学</span>.正弦(t * <span class="t-num">5.1</span> + i) * <span class="t-num">0.08</span>
+        <span class="t-kw">令</span> 摆动 = <span class="t-api">数学</span>.正弦(t * <span class="t-num">2.3</span> + i * <span class="t-num">1.7</span>) * <span class="t-num">0.35</span> + <span class="t-api">数学</span>.正弦(t * <span class="t-num">5.1</span> + i) * <span class="t-num">0.08</span>
         <span class="t-api">实体</span>.设朝向(旗, <span class="t-api">四元数</span>.轴角(上, 摆动))
         i = i + <span class="t-num">1</span>
     <span class="t-kw">结束</span>
@@ -401,7 +430,7 @@ print(hit, Entity.get_string(e, &quot;name&quot;), pt)
 <ul><li>探照灯是一个投射阴影的聚光灯实体，转它的 <code>rotation</code> 就是转光束：先向下俯 38°，再左右扫 ±70°。</li><li>旗帜按命名约定 <code>旗帜_1</code>、<code>旗帜_2</code>……每帧用 <code>世界.查找</code> 逐个查找，直到找不到为止：这里找不到不是错误，而是数完了，所以不用 <code>世界.获取</code>。在编辑器里多复制一面旗（复制会自动编号）脚本就会让它一起飘，不用改代码。每面旗的相位 <code>i * 1.7</code> 不同，所以不会整齐划一。</li></ul>
 <h3 id="s12-5"><span class="num">12.5</span><span>灯光组</span></h3>
 <pre class="code"><code><span class="t-com">-- 光源组（世界设置）：信标闪烁，大厅的窗户每 20 秒里暗 4 秒。</span>
-<span class="t-kw">本地</span> <span class="t-kw">函数</span> 更新灯光(t)
+<span class="t-kw">令</span> <span class="t-kw">函数</span> 更新灯光(t)
     <span class="t-api">世界</span>.设光源组(<span class="t-str">&quot;beacon&quot;</span>, <span class="t-num">0.55</span> + <span class="t-num">0.45</span> * <span class="t-api">数学</span>.正弦(t * <span class="t-num">3</span>))
     <span class="t-api">世界</span>.设光源组(<span class="t-str">&quot;windows&quot;</span>, (t % <span class="t-num">20</span>) &lt; <span class="t-num">16</span> <span class="t-kw">和</span> <span class="t-num">1</span> <span class="t-kw">或</span> <span class="t-num">0</span>)
 <span class="t-kw">结束</span></code></pre>
@@ -410,26 +439,26 @@ print(hit, Entity.get_string(e, &quot;name&quot;), pt)
 <p><code>玩家</code> 是一个没有模型的实体，代表站在它 <code>position</code> 上的胶囊；<code>主相机</code> 每帧跟到它的眼睛处。</p>
 <figure class="wide"><img src="images/lua/game_fps.jpg" alt="游戏模式下的第一人称视角" loading="lazy"><figcaption>游戏模式下的第一人称视角</figcaption></figure>
 <p><strong>视角：从相机现在的朝向反推偏航和俯仰。</strong> 脚本不存"当前偏航角"，而是每帧从相机的 <code>rotation</code> 算出来，加上这一帧的鼠标 / 右摇杆输入：</p>
-<pre class="code"><code><span class="t-kw">本地</span> 朝前 = <span class="t-api">实体</span>.取朝向(相机):旋转(前)
-<span class="t-kw">本地</span> 鼠标 = <span class="t-api">输入</span>.鼠标移动()
-<span class="t-kw">本地</span> 偏航 = <span class="t-api">数学</span>.反正切2(朝前.x, 朝前.z) + 鼠标.x * 灵敏度 + <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;rightx&quot;</span>) * 摇杆看速 * 时间差
-<span class="t-kw">本地</span> 俯仰 = -<span class="t-api">数学</span>.反正弦(<span class="t-api">数学</span>.夹紧(朝前.y, -<span class="t-num">1</span>, <span class="t-num">1</span>)) + 鼠标.y * 灵敏度 + <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;righty&quot;</span>) * 摇杆看速 * 时间差
+<pre class="code"><code><span class="t-kw">令</span> 朝前 = <span class="t-api">实体</span>.取朝向(相机):旋转(前)
+<span class="t-kw">令</span> 鼠标 = <span class="t-api">输入</span>.鼠标移动()
+<span class="t-kw">令</span> 偏航 = <span class="t-api">数学</span>.反正切2(朝前.x, 朝前.z) + 鼠标.x * 灵敏度 + <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;rightx&quot;</span>) * 摇杆看速 * 时间差
+<span class="t-kw">令</span> 俯仰 = -<span class="t-api">数学</span>.反正弦(<span class="t-api">数学</span>.夹紧(朝前.y, -<span class="t-num">1</span>, <span class="t-num">1</span>)) + 鼠标.y * 灵敏度 + <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;righty&quot;</span>) * 摇杆看速 * 时间差
 俯仰 = <span class="t-api">数学</span>.夹紧(俯仰, -<span class="t-num">1.4</span>, <span class="t-num">1.4</span>)
-<span class="t-kw">本地</span> 朝向 = <span class="t-api">四元数</span>.轴角(上, 偏航) * <span class="t-api">四元数</span>.轴角(右, 俯仰)</code></pre>
+<span class="t-kw">令</span> 朝向 = <span class="t-api">四元数</span>.轴角(上, 偏航) * <span class="t-api">四元数</span>.轴角(右, 俯仰)</code></pre>
 <p><strong>移动：键盘和左摇杆合成一个方向。</strong></p>
-<pre class="code"><code><span class="t-kw">本地</span> 向前 = <span class="t-api">矢量3</span>(<span class="t-api">数学</span>.正弦(偏航), <span class="t-num">0</span>, <span class="t-api">数学</span>.余弦(偏航))
-<span class="t-kw">本地</span> 向右 = <span class="t-api">矢量3</span>(<span class="t-api">数学</span>.余弦(偏航), <span class="t-num">0</span>, -<span class="t-api">数学</span>.正弦(偏航))
-<span class="t-kw">本地</span> 前后 = -<span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;lefty&quot;</span>)
-<span class="t-kw">本地</span> 左右 = <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;leftx&quot;</span>)
+<pre class="code"><code><span class="t-kw">令</span> 向前 = <span class="t-api">矢量3</span>(<span class="t-api">数学</span>.正弦(偏航), <span class="t-num">0</span>, <span class="t-api">数学</span>.余弦(偏航))
+<span class="t-kw">令</span> 向右 = <span class="t-api">矢量3</span>(<span class="t-api">数学</span>.余弦(偏航), <span class="t-num">0</span>, -<span class="t-api">数学</span>.正弦(偏航))
+<span class="t-kw">令</span> 前后 = -<span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;lefty&quot;</span>)
+<span class="t-kw">令</span> 左右 = <span class="t-api">输入</span>.手柄轴(<span class="t-str">&quot;leftx&quot;</span>)
 <span class="t-kw">如果</span> <span class="t-api">输入</span>.按住(<span class="t-str">&quot;W&quot;</span>) <span class="t-kw">那么</span> 前后 = 前后 + <span class="t-num">1</span> <span class="t-kw">结束</span>
 <span class="t-kw">如果</span> <span class="t-api">输入</span>.按住(<span class="t-str">&quot;S&quot;</span>) <span class="t-kw">那么</span> 前后 = 前后 - <span class="t-num">1</span> <span class="t-kw">结束</span>
 <span class="t-kw">如果</span> <span class="t-api">输入</span>.按住(<span class="t-str">&quot;D&quot;</span>) <span class="t-kw">那么</span> 左右 = 左右 + <span class="t-num">1</span> <span class="t-kw">结束</span>
 <span class="t-kw">如果</span> <span class="t-api">输入</span>.按住(<span class="t-str">&quot;A&quot;</span>) <span class="t-kw">那么</span> 左右 = 左右 - <span class="t-num">1</span> <span class="t-kw">结束</span>
 <span class="t-com">-- （长度超过 1 时归一化，按住左 Shift / 按下左摇杆时用跑速）</span>
-<span class="t-kw">本地</span> 水平 = (向前 * 前后 + 向右 * 左右) * 速度</code></pre>
+<span class="t-kw">令</span> 水平 = (向前 * 前后 + 向右 * 左右) * 速度</code></pre>
 <p><strong>重力、跳跃与碰撞：竖直速度存在实体字段里。</strong></p>
-<pre class="code"><code><span class="t-kw">本地</span> 竖直 = <span class="t-api">实体</span>.取矢量(玩家, <span class="t-str">&quot;velocity&quot;</span>).y - 重力 * 时间差
-<span class="t-kw">本地</span> 着地 = <span class="t-api">实体</span>.角色移动(玩家, <span class="t-api">矢量3</span>(水平.x * 时间差, 竖直 * 时间差, 水平.z * 时间差), 玩家半径, 玩家身高)
+<pre class="code"><code><span class="t-kw">令</span> 竖直 = <span class="t-api">实体</span>.取矢量(玩家, <span class="t-str">&quot;velocity&quot;</span>).y - 重力 * 时间差
+<span class="t-kw">令</span> 着地 = <span class="t-api">实体</span>.角色移动(玩家, <span class="t-api">矢量3</span>(水平.x * 时间差, 竖直 * 时间差, 水平.z * 时间差), 玩家半径, 玩家身高)
 <span class="t-kw">如果</span> 着地 <span class="t-kw">和</span> 竖直 &lt; <span class="t-num">0</span> <span class="t-kw">那么</span> 竖直 = -<span class="t-num">0.1</span> <span class="t-kw">结束</span>          <span class="t-com">-- 轻轻压住地面，下一帧还算着地</span>
 <span class="t-kw">如果</span> 着地 <span class="t-kw">和</span> (<span class="t-api">输入</span>.按下(<span class="t-str">&quot;Space&quot;</span>) <span class="t-kw">或</span> <span class="t-api">输入</span>.手柄按下(<span class="t-str">&quot;a&quot;</span>)) <span class="t-kw">那么</span>
     竖直 = 跳速
@@ -438,13 +467,13 @@ print(hit, Entity.get_string(e, &quot;name&quot;), pt)
 <span class="t-api">实体</span>.设矢量(玩家, <span class="t-str">&quot;velocity&quot;</span>, <span class="t-api">矢量3</span>(<span class="t-num">0</span>, 竖直, <span class="t-num">0</span>))</code></pre>
 <p>这里是"Lua 不保存状态"的标准写法：读字段 → 计算 → <code>实体.角色移动</code> → 写回字段。速度在 <code>玩家</code> 实体上，脚本热重载后玩家照样在空中继续下落。</p>
 <p><strong>相机跟随、出界复位、脚步声：</strong></p>
-<pre class="code"><code><span class="t-kw">本地</span> 位置 = <span class="t-api">实体</span>.取位置(玩家)
+<pre class="code"><code><span class="t-kw">令</span> 位置 = <span class="t-api">实体</span>.取位置(玩家)
 <span class="t-kw">如果</span> 位置.y &lt; -<span class="t-num">5</span> <span class="t-kw">那么</span>   <span class="t-com">-- 掉出了世界：回到出生点</span>
     位置 = 出生点
     <span class="t-api">实体</span>.设位置(玩家, 位置)
     <span class="t-api">实体</span>.设矢量(玩家, <span class="t-str">&quot;velocity&quot;</span>, <span class="t-api">矢量3</span>(<span class="t-num">0</span>, <span class="t-num">0</span>, <span class="t-num">0</span>))
 <span class="t-kw">结束</span>
-<span class="t-kw">本地</span> 眼 = 位置 + 上 * 眼高
+<span class="t-kw">令</span> 眼 = 位置 + 上 * 眼高
 <span class="t-api">实体</span>.设位置(相机, 眼)
 <span class="t-api">实体</span>.设朝向(相机, 朝向)
 
@@ -455,7 +484,7 @@ print(hit, Entity.get_string(e, &quot;name&quot;), pt)
 <p>脚步声复用了 12.3 节的 <code>越过</code>：每跨过一个步距就响一声，不需要计步器。</p>
 <p><strong>射线检测：按 E / 手柄 X 沿视线打一条 8 单位的射线。</strong></p>
 <pre class="code"><code><span class="t-kw">如果</span> <span class="t-api">输入</span>.按下(<span class="t-str">&quot;E&quot;</span>) <span class="t-kw">或</span> <span class="t-api">输入</span>.手柄按下(<span class="t-str">&quot;x&quot;</span>) <span class="t-kw">那么</span>
-    <span class="t-kw">本地</span> 命中, 点, 法线, 实体号 = <span class="t-api">世界</span>.射线检测(眼, 朝向:旋转(前), <span class="t-num">8</span>)
+    <span class="t-kw">令</span> 命中, 点, 法线, 实体号 = <span class="t-api">世界</span>.射线检测(眼, 朝向:旋转(前), <span class="t-num">8</span>)
     <span class="t-kw">如果</span> 命中 <span class="t-kw">那么</span>
         <span class="t-api">世界</span>.在位置播放声音(<span class="t-str">&quot;assets/sounds/ping.wav&quot;</span>, 点)
         <span class="t-api">打印</span>(<span class="t-str">&quot;射线命中 &quot;</span> .. <span class="t-api">实体</span>.取文本(实体号, <span class="t-str">&quot;name&quot;</span>) .. <span class="t-str">&quot; &quot;</span> .. <span class="t-api">转文本</span>(点))
@@ -479,7 +508,7 @@ print(hit, Entity.get_string(e, &quot;name&quot;), pt)
 <span class="t-kw">结束</span>
 
 <span class="t-kw">函数</span> <span class="t-api">世界</span>.更新(时间差)
-    <span class="t-kw">本地</span> t = <span class="t-api">世界</span>.时间()
+    <span class="t-kw">令</span> t = <span class="t-api">世界</span>.时间()
     更新城门(t)
     更新城门声音(t, 时间差)
     更新探照灯(t)

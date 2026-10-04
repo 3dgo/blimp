@@ -3,7 +3,6 @@ package blimp
 import "core:c"
 import "core:fmt"
 import "core:log"
-import "core:strings"
 import lua "vendor:lua/5.1"
 
 // World scripts: each world's [world] `script` (a .lua file) runs while the world is playing.
@@ -11,20 +10,21 @@ import lua "vendor:lua/5.1"
 //   function World.start()       / function 世界.开始()          -- once, at Play (or when the script changes)
 //   function World.update(dt)    / function 世界.更新(时间差)    -- every frame
 //
-// Each script runs in its own environment — a table that falls back to _G — so two open worlds'
-// scripts can't clobber each other's globals. Its World (= 世界) is its own table too, falling back
-// to the shared World bindings, so World.find etc. work and its hooks never land in the shared table.
+// Each script runs in its own environment (lua_script_load, lua.odin) — a table that falls back to _G — so
+// two open worlds' scripts can't clobber each other's globals. Its World (= 世界) is its own table too,
+// falling back to the shared World bindings, so World.find etc. work and its hooks never land in the shared table.
 // While a world's script runs, the @(lua) world/entity procs (lua_api_*.odin) act on that world
 // (lua_world()). Engine hooks (引擎.更新 …) have no world: World/Entity procs called there log an error and do nothing.
 //
 // Lua never holds state that matters (CLAUDE.md): script edits to entities go straight into the
-// world. A script error is logged once and stops that world's script until it's changed or reopened.
+// world, and a script can't create globals (assigning an undeclared name is an error). A script loads its
+// modules with require / 引入 by project-relative path; they run in its env (lua_script_load). A script error is logged once and stops that world's script until it's changed or reopened.
 Lua_World_Script :: struct {
     loaded: sbuf256,   // the path these refs were loaded from ("" = none); compared each frame to settings.script
     env:    c.int,     // registry refs; <= 0 = none (refs start at 1, so a zeroed world has none)
     start:  c.int,
     update: c.int,
-    failed: bool,      // errored: stays stopped until the path changes
+    failed: bool,      // errored: stays stopped until it reloads (path change, hot reload, next Play)
     missed: [16]u32,   // hashes of names World.get didn't find, so each warns once per load (lua_api_world.odin)
     missed_count: int,
 }
@@ -88,29 +88,13 @@ lua_world_script_sync :: proc(w: ^World) {
     top := lua.gettop(L)
     defer lua.settop(L, top)
 
-    if lua.L_loadfile(L, strings.clone_to_cstring(want, context.temp_allocator)) != .OK {
+    env, ok := lua_script_load(L, want, "World", "世界")
+    if !ok {
         log.errorf("World script %s (%s): %s", want, w.title, lua.tostring(L, -1))
         s.failed = true
         return
     }
-    // env = setmetatable({}, {__index = _G}); setfenv(chunk, env)
-    lua.newtable(L)
-    lua.newtable(L)
-    lua.getglobal(L, "_G")
-    lua.setfield(L, -2, "__index")
-    lua.setmetatable(L, -2)
-    // env.World = env.世界 = setmetatable({}, {__index = World}): where the script's hooks go
-    lua.newtable(L)
-    lua.newtable(L)
-    lua.getglobal(L, "World")
-    lua.setfield(L, -2, "__index")
-    lua.setmetatable(L, -2)
-    lua.pushvalue(L, -1)
-    lua.setfield(L, -3, "World")
-    lua.setfield(L, -2, "世界")
-    lua.pushvalue(L, -1)
-    s.env = lua.L_ref(L, lua.REGISTRYINDEX)
-    lua.setfenv(L, -2)
+    s.env = env
 
     // Run the chunk (its top level defines the hooks) with this world as the context.
     prev := lua_current_world
@@ -132,6 +116,7 @@ lua_world_script_sync :: proc(w: ^World) {
     if s.start > 0 && !lua_world_call(w, s.start) do lua_world_script_stop(w, "start")
 }
 
+
 // Calls a hook with `w` as the world context. False (error logged) on a Lua error.
 @(private="file")
 lua_world_call :: proc(w: ^World, ref: c.int, args: ..f64) -> bool {
@@ -144,5 +129,5 @@ lua_world_call :: proc(w: ^World, ref: c.int, args: ..f64) -> bool {
 @(private="file")
 lua_world_script_stop :: proc(w: ^World, hook: string) {
     w.script.failed = true
-    log.warnf("World script for %s stopped after an error in %s; change the script path or reopen the world to retry", w.title, hook)
+    log.warnf("World script for %s stopped after an error in %s; save a fix (hot reload) or stop and play again", w.title, hook)
 }

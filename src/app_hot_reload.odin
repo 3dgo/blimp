@@ -13,8 +13,8 @@ import "common"
 //   .slang                every pipeline (render_shaders_reload), all or nothing
 //   .wav .ogg .mp3 .flac  every sound clip (sound_reload); playing voices stop
 //   .luacn                transpiled to its .lua, which then reloads like any .lua
-//   .lua                  world scripts loaded from it rerun from the top, start included;
-//                         assets/scripts/main.lua reruns and its engine hooks are re-resolved
+//   .lua                  every script reruns from the top (it may be a module one requires): main.lua and
+//                         its start hook now, each playing world's script and start next frame
 // Editors and exporters write a file in several steps (3ds Max writes .bin then .gltf), so a change
 // waits HOT_RELOAD_SETTLE_SEC after the last event before anything reloads.
 HOT_RELOAD_SETTLE_SEC :: 0.3
@@ -93,10 +93,8 @@ hot_reload_update :: proc() {
         delete(p, app.allocators.perm)
     }
     clear(&h.luacn)
-    for p in h.scripts {
-        lua_reload_script(p)
-        delete(p, app.allocators.perm)
-    }
+    lua_reload_scripts(h.scripts[:])
+    for p in h.scripts do delete(p, app.allocators.perm)
     clear(&h.scripts)
 }
 

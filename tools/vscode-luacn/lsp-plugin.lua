@@ -22,6 +22,7 @@ local KEYWORDS = {
     ["函数"]     = "function",
     ["返回"]     = "return",
     ["本地"]     = "local",
+    ["令"]       = "local",
     ["真"]       = "true",
     ["假"]       = "false",
     ["空"]       = "nil",
