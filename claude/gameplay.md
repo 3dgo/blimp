@@ -70,8 +70,8 @@ for AI, not for sound. Odin is authoritative so script reload can't corrupt anyt
   The lines live in `World.debug_lines` until the world's next tick (`world_play_tick` clears them), so a
   script redraws what it wants each update and they hold while paused. Gameplay code in Odin uses
   `world_debug_line` the same way.
-- `Entity.set_*` write through `entity_writable_field` like files and blimpctl do: no `noserialize`
-  fields, string fields are interned asset keys, names stay unique. `World.add` goes through `world_add`.
+- `Entity.set_*` write through `entity_writable_field` like files and blimpctl do: no `hidden` fields (but
+  `noserialize` game state like `velocity` is writable), string fields are interned asset keys, names stay unique. `World.add` goes through `world_add`.
 
 ### Sound
 

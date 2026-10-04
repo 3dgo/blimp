@@ -128,13 +128,13 @@ entity_set_quat :: proc(handle: Entity_Handle, field: string, value: quat) {
 
 // The `any` for entity `handle`'s field named `name` in the script's world, pointing at the live slot (so
 // writes through it hit the entity). `name` may be a dotted path into nested struct fields. `write`: only a
-// field code may write (entity_writable_field: not the handle or the selection). ok = false if the handle
+// field code may write (entity_writable_field: not the handle or the selection; velocity yes). ok = false if the handle
 // is stale or the path doesn't resolve.
 @(private = "file")
 entity_field :: proc(handle: Entity_Handle, name: string, write := false) -> (v: any, ok: bool) {
     w := lua_world() or_return
     e := entity_get(w, handle) or_return
-    if write do return entity_writable_field(e, name)
+    if write do return entity_writable_field(e, name, saved = false)
     return struct_field_by_path(e^, name)
 }
 

@@ -40,7 +40,8 @@ Doc_Field :: struct {
     en:      Edit_Buf,
     zh:      Edit_Buf,
     default: Edit_Buf,
-    tags:    Edit_Buf,   // preserved verbatim (e.g. "hidden, noserialize")
+    flags:   [len(SCHEMA_FLAG_TAGS)]bool,   // which of SCHEMA_FLAG_TAGS it has
+    widget:  Edit_Buf,   // a schema_widgets name, "" = the type's default widget
     section: Edit_Buf,   // inspector section: a member of enum EntitySection, "" = top, above the sections
     note:    Edit_Buf,   // what it's for, one line: written beside the field in gen_entity.odin
     builtin: bool,       // engine-required: locked in the editor
@@ -95,6 +96,8 @@ SCHEMA_HEADER ::
 #
 # section = a member of enum.EntitySection: the inspector section the field is drawn under
 # (sections in the enum's member order; fields without one go first, above them).
+# tags = how the inspector treats the field: hidden / readonly / noserialize / identity, and widget:<kind>
+# (model, texture, sound for string; icon for sbuf*; color, linear_color for vec3). Set in the schema editor.
 # note = what it's for, one line; codegen writes it as a comment beside the generated declaration.
 `
 
@@ -184,7 +187,7 @@ schema_doc_load :: proc() {
             case "en":      edit_buf_set(&f.en, val)
             case "zh":      edit_buf_set(&f.zh, val)
             case "default": edit_buf_set(&f.default, val)
-            case "tags":    edit_buf_set(&f.tags, val)
+            case "tags":    _doc_parse_tags(f, val)
             case "section": edit_buf_set(&f.section, val)
             case "note":    edit_buf_set(&f.note, val)
             case "builtin": f.builtin = val == "true"
@@ -220,7 +223,7 @@ schema_doc_save :: proc(path: string) -> bool {
         fmt.sbprintfln(&b, "\n[field.%s]", edit_buf_str(&f.id))
         _doc_write_kv(&b, "type", edit_buf_str(&f.type))
         if f.builtin do _doc_write_kv(&b, "builtin", "true")
-        _doc_write_kv_opt(&b, "tags", edit_buf_str(&f.tags))
+        _doc_write_kv_opt(&b, "tags", _doc_tags_string(&f))
         _doc_write_kv_opt(&b, "section", edit_buf_str(&f.section))
         _doc_write_kv_opt(&b, "en", edit_buf_str(&f.en))
         _doc_write_kv_opt(&b, "zh", edit_buf_str(&f.zh))
@@ -279,6 +282,9 @@ schema_doc_validate :: proc() -> (ok: bool, msg: string) {
         if sec := edit_buf_str(&f.section); sec != "" && !schema_doc_is_section(sec) {
             return false, strings.concatenate({"field '", id, "' has unknown section (not in enum ", SCHEMA_SECTION_ENUM, "): ", sec}, context.temp_allocator)
         }
+        if w := edit_buf_str(&f.widget); w != "" && !schema_widget_fits(w, t) {
+            return false, strings.concatenate({"field '", id, "' has widget '", w, "', which doesn't fit type ", t}, context.temp_allocator)
+        }
     }
     for &t, i in schema_doc.types {
         name := edit_buf_str(&t.name)
@@ -307,6 +313,68 @@ schema_doc_validate :: proc() -> (ok: bool, msg: string) {
     return true, ""
 }
 
+/* ------------------------------ tags ------------------------------ */
+
+// A field's tags, as the schema editor offers them. The INI keeps them as one `tags = a, b, widget:x`
+// line (codegen copies it into the struct tag verbatim); the editor shows a toggle per flag tag and a
+// dropdown of the widgets that fit the field's type. A tag the inspector starts reading goes here.
+SCHEMA_FLAG_TAGS :: [?]struct{ tag: string, label: Loc_ID }{
+    {"hidden",      .Schema_Tag_Hidden},        // not drawn in the inspector
+    {"readonly",    .Schema_Tag_Readonly},      // drawn disabled
+    {"noserialize", .Schema_Tag_Noserialize},   // never saved, copied or set from text (Lua still writes it)
+    {"identity",    .Schema_Tag_Identity},      // never copied to the rest of the selection by multi-edit
+}
+
+// `widget:<name>`: how the inspector edits a field of `type` (ui_param_struct).
+@(rodata) schema_widgets := [?]struct{ name: string, types: []string, label: Loc_ID }{
+    {"model",        {"string"},                       .Schema_Widget_Model},
+    {"texture",      {"string"},                       .Schema_Widget_Texture},
+    {"sound",        {"string"},                       .Schema_Widget_Sound},
+    {"icon",         {"sbuf64", "sbuf128", "sbuf256"}, .Schema_Widget_Icon},
+    {"color",        {"vec3"},                         .Schema_Widget_Color},
+    {"linear_color", {"vec3"},                         .Schema_Widget_Linear_Color},
+}
+
+schema_widget_fits :: proc(widget, type: string) -> bool {
+    for w in schema_widgets do if w.name == widget {
+        for t in w.types do if t == type do return true
+    }
+    return false
+}
+
+@(private = "file")
+_doc_parse_tags :: proc(f: ^Doc_Field, tags: string) {
+    s := tags
+    next: for part in strings.split_iterator(&s, ",") {
+        tag := strings.trim_space(part)
+        if tag == "" do continue
+        if strings.has_prefix(tag, "widget:") {
+            edit_buf_set(&f.widget, tag[len("widget:"):])
+            continue
+        }
+        for ft, i in SCHEMA_FLAG_TAGS do if ft.tag == tag {
+            f.flags[i] = true
+            continue next
+        }
+        log.warnf("schema_doc: field '%v' has unknown tag '%v'; it will be dropped on save", edit_buf_str(&f.id), tag)
+    }
+}
+
+// The `tags =` value: the flag tags in SCHEMA_FLAG_TAGS order, then the widget.
+@(private = "file")
+_doc_tags_string :: proc(f: ^Doc_Field) -> string {
+    b := strings.builder_make(context.temp_allocator)
+    for ft, i in SCHEMA_FLAG_TAGS do if f.flags[i] {
+        if strings.builder_len(b) > 0 do strings.write_string(&b, ", ")
+        strings.write_string(&b, ft.tag)
+    }
+    if w := edit_buf_str(&f.widget); w != "" {
+        if strings.builder_len(b) > 0 do strings.write_string(&b, ", ")
+        fmt.sbprintf(&b, "widget:%s", w)
+    }
+    return strings.to_string(b)
+}
+
 /* ------------------------------ helpers ------------------------------ */
 
 // The enum whose members are the inspector's sections (their order is the inspector's order).
@@ -323,6 +391,14 @@ schema_doc_is_section :: proc(member: string) -> bool {
     if t == nil do return false
     for &m in t.members do if edit_buf_str(&m.id) == member do return true
     return false
+}
+
+// Points the fields in section `old` at `new` ("" = none: the top, above the sections), after a group was
+// renamed or removed. Skipped while another group still has `old`, so a rename passing through an existing
+// id doesn't take that group's fields along.
+schema_doc_rename_section :: proc(old, new: string) {
+    if old == "" || schema_doc_is_section(old) do return
+    for &f in schema_doc.fields do if edit_buf_str(&f.section) == old do edit_buf_set(&f.section, new)
 }
 
 // All scalar types accepted by validation (includes the builtin-only Entity_Handle).

@@ -92,15 +92,16 @@ ENTITY_SECTION :: "entity"   // the [entity] block: levels and the clipboard
 
 // The live slot of `e`'s field at `path` (a name, or a dotted path into nested structs), for code that
 // writes a field it names at runtime: levels and the clipboard (deserialize_field), blimpctl set, Lua's
-// Entity.set_*. Refuses `noserialize` fields (the handle, the selection flag) — even if a hand-edited file
-// lists one. Nested paths are checked by their top field.
-entity_writable_field :: proc(e: ^Entity, path: string) -> (v: any, ok: bool) {
+// Entity.set_*. Refuses `hidden` fields (the handle, the selection flag). `saved` (text: files, clipboard,
+// blimpctl) also refuses `noserialize` ones, even if a hand-edited file lists one; game code still writes
+// those (velocity). Nested paths are checked by their top field.
+entity_writable_field :: proc(e: ^Entity, path: string, saved: bool) -> (v: any, ok: bool) {
     top := path
     if d := strings.index_byte(path, '.'); d >= 0 do top = path[:d]
     for i in 0 ..< reflect.struct_field_count(Entity) {
         field := reflect.struct_field_at(Entity, i)
         if field.name != top do continue
-        if field_has_tag(field.tag, "noserialize") do return
+        if field_has_tag(field.tag, "hidden") || (saved && field_has_tag(field.tag, "noserialize")) do return
         break
     }
     return struct_field_by_path(e^, path)
@@ -109,5 +110,5 @@ entity_writable_field :: proc(e: ^Entity, path: string) -> (v: any, ok: bool) {
 // Routes one INI `key = value` onto `e`'s field `key` (entity_writable_field), through the value codec in
 // serialize.odin.
 deserialize_field :: proc(e: ^Entity, key: string, val: string) {
-    if v, ok := entity_writable_field(e, key); ok do deserialize_value(v, val)
+    if v, ok := entity_writable_field(e, key, saved = true); ok do deserialize_value(v, val)
 }

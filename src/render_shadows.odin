@@ -208,6 +208,7 @@ render_shadows_draw :: proc(w: ^World, frame_slot: u64) {
             cmd.handle->OMSetRenderTargets(0, nil, false, &dsv)
             cmd.handle->ClearDepthStencilView(dsv, {.DEPTH}, 0.0, 0, 0, nil)   // reversed-Z: 0 = far, nothing casts
             cmd.handle->SetGraphicsRootConstantBufferView(0, views_va + d3d12.GPU_VIRTUAL_ADDRESS(i * size_of(Shadow_View)))
+            if casters == 0 do continue   // cleared map is correct; a zero-count ExecuteIndirect draws a debug-layer warning
             cmd.handle->ExecuteIndirect(renderer_dx.indirect_sig.handle, casters, r.draw_cmd[frame_slot].handle, 0, nil, 0)
         }
     }

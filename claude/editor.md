@@ -68,7 +68,8 @@
   entity, not a structure in it. Every field stays shared and always shown; nothing hides by kind.
   - Sections: a field's schema `section` (a member of `enum.EntitySection`, emitted as a `section:` tag)
     puts it under that collapsing header. Fields without one come first, then sections in the enum's order.
-    The schema editor picks it per field and can add sections (that builtin enum's members stay editable).
+    The schema editor picks it per field (labelled "Group"); its Groups list edits that enum's members: add,
+    rename (fields follow), reorder, remove (its fields move to the top).
   - Search (per panel, `search_matches`) matches a field's id, its label in any language or its text value
     (strings, an enum's choice, set flags; not numbers), or a section's name (which shows all its fields). While searching, sections are separators, not folds. The entity list
     has the same box over entity names.
@@ -219,11 +220,14 @@
 - **Entity names are unique per world.** Every add goes through `world_add` (level load, paste,
   duplicate, kits, Lua), which interns asset keys and calls `world_unique_name` (`base_1`,
   `base_2`, …). Writing a field by name (blimpctl `set`, Lua `Entity.set_*`) goes through
-  `entity_writable_field`, which refuses `noserialize` fields. The inspector re-checks once no
+  `entity_writable_field`, which refuses `hidden` fields (and, for text — files, clipboard, blimpctl —
+  `noserialize` ones too). The inspector re-checks once no
   item is active, not per keystroke.
 - Backtick tags drive the above alongside `noserialize`/`hidden`/`readonly`:
   - **`identity`**: never copied to the rest of the selection by multi-edit, e.g. `name`.
-  - Authored per field in the schema; extending them is a tag, not code.
+  - Authored per field in the schema editor: a toggle per flag tag and a dropdown of the widgets that fit the
+    field's type (`SCHEMA_FLAG_TAGS` / `schema_widgets` in `editor_schema.odin`; builtin fields' tags are locked).
+    A tag the inspector starts reading is added to those tables, not typed into the INI.
 - **Text fields: the type says who owns it.** `sbuf64` / `sbuf128` / `sbuf256` = text the entity owns,
   inline, sized by content (64: names, ids, gameplay tags · 128: labels · 256: paths, descriptions) —
   editable in the inspector by default (`readonly` disables). `string` = a

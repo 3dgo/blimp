@@ -1,6 +1,7 @@
 package blimp
 
 import "core:fmt"
+import "core:strings"
 import im "lib:odin-imgui"
 
 // The in-engine entity-schema editor. Edits schema_doc (loaded from entity_schema.ini); Save
@@ -36,6 +37,8 @@ ui_draw_schema_editor :: proc() {
                 ui_form_input(tr(.Schema_Prop_Id), "id", &f.id, f.builtin)
                 ui_form_type_combo(tr(.Schema_Prop_Type), "type", &f.type, f.builtin)
                 ui_form_section_combo(&f.section)   // presentation only, so builtin fields can move too
+                ui_form_tags(&f)
+                ui_form_widget_combo(&f)
                 ui_form_input(tr(.Schema_Prop_English), "en", &f.en)
                 ui_form_input(tr(.Schema_Prop_Chinese), "zh", &f.zh)
                 ui_form_input(tr(.Schema_Prop_Default), "default", &f.default)
@@ -66,12 +69,62 @@ ui_draw_schema_editor :: proc() {
 
         im.Dummy({0, 10 * app.display_scale})
 
-        // ---- Types (enum / flags / struct) ----
+        // ---- Groups: the members of the section enum, i.e. the inspector's sections in order ----
+        if sections := schema_doc_sections(); sections != nil {
+            im.SeparatorText(tr(.Schema_Groups))
+            im.Dummy({0, 4 * app.display_scale})
+
+            remove_group := -1
+            for &m, i in sections.members {
+                im.PushIDInt(i32(2_000_000 + i))
+                head := fmt.ctprintf("%s      %s###g%d", ui_schema_name(&m.en, &m.zh, &m.id), edit_buf_str(&m.id), i)
+                if im.CollapsingHeader(head) {
+                    im.Indent()
+                    im.Dummy({0, 2 * app.display_scale})
+                    old_id := strings.clone(edit_buf_str(&m.id), context.temp_allocator)
+                    ui_form_input(tr(.Schema_Prop_Id), "gid", &m.id)
+                    if new_id := edit_buf_str(&m.id); new_id != old_id do schema_doc_rename_section(old_id, new_id)
+                    ui_form_input(tr(.Schema_Prop_English), "gen", &m.en)
+                    ui_form_input(tr(.Schema_Prop_Chinese), "gzh", &m.zh)
+                    ui_form_input(tr(.Schema_Prop_Note), "gnote", &m.note)
+
+                    im.Dummy({0, 4 * app.display_scale})
+                    if ui_move_buttons(len(sections.members), i) != 0 {
+                        j := i + ui_move_buttons_last
+                        sections.members[i], sections.members[j] = sections.members[j], sections.members[i]
+                    }
+                    im.SameLine()
+                    if im.SmallButton(tr(.Schema_Remove)) do remove_group = i
+                    im.Unindent()
+                    im.Dummy({0, 8 * app.display_scale})
+                }
+                im.PopID()
+            }
+            if remove_group >= 0 {
+                // Its fields move to the top, above the sections.
+                id := strings.clone(edit_buf_str(&sections.members[remove_group].id), context.temp_allocator)
+                ordered_remove(&sections.members, remove_group)
+                schema_doc_rename_section(id, "")
+            }
+
+            if im.Button(tr(.Schema_Add_Group)) {
+                id := "Group"
+                for n := 2; schema_doc_is_section(id); n += 1 do id = fmt.tprintf("Group_%d", n)
+                item: Doc_Item
+                edit_buf_set(&item.id, id)
+                append(&sections.members, item)
+            }
+
+            im.Dummy({0, 10 * app.display_scale})
+        }
+
+        // ---- Types (enum / flags / struct; the section enum is edited above, as Groups) ----
         im.SeparatorText(tr(.Schema_Types))
         im.Dummy({0, 4 * app.display_scale})
 
         remove_type := -1
         for &t, i in schema_doc.types {
+            if t.kind == .Enum && edit_buf_str(&t.name) == SCHEMA_SECTION_ENUM do continue
             im.PushIDInt(i32(1_000_000 + i))
             head := fmt.ctprintf("%s      [%s]%s###t%d",
                 edit_buf_str(&t.name), doc_kind_word(t.kind),
@@ -85,8 +138,7 @@ ui_draw_schema_editor :: proc() {
 
                 im.Dummy({0, 4 * app.display_scale})
                 im.SeparatorText(tr(.Schema_Members))
-                // The section enum is builtin (the inspector reads it) but its members are the user's sections.
-                members_locked := t.builtin && edit_buf_str(&t.name) != SCHEMA_SECTION_ENUM
+                members_locked := t.builtin
                 remove_member := -1
                 for &m, mi in t.members {
                     im.PushIDInt(i32(mi))
@@ -222,6 +274,42 @@ ui_form_section_combo :: proc(b: ^Edit_Buf) {
         }
         im.EndCombo()
     }
+}
+
+// A form row of toggles, one per flag tag. Locked on builtin fields: the engine relies on theirs.
+@(private = "file")
+ui_form_tags :: proc(f: ^Doc_Field) {
+    ui_param_label(string(tr(.Schema_Prop_Tags)), {label_w = FORM_LABEL_W * app.display_scale})
+    im.BeginDisabled(f.builtin)
+    for ft, i in SCHEMA_FLAG_TAGS {
+        if i > 0 do im.SameLine()
+        im.Checkbox(tr(ft.label), &f.flags[i])
+    }
+    im.EndDisabled()
+}
+
+// A form row picking the field's inspector widget among those that fit its type. Skipped when none
+// fits and none is set.
+@(private = "file")
+ui_form_widget_combo :: proc(f: ^Doc_Field) {
+    type := edit_buf_str(&f.type)
+    cur := edit_buf_str(&f.widget)
+    any_fits := false
+    for w in schema_widgets do if schema_widget_fits(w.name, type) { any_fits = true; break }
+    if !any_fits && cur == "" do return
+
+    ui_param_label(string(tr(.Schema_Prop_Widget)), {label_w = FORM_LABEL_W * app.display_scale})
+    im.BeginDisabled(f.builtin)
+    shown := cur == "" ? trs(.Schema_Widget_Default) : cur
+    for w in schema_widgets do if w.name == cur do shown = trs(w.label)
+    if im.BeginCombo("##widget", fmt.ctprintf("%s", shown)) {
+        if im.Selectable(tr(.Schema_Widget_Default), cur == "") do edit_buf_set(&f.widget, "")
+        for w in schema_widgets do if schema_widget_fits(w.name, type) {
+            if im.Selectable(fmt.ctprintf("%s##%s", trs(w.label), w.name), w.name == cur) do edit_buf_set(&f.widget, w.name)
+        }
+        im.EndCombo()
+    }
+    im.EndDisabled()
 }
 
 // A form row selecting a type's kind (enum / flags / struct).
