@@ -25,12 +25,12 @@ _G.矩阵4  = _G.Mat4   --[[@as Mat4ZHClass]]
 -- aliases reference the same table object; _lua_register_all_bindings (run after this file)
 -- fills these existing tables rather than replacing them.
 _G.Blimp  = {}   -- also where main.lua defines the engine hooks (lua.odin)
-_G.引擎   = _G.Blimp
+_G.引擎   = _G.Blimp   --[[@as 引擎]]
 _G.Entity = {}
-_G.实体   = _G.Entity
+_G.实体   = _G.Entity   --[[@as 实体]]
 _G.World  = {}
-_G.世界   = _G.World
+_G.世界   = _G.World   --[[@as 世界]]
 _G.Input  = {}   -- input.odin: keys, mouse, gamepad (live in game mode)
-_G.输入   = _G.Input
+_G.输入   = _G.Input   --[[@as 输入]]
 
 require("stdlib_aliases")

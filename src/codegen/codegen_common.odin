@@ -16,6 +16,7 @@ main :: proc() {
     // Lua bindings: scan Odin source for @(lua) and emit wrappers.
     scan_folder("src")
     generate_file("src/gen_lua_bindings.odin")
+    generate_lua_defs("assets_engine/scripts/gen_lua_api_defs.lua")
 
     // LuaCN: transpile Chinese-keyword .luacn scripts to .lua.
     common.luacn_scan_folder("assets_engine")

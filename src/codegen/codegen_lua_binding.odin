@@ -42,6 +42,7 @@ Proc_Info :: struct {
     lua_name_zh: string,
     lua_table: string,
     is_method: bool,
+    docs: string,   // the proc's // doc comment as LuaLS "---" lines (codegen_lua_defs.odin); "" = none
     params: [dynamic]Proc_Param,
     returns: [dynamic]Proc_Return,
 }
@@ -139,6 +140,11 @@ parse_file :: proc(path: string) {
             case ^ast.Proc_Lit: {
                 if proc_type, is_pt := expr.type.derived_expr.(^ast.Proc_Type); is_pt {
                     if proc_info, proc_ok := parse_proc(name_id, proc_type, attr_map, file.src); proc_ok {
+                        if val.docs != nil {
+                            lines := make([dynamic]string, context.temp_allocator)
+                            for tok in val.docs.list do if strings.has_prefix(tok.text, "//") do append(&lines, tok.text)
+                            proc_info.docs = lua_doc_lines(lines[:])
+                        }
                         codegen.procs[proc_info.odin_proc_name] = proc_info
                     }
                 }

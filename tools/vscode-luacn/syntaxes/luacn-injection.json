@@ -1,19 +1,20 @@
 {
     "scopeName": "luacn.keywords",
-    "injectionSelector": "L:source.lua",
+    "comment": "Chinese keywords for .luacn (opened as Lua). Whole words only (not inside a Chinese name like 存在 or 当前), and never in comments or strings.",
+    "injectionSelector": "L:source.lua -comment -string",
     "patterns": [
         {
             "comment": "Control flow keywords — 否则如果 must appear before 否则",
             "name": "keyword.control.lua",
-            "match": "(否则如果|如果|那么|否则|结束|当|重复|直到|对于|在|做|函数|返回|本地|中断)"
+            "match": "(?<![\\p{L}\\p{N}_])(否则如果|如果|那么|否则|结束|当|重复|直到|对于|在|做|函数|返回|本地|中断)(?![\\p{L}\\p{N}_])"
         },
         {
             "name": "keyword.operator.lua",
-            "match": "(和|或|非)"
+            "match": "(?<![\\p{L}\\p{N}_])(和|或|非)(?![\\p{L}\\p{N}_])"
         },
         {
             "name": "constant.language.lua",
-            "match": "(真|假|空)"
+            "match": "(?<![\\p{L}\\p{N}_])(真|假|空)(?![\\p{L}\\p{N}_])"
         }
     ]
 }

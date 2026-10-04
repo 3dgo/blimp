@@ -10,5 +10,9 @@
     ],
     "Lua.diagnostics.disable": [
         "duplicate-set-field"
-    ]
+    ],
+    "Lua.completion.showWord": "Disable",
+    "[lua]": {
+        "editor.wordBasedSuggestions": "off"
+    }
 }

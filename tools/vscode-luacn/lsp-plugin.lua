@@ -2,6 +2,10 @@
 -- LuaLS plugin: transpile .luacn files before analysis so the language server
 -- sees valid Lua instead of Chinese keywords, giving correct completions,
 -- type checking and hover without any suppressed diagnostics.
+--
+-- OnSetText returns the keyword replacements as diffs, not the rewritten text: the
+-- English keywords have different byte lengths, and only diffs let LuaLS map its
+-- positions (semantic colours, diagnostics, hover) back onto the .luacn text.
 
 local KEYWORDS = {
     ["否则如果"] = "elseif",
@@ -40,10 +44,12 @@ local function is_cjk(text, pos)
     return ok and cp >= 0x4E00 and cp <= 0x9FFF
 end
 
-local function transpile(text)
-    local out = {}
-    local i   = 1
-    local n   = #text
+-- The keyword replacements in `text`, skipping comments and strings:
+-- { start, finish (1-based byte positions, inclusive), text }.
+local function keyword_diffs(text)
+    local diffs = {}
+    local i     = 1
+    local n     = #text
 
     while i <= n do
         local b = text:byte(i)
@@ -52,15 +58,11 @@ local function transpile(text)
         if text:sub(i, i+1) == "--" then
             local long_open = text:match("^%[=*%[", i+2)
             if long_open then
-                local close   = "]" .. ("="):rep(#long_open - 2) .. "]"
-                local e       = text:find(close, i + 2 + #long_open, true)
-                local end_pos = e and (e + #close - 1) or n
-                out[#out+1]   = text:sub(i, end_pos)
-                i = end_pos + 1
+                local close = "]" .. ("="):rep(#long_open - 2) .. "]"
+                local e     = text:find(close, i + 2 + #long_open, true)
+                i = (e and (e + #close - 1) or n) + 1
             else
-                local e     = text:find("\n", i, true) or n + 1
-                out[#out+1] = text:sub(i, e - 1)
-                i = e
+                i = text:find("\n", i, true) or n + 1
             end
 
         -- Short string: " or '
@@ -72,53 +74,44 @@ local function transpile(text)
                 elseif c == b  then j = j + 1; break
                 else               j = j + 1 end
             end
-            out[#out+1] = text:sub(i, j - 1)
             i = j
 
         -- Long string: [[ [=[ etc.
         elseif b == 91 then
             local long_open = text:match("^%[=*%[", i)
             if long_open then
-                local close   = "]" .. ("="):rep(#long_open - 2) .. "]"
-                local e       = text:find(close, i + #long_open, true)
-                local end_pos = e and (e + #close - 1) or n
-                out[#out+1]   = text:sub(i, end_pos)
-                i = end_pos + 1
+                local close = "]" .. ("="):rep(#long_open - 2) .. "]"
+                local e     = text:find(close, i + #long_open, true)
+                i = (e and (e + #close - 1) or n) + 1
             else
-                out[#out+1] = "["
                 i = i + 1
             end
 
-        -- Multi-byte UTF-8: accumulate consecutive CJK chars as one token
+        -- Multi-byte UTF-8: consecutive CJK chars are one word; only a whole word is a keyword
         elseif b >= 0x80 then
             if is_cjk(text, i) then
                 local j = i
                 while j <= n and is_cjk(text, j) do
                     j = j + utf8_len(text, j)
                 end
-                local word  = text:sub(i, j - 1)
-                out[#out+1] = KEYWORDS[word] or word
+                local keyword = KEYWORDS[text:sub(i, j - 1)]
+                if keyword then diffs[#diffs+1] = { start = i, finish = j - 1, text = keyword } end
                 i = j
             else
-                local len   = utf8_len(text, i)
-                out[#out+1] = text:sub(i, i + len - 1)
-                i = i + len
+                i = i + utf8_len(text, i)
             end
 
-        -- Plain ASCII
         else
-            out[#out+1] = text:sub(i, i)
             i = i + 1
         end
     end
 
-    return table.concat(out)
+    return diffs
 end
 
 function OnSetText(uri, text)
     if uri:sub(-6) == ".luacn" then
-        local ok, result = pcall(transpile, text)
-        if ok then return result end
+        local ok, diffs = pcall(keyword_diffs, text)
+        if ok then return diffs end
     end
-    return text
 end
