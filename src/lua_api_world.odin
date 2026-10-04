@@ -1,5 +1,8 @@
 package blimp
 
+import "core:hash"
+import "core:log"
+
 // The script API's World table (世界): what a world script can do to the world it runs in. Each proc is a
 // thin @(lua) wrapper — the binding codegen (src/codegen/codegen_lua_binding.odin) marshals the params and
 // returns — around a world-layer proc that takes ^World. lua_world() is the world whose script is running;
@@ -22,6 +25,26 @@ world_find_lua :: proc(name: string) -> (Entity_Handle, bool) {
     w := lua_world() or_else nil
     if w == nil do return {}, false
     return world_find(w, name)
+}
+
+// World.find for an entity the script needs: a miss is a bug (renamed or deleted in the editor), so it warns,
+// once per name per script load (the error overlay shows it). Use World.find when a miss is an answer
+// (the target is gone).
+@(lua=get, table=World, lua_zh="获取")
+world_get_lua :: proc(name: string) -> Entity_Handle {
+    w := lua_world() or_else nil
+    if w == nil do return {}
+    h, ok := world_find(w, name)
+    if ok do return h
+    s := &w.script
+    key := hash.fnv32a(transmute([]u8)name)
+    for m in s.missed[:s.missed_count] do if m == key do return {}
+    if s.missed_count < len(s.missed) {
+        s.missed[s.missed_count] = key
+        s.missed_count += 1
+    }
+    log.warnf("World.get: no entity named '%s' in %s", name, w.title)
+    return {}
 }
 
 // Game seconds since Play (World.time): animate from this, not from a clock kept in Lua. Stops while paused.

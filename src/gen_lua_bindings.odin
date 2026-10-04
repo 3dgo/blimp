@@ -103,6 +103,15 @@ _lua_entity_get_number :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// Binding odin proc: entity_get_position to lua function: get_position.
+_lua_entity_get_position :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    r0 := entity_get_position(handle)
+    _lua_push_ffi_vec3(L, r0)
+    return 1
+}
+
 // Binding odin proc: entity_get_quat to lua function: get_quat.
 _lua_entity_get_quat :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -110,6 +119,24 @@ _lua_entity_get_quat :: proc "c" (L: ^lua.State) -> c.int {
     field := string(lua.L_checkstring(L, 2))
     r0 := entity_get_quat(handle, field)
     _lua_push_ffi_quat(L, r0)
+    return 1
+}
+
+// Binding odin proc: entity_get_rotation to lua function: get_rotation.
+_lua_entity_get_rotation :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    r0 := entity_get_rotation(handle)
+    _lua_push_ffi_quat(L, r0)
+    return 1
+}
+
+// Binding odin proc: entity_get_scale to lua function: get_scale.
+_lua_entity_get_scale :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    r0 := entity_get_scale(handle)
+    _lua_push_ffi_vec3(L, r0)
     return 1
 }
 
@@ -130,6 +157,23 @@ _lua_entity_get_vec3 :: proc "c" (L: ^lua.State) -> c.int {
     field := string(lua.L_checkstring(L, 2))
     r0 := entity_get_vec3(handle, field)
     _lua_push_ffi_vec3(L, r0)
+    return 1
+}
+
+// Binding odin proc: entity_hide to lua function: hide.
+_lua_entity_hide :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    entity_hide(handle)
+    return 0
+}
+
+// Binding odin proc: entity_is_hidden to lua function: is_hidden.
+_lua_entity_is_hidden :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    r0 := entity_is_hidden(handle)
+    lua.pushboolean(L, b32(r0))
     return 1
 }
 
@@ -154,6 +198,15 @@ _lua_entity_play_sound_lua :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// Binding odin proc: entity_rotate to lua function: rotate.
+_lua_entity_rotate :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    by := _lua_read_ffi_quat(L, 2)
+    entity_rotate(handle, by)
+    return 0
+}
+
 // Binding odin proc: entity_set_bool to lua function: set_bool.
 _lua_entity_set_bool :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -174,6 +227,15 @@ _lua_entity_set_number :: proc "c" (L: ^lua.State) -> c.int {
     return 0
 }
 
+// Binding odin proc: entity_set_position to lua function: set_position.
+_lua_entity_set_position :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    position := _lua_read_ffi_vec3(L, 2)
+    entity_set_position(handle, position)
+    return 0
+}
+
 // Binding odin proc: entity_set_quat to lua function: set_quat.
 _lua_entity_set_quat :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -181,6 +243,24 @@ _lua_entity_set_quat :: proc "c" (L: ^lua.State) -> c.int {
     field := string(lua.L_checkstring(L, 2))
     value := _lua_read_ffi_quat(L, 3)
     entity_set_quat(handle, field, value)
+    return 0
+}
+
+// Binding odin proc: entity_set_rotation to lua function: set_rotation.
+_lua_entity_set_rotation :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    rotation := _lua_read_ffi_quat(L, 2)
+    entity_set_rotation(handle, rotation)
+    return 0
+}
+
+// Binding odin proc: entity_set_scale to lua function: set_scale.
+_lua_entity_set_scale :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    scale := _lua_read_ffi_vec3(L, 2)
+    entity_set_scale(handle, scale)
     return 0
 }
 
@@ -209,6 +289,23 @@ _lua_entity_stop_sound_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
     handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
     entity_stop_sound_lua(handle)
+    return 0
+}
+
+// Binding odin proc: entity_translate to lua function: translate.
+_lua_entity_translate :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    delta := _lua_read_ffi_vec3(L, 2)
+    entity_translate(handle, delta)
+    return 0
+}
+
+// Binding odin proc: entity_unhide to lua function: unhide.
+_lua_entity_unhide :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    entity_unhide(handle)
     return 0
 }
 
@@ -342,6 +439,15 @@ _lua_world_find_lua :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
+// Binding odin proc: world_get_lua to lua function: get.
+_lua_world_get_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    name := string(lua.L_checkstring(L, 1))
+    r0 := world_get_lua(name)
+    lua.pushinteger(L, lua.Integer(transmute(u32)r0))
+    return 1
+}
+
 // Binding odin proc: world_light_group_lua to lua function: light_group.
 _lua_world_light_group_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -426,10 +532,22 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "get_number")
     lua.pushcfunction(L, _lua_entity_get_number)
     lua.setfield(L, -2, "取数")
+    lua.pushcfunction(L, _lua_entity_get_position)
+    lua.setfield(L, -2, "get_position")
+    lua.pushcfunction(L, _lua_entity_get_position)
+    lua.setfield(L, -2, "取位置")
     lua.pushcfunction(L, _lua_entity_get_quat)
     lua.setfield(L, -2, "get_quat")
     lua.pushcfunction(L, _lua_entity_get_quat)
     lua.setfield(L, -2, "取四元数")
+    lua.pushcfunction(L, _lua_entity_get_rotation)
+    lua.setfield(L, -2, "get_rotation")
+    lua.pushcfunction(L, _lua_entity_get_rotation)
+    lua.setfield(L, -2, "取朝向")
+    lua.pushcfunction(L, _lua_entity_get_scale)
+    lua.setfield(L, -2, "get_scale")
+    lua.pushcfunction(L, _lua_entity_get_scale)
+    lua.setfield(L, -2, "取缩放")
     lua.pushcfunction(L, _lua_entity_get_string)
     lua.setfield(L, -2, "get_string")
     lua.pushcfunction(L, _lua_entity_get_string)
@@ -438,6 +556,14 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "get_vec3")
     lua.pushcfunction(L, _lua_entity_get_vec3)
     lua.setfield(L, -2, "取矢量")
+    lua.pushcfunction(L, _lua_entity_hide)
+    lua.setfield(L, -2, "hide")
+    lua.pushcfunction(L, _lua_entity_hide)
+    lua.setfield(L, -2, "隐藏")
+    lua.pushcfunction(L, _lua_entity_is_hidden)
+    lua.setfield(L, -2, "is_hidden")
+    lua.pushcfunction(L, _lua_entity_is_hidden)
+    lua.setfield(L, -2, "是否隐藏")
     lua.pushcfunction(L, _lua_entity_move_character_lua)
     lua.setfield(L, -2, "move_character")
     lua.pushcfunction(L, _lua_entity_move_character_lua)
@@ -446,6 +572,10 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "play_sound")
     lua.pushcfunction(L, _lua_entity_play_sound_lua)
     lua.setfield(L, -2, "播放声音")
+    lua.pushcfunction(L, _lua_entity_rotate)
+    lua.setfield(L, -2, "rotate")
+    lua.pushcfunction(L, _lua_entity_rotate)
+    lua.setfield(L, -2, "旋转")
     lua.pushcfunction(L, _lua_entity_set_bool)
     lua.setfield(L, -2, "set_bool")
     lua.pushcfunction(L, _lua_entity_set_bool)
@@ -454,10 +584,22 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "set_number")
     lua.pushcfunction(L, _lua_entity_set_number)
     lua.setfield(L, -2, "设数")
+    lua.pushcfunction(L, _lua_entity_set_position)
+    lua.setfield(L, -2, "set_position")
+    lua.pushcfunction(L, _lua_entity_set_position)
+    lua.setfield(L, -2, "设位置")
     lua.pushcfunction(L, _lua_entity_set_quat)
     lua.setfield(L, -2, "set_quat")
     lua.pushcfunction(L, _lua_entity_set_quat)
     lua.setfield(L, -2, "设四元数")
+    lua.pushcfunction(L, _lua_entity_set_rotation)
+    lua.setfield(L, -2, "set_rotation")
+    lua.pushcfunction(L, _lua_entity_set_rotation)
+    lua.setfield(L, -2, "设朝向")
+    lua.pushcfunction(L, _lua_entity_set_scale)
+    lua.setfield(L, -2, "set_scale")
+    lua.pushcfunction(L, _lua_entity_set_scale)
+    lua.setfield(L, -2, "设缩放")
     lua.pushcfunction(L, _lua_entity_set_string)
     lua.setfield(L, -2, "set_string")
     lua.pushcfunction(L, _lua_entity_set_string)
@@ -470,6 +612,14 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "stop_sound")
     lua.pushcfunction(L, _lua_entity_stop_sound_lua)
     lua.setfield(L, -2, "停止声音")
+    lua.pushcfunction(L, _lua_entity_translate)
+    lua.setfield(L, -2, "translate")
+    lua.pushcfunction(L, _lua_entity_translate)
+    lua.setfield(L, -2, "平移")
+    lua.pushcfunction(L, _lua_entity_unhide)
+    lua.setfield(L, -2, "unhide")
+    lua.pushcfunction(L, _lua_entity_unhide)
+    lua.setfield(L, -2, "取消隐藏")
     lua.pushcfunction(L, _lua_entity_valid)
     lua.setfield(L, -2, "valid")
     lua.pushcfunction(L, _lua_entity_valid)
@@ -534,6 +684,10 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "find")
     lua.pushcfunction(L, _lua_world_find_lua)
     lua.setfield(L, -2, "查找")
+    lua.pushcfunction(L, _lua_world_get_lua)
+    lua.setfield(L, -2, "get")
+    lua.pushcfunction(L, _lua_world_get_lua)
+    lua.setfield(L, -2, "获取")
     lua.pushcfunction(L, _lua_world_light_group_lua)
     lua.setfield(L, -2, "light_group")
     lua.pushcfunction(L, _lua_world_light_group_lua)

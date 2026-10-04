@@ -63,9 +63,19 @@ for AI, not for sound. Odin is authoritative so script reload can't corrupt anyt
   `lua_api_input.odin`: thin wrappers over world-layer procs that take `^World`. World, entity, physics,
   sound and input code knows nothing about Lua. The binding codegen (`src/codegen/codegen_lua_binding.odin`)
   scans for the attribute and marshals params and returns.
+- The same scan writes `assets_engine/scripts/gen_lua_api_defs.lua`, the LuaLS types for those procs (English
+  names on `World`, Chinese on `世界`, as the hand-written `lua_*_defs.lua` split them), so completion and hover
+  in .lua/.luacn follow the API with no hand edits. A proc's `//` doc comment becomes its hover text.
 - They act on `lua_world()`, the world whose script is running. There is no hidden world: called from an
   engine hook (`引擎.更新`), World/Entity procs log an error and do nothing; engine hooks are for
   session-level logic and Input.
+- `World.find(name)` is quiet: a miss is an answer (the target is gone). `World.get(name)` is for entities the
+  script needs: a miss warns once per name per script load (`Lua_World_Script.missed`), so a rename in the
+  editor shows up at Play instead of silently disabling the script.
+- A script may keep handles to fixed level pieces in top-level locals set in `start` (via `World.get`). That's a
+  cache, not state: handles are generational, so a removed entity's handle goes invalid, and `start` reruns on
+  every Play and script reload. Anything that spawns, dies or respawns is looked up each frame with `World.find`,
+  since a kept handle never sees a new entity of the same name.
 - `World.debug_line(from, to [, color])` draws in every view of the script's world, the game view too.
   The lines live in `World.debug_lines` until the world's next tick (`world_play_tick` clears them), so a
   script redraws what it wants each update and they hold while paused. Gameplay code in Odin uses

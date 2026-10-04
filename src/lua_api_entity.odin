@@ -126,6 +126,81 @@ entity_set_quat :: proc(handle: Entity_Handle, field: string, value: quat) {
     if _, is_q := type_info_of(v.id).variant.(runtime.Type_Info_Quaternion); is_q do (^quat)(v.data)^ = value
 }
 
+//================================ Built-in fields ================================
+// Typed shortcuts for the fields every entity has (transform, Hidden), so a script writes
+// Entity.translate(e, d) instead of Entity.set_vec3(e, "position", Entity.get_vec3(e, "position") + d).
+// Same live slot as the by-name accessors; a stale handle reads zero/identity and writes nothing.
+
+@(lua=get_position, table=Entity, lua_zh="取位置")
+entity_get_position :: proc(handle: Entity_Handle) -> vec3 {
+    e, ok := entity_lua(handle)
+    return ok ? e.position : {}
+}
+
+@(lua=set_position, table=Entity, lua_zh="设位置")
+entity_set_position :: proc(handle: Entity_Handle, position: vec3) {
+    if e, ok := entity_lua(handle); ok do e.position = position
+}
+
+// Moves by `delta` in world space.
+@(lua=translate, table=Entity, lua_zh="平移")
+entity_translate :: proc(handle: Entity_Handle, delta: vec3) {
+    if e, ok := entity_lua(handle); ok do e.position += delta
+}
+
+@(lua=get_rotation, table=Entity, lua_zh="取朝向")
+entity_get_rotation :: proc(handle: Entity_Handle) -> quat {
+    e, ok := entity_lua(handle)
+    return ok ? e.rotation : quat(1)
+}
+
+@(lua=set_rotation, table=Entity, lua_zh="设朝向")
+entity_set_rotation :: proc(handle: Entity_Handle, rotation: quat) {
+    if e, ok := entity_lua(handle); ok do e.rotation = rotation
+}
+
+// Turns by `by` in the entity's local space (rotation * by, as in the castle walkthrough).
+@(lua=rotate, table=Entity, lua_zh="旋转")
+entity_rotate :: proc(handle: Entity_Handle, by: quat) {
+    if e, ok := entity_lua(handle); ok do e.rotation = e.rotation * by
+}
+
+@(lua=get_scale, table=Entity, lua_zh="取缩放")
+entity_get_scale :: proc(handle: Entity_Handle) -> vec3 {
+    e, ok := entity_lua(handle)
+    return ok ? e.scale : {}
+}
+
+@(lua=set_scale, table=Entity, lua_zh="设缩放")
+entity_set_scale :: proc(handle: Entity_Handle, scale: vec3) {
+    if e, ok := entity_lua(handle); ok do e.scale = scale
+}
+
+// Hidden: not drawn (entity_drawn). Collision and sound are unaffected.
+@(lua=hide, table=Entity, lua_zh="隐藏")
+entity_hide :: proc(handle: Entity_Handle) {
+    if e, ok := entity_lua(handle); ok do e.basic_flags += {.Hidden}
+}
+
+@(lua=unhide, table=Entity, lua_zh="取消隐藏")
+entity_unhide :: proc(handle: Entity_Handle) {
+    if e, ok := entity_lua(handle); ok do e.basic_flags -= {.Hidden}
+}
+
+@(lua=is_hidden, table=Entity, lua_zh="是否隐藏")
+entity_is_hidden :: proc(handle: Entity_Handle) -> bool {
+    e, ok := entity_lua(handle)
+    return ok && .Hidden in e.basic_flags
+}
+
+// Entity `handle` in the script's world; false if there's no world or the handle is stale.
+@(private="file")
+entity_lua :: proc(handle: Entity_Handle) -> (^Entity, bool) {
+    w := lua_world() or_else nil
+    if w == nil do return nil, false
+    return entity_get(w, handle)
+}
+
 // The `any` for entity `handle`'s field named `name` in the script's world, pointing at the live slot (so
 // writes through it hit the entity). `name` may be a dotted path into nested struct fields. `write`: only a
 // field code may write (entity_writable_field: not the handle or the selection; velocity yes). ok = false if the handle

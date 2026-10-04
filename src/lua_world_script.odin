@@ -25,6 +25,8 @@ Lua_World_Script :: struct {
     start:  c.int,
     update: c.int,
     failed: bool,      // errored: stays stopped until the path changes
+    missed: [16]u32,   // hashes of names World.get didn't find, so each warns once per load (lua_api_world.odin)
+    missed_count: int,
 }
 
 // The world the @(lua) world/entity procs act on: the one whose script is running (or the one blimpctl
