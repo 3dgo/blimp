@@ -21,21 +21,12 @@ ffi.cdef[[
     float roundf(float x);
     float fmodf(float x, float y);
 
-    /* vectors and matrices (column-major) */
-    typedef union {
-        struct { float x, y; };
-        float v[2];
-    } Vec2;
-
-    typedef union {
-        struct { float x, y, z; };
-        float v[3];
-    } Vec3;
-
-    typedef union {
-        struct { float x, y, z, w; };
-        float v[4];
-    } Vec4;
+    /* vectors and matrices (column-major). Plain structs, not unions with a float v[] view:
+       LuaJIT's JIT (2.0 and 2.1) can't compile creating a union ("NYI: unsupported C type conversion"), so
+       every vector op fell back to the interpreter (~126 ns vs ~3 ns per Vec3). */
+    typedef struct { float x, y; }       Vec2;
+    typedef struct { float x, y, z; }    Vec3;
+    typedef struct { float x, y, z, w; } Vec4;
 
     typedef struct { float x, y, z, w; } Quat;
     
