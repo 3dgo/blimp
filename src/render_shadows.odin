@@ -32,7 +32,9 @@ Shadow_View :: struct {
     mesh_instance_buffer_slot: u32,
     mesh_buffer_slot:          u32,
     position_buffer_slot:      u32,
-    _padding: [256 - 80]byte,
+    skin_buffer_slot:          u32,
+    bone_buffer_slot:          u32,
+    _padding: [256 - 88]byte,
 }
 #assert(size_of(Shadow_View) == 256)
 
@@ -158,6 +160,8 @@ world_shadows_upload :: proc(w: ^World, frame_slot: u64) {
             mesh_instance_buffer_slot = r.mesh_instance[frame_slot].resource_view.heap_slot,
             mesh_buffer_slot          = asset_buffers.mesh_buffer.resource_view.heap_slot,
             position_buffer_slot      = asset_buffers.position_buffer.resource_view.heap_slot,
+            skin_buffer_slot          = asset_buffers.skin_buffer.resource_view.heap_slot,
+            bone_buffer_slot          = r.bones[frame_slot].resource_view.heap_slot,
         }
     }
 }

@@ -21,6 +21,11 @@ current state inside the rule. Interruptibility as per-state cancel windows.
 
 Same structure for AI. Effort goes into perception and steering, not decision structure.
 
+In a world script the rules are an `if / elseif` chain run every update, and the animation records are the
+state Lua can't keep: "attacking" is `Anim.playing(e, "Attack")`, hysteresis is a threshold that depends on
+which clip is playing. The chosen rule samples its clip and outputs it; switching clips is the transition
+(claude/animation.md). Example: the fox in castle.luacn.
+
 ### Entities
 
 - Wrap the handle map, don't hijack it. `world_add` / `world_remove` update anything parallel.

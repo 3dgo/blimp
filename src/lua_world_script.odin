@@ -3,6 +3,7 @@ package blimp
 import "core:c"
 import "core:fmt"
 import "core:log"
+import "core:strings"
 import lua "vendor:lua/5.1"
 
 // World scripts: each world's [world] `script` (a .lua file) runs while the world is playing.
@@ -24,6 +25,7 @@ Lua_World_Script :: struct {
     env:    c.int,     // registry refs; <= 0 = none (refs start at 1, so a zeroed world has none)
     start:  c.int,
     update: c.int,
+    anim_event: c.int,   // World.anim_event(entity, name): a clip event (world_anim.odin)
     failed: bool,      // errored: stays stopped until it reloads (path change, hot reload, next Play)
     missed: [16]u32,   // hashes of names World.get didn't find, so each warns once per load (lua_api_world.odin)
     missed_count: int,
@@ -66,12 +68,37 @@ lua_worlds_update :: proc(dt: f64) {
     }
 }
 
+// After anim_update: each clip event this tick (a footstep) to its world script's anim_event hook, as
+// (entity, name), in the order they fired. An error stops the script like one in update.
+lua_worlds_anim_events :: proc() {
+    L := lua_system.L
+    for w in worlds {
+        s := &w.script
+        if s.failed || s.anim_event <= 0 do continue
+        for ev in anim_events(w) {
+            prev := lua_current_world
+            lua_current_world = w
+            lua.rawgeti(L, lua.REGISTRYINDEX, lua.Integer(s.anim_event))
+            lua.pushinteger(L, lua.Integer(transmute(u32)ev.entity))
+            lua.pushstring(L, strings.clone_to_cstring(ev.name, context.temp_allocator))
+            rc := lua.pcall(L, 2, 0, 0)
+            lua_current_world = prev
+            if rc != 0 {
+                log.errorf("Lua error in world script %s (%s) anim_event: %s", sbuf_str(&s.loaded), w.title, lua.tostring(L, -1))
+                lua.pop(L, 1)
+                lua_world_script_stop(w, "anim_event")
+                break
+            }
+        }
+    }
+}
+
 // Frees a world's script state (the world is closing).
 lua_world_script_unload :: proc(w: ^World) {
     L := lua_system.L
     s := &w.script
-    if L != nil do for ref in ([]c.int{s.env, s.start, s.update}) do if ref > 0 do lua.L_unref(L, lua.REGISTRYINDEX, ref)
-    s^ = {env = lua.NOREF, start = lua.NOREF, update = lua.NOREF}
+    if L != nil do for ref in ([]c.int{s.env, s.start, s.update, s.anim_event}) do if ref > 0 do lua.L_unref(L, lua.REGISTRYINDEX, ref)
+    s^ = {env = lua.NOREF, start = lua.NOREF, update = lua.NOREF, anim_event = lua.NOREF}
 }
 
 // Loads the script if settings.script differs from what's loaded (opened, edited, undone), then runs start.
@@ -112,6 +139,7 @@ lua_world_script_sync :: proc(w: ^World) {
     lua.getfield(L, -1, "World")
     s.start  = lua_hook_ref(L, "start", "开始")
     s.update = lua_hook_ref(L, "update", "更新")
+    s.anim_event = lua_hook_ref(L, "anim_event", "动画事件")
     log.infof("World script %s loaded for %s", want, w.title)
     if s.start > 0 && !lua_world_call(w, s.start) do lua_world_script_stop(w, "start")
 }

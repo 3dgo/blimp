@@ -32,5 +32,7 @@ _G.World  = {}
 _G.世界   = _G.World   --[[@as 世界]]
 _G.Input  = {}   -- input.odin: keys, mouse, gamepad (live in game mode)
 _G.输入   = _G.Input   --[[@as 输入]]
+_G.Anim   = {}   -- world_anim.odin: sample, blend and output poses each update (claude/animation.md)
+_G.动画   = _G.Anim   --[[@as 动画]]
 
 require("stdlib_aliases")

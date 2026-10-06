@@ -89,7 +89,17 @@ URIs are re-rooted, see below). The game build (`odin run build.odin -file -- ga
 - **Content determines format, directory determines role.** glTF contents identify
   skinned vs static vs animation-only (`skins`, `animations`, `meshes`); directory
   (`kits/`, `characters/`, `props/`) identifies intent.
-- Animation-only files bind to skeletons by node **name**, not index. Fail loudly on mismatch.
+- Animation-only files bind to skeletons by node **name**, not index. Fail loudly on mismatch. (Not built:
+  clips in the skin's own file bind to it.)
+- **Skins and clips** (`asset_anim.odin`, claude/animation.md → Assets): a skeleton per skin, the rest pose
+  baked into skinned vertices, clips resampled at import and made in place. A skinned model's kit node is
+  where its skeleton's parent sits. A `<kit>.clips` file next to the glTF cuts its timeline into named clips
+  and gives them events (claude/animation.md → Clips file; written by `tools/max/blimp_clips.ms`), reloaded
+  with the assets.
+- The importer also takes non-indexed primitives, computes smooth normals for meshes without them, and drops
+  `byteStride`s that equal the element size (the gltf2 lib refuses any stride; truly interleaved data is
+  refused with an error).
+- Test asset: `assets/characters/Fox.gltf` (Khronos sample, CC0 / CC-BY 4.0, `Fox_LICENSE.md`).
 - Import settings by convention (`_n` suffix → BC5) plus one rules file. Sidecars only as
   per-asset exceptions.
 - Upload through a fixed staging ring (~64MB) on the copy queue, never one allocation the

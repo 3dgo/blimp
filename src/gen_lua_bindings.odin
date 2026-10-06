@@ -83,6 +83,103 @@ _lua_read_ffi_vec4 :: proc(L: ^lua.State, idx: c.int) -> vec4 {
 
 //==================== Generate Procs ====================
 
+// Binding odin proc: anim_blend_lua to lua function: blend.
+_lua_anim_blend_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    a := transmute(Anim_Pose)u32(lua.L_checkinteger(L, 1))
+    b := transmute(Anim_Pose)u32(lua.L_checkinteger(L, 2))
+    weight := f32(lua.L_checknumber(L, 3))
+    r0 := anim_blend_lua(a, b, weight)
+    lua.pushinteger(L, lua.Integer(transmute(u32)r0))
+    return 1
+}
+
+// Binding odin proc: anim_joint_lua to lua function: joint.
+_lua_anim_joint_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    e := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    joint := string(lua.L_checkstring(L, 2))
+    r0, r1 := anim_joint_lua(e, joint)
+    _lua_push_ffi_vec3(L, r0)
+    _lua_push_ffi_quat(L, r1)
+    return 2
+}
+
+// Binding odin proc: anim_layer_lua to lua function: layer.
+_lua_anim_layer_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    base := transmute(Anim_Pose)u32(lua.L_checkinteger(L, 1))
+    over := transmute(Anim_Pose)u32(lua.L_checkinteger(L, 2))
+    joint := string(lua.L_checkstring(L, 3))
+    weight := f32(lua.L_checknumber(L, 4))
+    r0 := anim_layer_lua(base, over, joint, weight)
+    lua.pushinteger(L, lua.Integer(transmute(u32)r0))
+    return 1
+}
+
+// Binding odin proc: anim_output_lua to lua function: output.
+_lua_anim_output_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    e := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    pose := transmute(Anim_Pose)u32(lua.L_checkinteger(L, 2))
+    blend_time := f32(lua.L_optnumber(L, 3, ANIM_BLEND_TIME))
+    anim_output_lua(e, pose, blend_time)
+    return 0
+}
+
+// Binding odin proc: anim_playing_lua to lua function: playing.
+_lua_anim_playing_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    e := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    clip := string(lua.L_checkstring(L, 2))
+    r0 := anim_playing_lua(e, clip)
+    lua.pushboolean(L, b32(r0))
+    return 1
+}
+
+// Binding odin proc: anim_root_speed_lua to lua function: root_speed.
+_lua_anim_root_speed_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    e := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    clip := string(lua.L_checkstring(L, 2))
+    r0 := anim_root_speed_lua(e, clip)
+    lua.pushnumber(L, lua.Number(r0))
+    return 1
+}
+
+// Binding odin proc: anim_sample_lua to lua function: sample.
+_lua_anim_sample_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    e := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    clip := string(lua.L_checkstring(L, 2))
+    speed := f32(lua.L_optnumber(L, 3, 1))
+    loop := lua.isnoneornil(L, 4) ? true : bool(lua.toboolean(L, 4))
+    r0 := anim_sample_lua(e, clip, speed, loop)
+    lua.pushinteger(L, lua.Integer(transmute(u32)r0))
+    return 1
+}
+
+// Binding odin proc: anim_seek_lua to lua function: seek.
+_lua_anim_seek_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    e := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    clip := string(lua.L_checkstring(L, 2))
+    time := f32(lua.L_checknumber(L, 3))
+    anim_seek_lua(e, clip, time)
+    return 0
+}
+
+// Binding odin proc: anim_time_lua to lua function: time.
+_lua_anim_time_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    e := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    clip := string(lua.L_checkstring(L, 2))
+    r0, r1 := anim_time_lua(e, clip)
+    lua.pushnumber(L, lua.Number(r0))
+    lua.pushnumber(L, lua.Number(r1))
+    return 2
+}
+
 // Binding odin proc: entity_get_bool to lua function: get_bool.
 _lua_entity_get_bool :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -521,6 +618,46 @@ _lua_world_time_lua :: proc "c" (L: ^lua.State) -> c.int {
 //==================== Register Bindings ====================
 
 _lua_register_all_bindings :: proc(L: ^lua.State) {
+
+    lua.getglobal(L, "Anim")
+    if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
+    lua.pushcfunction(L, _lua_anim_blend_lua)
+    lua.setfield(L, -2, "blend")
+    lua.pushcfunction(L, _lua_anim_blend_lua)
+    lua.setfield(L, -2, "混合")
+    lua.pushcfunction(L, _lua_anim_joint_lua)
+    lua.setfield(L, -2, "joint")
+    lua.pushcfunction(L, _lua_anim_joint_lua)
+    lua.setfield(L, -2, "关节")
+    lua.pushcfunction(L, _lua_anim_layer_lua)
+    lua.setfield(L, -2, "layer")
+    lua.pushcfunction(L, _lua_anim_layer_lua)
+    lua.setfield(L, -2, "叠层")
+    lua.pushcfunction(L, _lua_anim_output_lua)
+    lua.setfield(L, -2, "output")
+    lua.pushcfunction(L, _lua_anim_output_lua)
+    lua.setfield(L, -2, "输出")
+    lua.pushcfunction(L, _lua_anim_playing_lua)
+    lua.setfield(L, -2, "playing")
+    lua.pushcfunction(L, _lua_anim_playing_lua)
+    lua.setfield(L, -2, "播放中")
+    lua.pushcfunction(L, _lua_anim_root_speed_lua)
+    lua.setfield(L, -2, "root_speed")
+    lua.pushcfunction(L, _lua_anim_root_speed_lua)
+    lua.setfield(L, -2, "移动速度")
+    lua.pushcfunction(L, _lua_anim_sample_lua)
+    lua.setfield(L, -2, "sample")
+    lua.pushcfunction(L, _lua_anim_sample_lua)
+    lua.setfield(L, -2, "采样")
+    lua.pushcfunction(L, _lua_anim_seek_lua)
+    lua.setfield(L, -2, "seek")
+    lua.pushcfunction(L, _lua_anim_seek_lua)
+    lua.setfield(L, -2, "跳转")
+    lua.pushcfunction(L, _lua_anim_time_lua)
+    lua.setfield(L, -2, "time")
+    lua.pushcfunction(L, _lua_anim_time_lua)
+    lua.setfield(L, -2, "时间")
+    lua.setglobal(L, "Anim")
 
     lua.getglobal(L, "Entity")
     if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }

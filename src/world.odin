@@ -29,6 +29,8 @@ World :: struct {
     step:        bool,   // paused play worlds: advance one frame on the next tick (world_step)
     ticks:       bool,   // this frame: the game advances (world_play_tick) — what game systems check
     time:        f64,    // play worlds: game seconds since Play, advanced only on frames that tick (pause and F10 step respected)
+    dt:          f32,    // this frame's game seconds: the frame's dt when it ticks, else 0
+    anim:        ^Anim_World,   // play worlds: animation state (world_anim.odin) — runtime, nil when not playing
 }
 
 // A line game code asked to see (World.debug_line): drawn in every view of its world, the game view too,
@@ -53,6 +55,7 @@ World_Settings :: struct {
     script:     sbuf256 `loc:World_Script`,   // the world's Lua script (start + update hooks, run while playing), e.g. assets/scripts/castle.lua
     light_groups: Light_Groups `loc:World_Light_Groups`,   // where the switchable light groups start (world_light_groups.odin)
     bake:       Bake_Settings `hidden`,   // saved as bake.* keys; edited in the Bake window (ui_bake.odin), not this one
+    anim_fps:   i32 `loc:World_Anim_Fps`,   // poses update this many times a second, PS1-style stepped motion; 0 = every frame (world_anim.odin)
     retro:      Retro_Settings `hidden`,  // saved as retro.* keys; edited in the Retro Look window (ui_retro.odin)
 }
 

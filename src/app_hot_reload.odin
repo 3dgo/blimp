@@ -57,7 +57,7 @@ hot_reload_update :: proc() {
         for rel in changed {
             path := strings.concatenate({roots[i], "/", rel}, context.temp_allocator)
             switch strings.to_lower(filepath.ext(path), context.temp_allocator) {
-            case ".gltf", ".glb", ".bin", ".png": h.assets = true
+            case ".gltf", ".glb", ".bin", ".png", ".clips": h.assets = true
             case ".slang":                        h.shaders = true
             case ".wav", ".ogg", ".mp3", ".flac": h.sounds = true
             case ".lua":   if !slice.contains(h.scripts[:], path) do append(&h.scripts, strings.clone(path, app.allocators.perm))

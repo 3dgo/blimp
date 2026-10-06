@@ -346,8 +346,8 @@ generate_proc :: proc(sb: ^strings.Builder, info: Proc_Info) {
     fmt.sbprintfln(sb, "%v :: proc \"c\" (L: ^lua.State) -> c.int {{", info.odin_wrapper_name)
     fmt.sbprintfln(sb, `    context = app.g_context`)
 
-    // Read parameters. One with a default is optional: a number reads with the default when absent; an FFI
-    // value (Vec3…) keeps the default unless one was passed.
+    // Read parameters. One with a default is optional: a number reads with the default when absent; a bool or an
+    // FFI value (Vec3…) keeps the default unless one was passed.
     for param, i in info.params {
         idx := fmt.tprintf("%v", i + 1)
         switch {
@@ -355,6 +355,8 @@ generate_proc :: proc(sb: ^strings.Builder, info: Proc_Info) {
             fmt.sbprintfln(sb, "    %v := %v(lua.L_optnumber(L, %v, %v))", param.name, param.type, idx, param.default)
         case param.default != "" && slice.contains(LUA_INT_TYPES, param.type):
             fmt.sbprintfln(sb, "    %v := %v(lua.L_optinteger(L, %v, %v))", param.name, param.type, idx, param.default)
+        case param.default != "" && param.type == "bool":   // toboolean reads an absent argument as false
+            fmt.sbprintfln(sb, "    %v := lua.isnoneornil(L, %v) ? %v : bool(lua.toboolean(L, %v))", param.name, idx, param.default, idx)
         case param.default != "" && param.type in codegen.ffi_types:
             fmt.sbprintfln(sb, "    %v: %v = %v", param.name, param.type, param.default)
             fmt.sbprintfln(sb, "    if !lua.isnoneornil(L, %v) do %v = _lua_read_ffi_%v(L, %v)", idx, param.name, param.type, idx)

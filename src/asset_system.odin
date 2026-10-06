@@ -35,6 +35,10 @@ Asset_System :: struct {
     vertex_indices: [dynamic]u32,
     vertex_positions: [dynamic]vec3,
     vertex_attributes: [dynamic]Vertex_Attributes,
+    vertex_skins: [dynamic]Skin_Vertex,   // skinned meshes only, from Mesh.skin_offset (asset_anim.odin)
+
+    skeletons: [dynamic]Skeleton,
+    clips: [dynamic]Clip,
 
     mesh_bvhs: []Mesh_BVH,
     collision: map[string]^b3.MeshData,          // model key → its authored collision (the kit's <model>_col mesh, cooked); Box3D owns the data
@@ -52,7 +56,10 @@ Mesh :: struct {
     vertex_count: u32,
 
     material: u32,
+    skin_offset: u32,   // into vertex_skins, parallel to the vertices; NO_SKIN for a static mesh
+    _pad: [2]u32,
 }
+#assert(size_of(Mesh) == 32)   // = Mesh in scene.slang and shadow.slang (uploaded as is)
 
 Material :: struct {
     color: rgba_f32,
@@ -80,8 +87,9 @@ Kit_Node :: struct {
 }
 
 Model :: struct {
-    key:    string,   // its own interned key, stored so callers can reference it without owning a copy
-    meshes: [dynamic]u32,
+    key:      string,   // its own interned key, stored so callers can reference it without owning a copy
+    meshes:   [dynamic]u32,
+    skeleton: u32,      // asset_system.skeletons index, NO_SKELETON if unskinned
 }
 
 Vertex_Attributes :: struct {
@@ -182,8 +190,9 @@ asset_system_load :: proc() {
     }
     slice.sort_by(asset_system.kits[:], proc(a, b: Kit) -> bool { return a.path < b.path })
     // More image keys than images means kits share textures (by path, or by embedded content).
-    log.infof("Assets: %v kits, %v meshes, %v images under %v keys, %v collision models", len(asset_system.kits),
-        len(asset_system.meshes), len(asset_system.images), len(asset_system.image_ids), len(asset_system.collision))
+    log.infof("Assets: %v kits, %v meshes, %v images under %v keys, %v collision models, %v skeletons, %v clips", len(asset_system.kits),
+        len(asset_system.meshes), len(asset_system.images), len(asset_system.image_ids), len(asset_system.collision),
+        len(asset_system.skeletons), len(asset_system.clips))
 
     asset_build_bvhs()
     asset_build_albedos()
@@ -261,6 +270,7 @@ asset_system_import_gltf_models :: proc(path: string) {
     if len(data.meshes) <= 0 {
         return
     }
+    if !gltf_drop_packed_strides(data, path) do return
 
     file_key := asset_key(path, context.temp_allocator)
 
@@ -343,9 +353,14 @@ asset_system_import_gltf_models :: proc(path: string) {
     node_world, node_reached := gltf_world_matrices(data, context.temp_allocator)
     mesh_matrices := make([]matrix[4, 4]f32, len(data.meshes), context.temp_allocator)
     for &m in mesh_matrices do m = 1
+    // A skinned mesh ignores its node (glTF): its skin's rest pose places it instead (asset_anim.odin).
+    skins := asset_import_skeletons(data, path, file_key, node_world, node_reached)
+    mesh_skins := make([]int, len(data.meshes), context.temp_allocator)   // glTF skin per mesh, -1 = static
+    for &s in mesh_skins do s = -1
     for node, ni in data.nodes {
         if mi, ok := node.mesh.(gltf2.Integer); ok && node_reached[ni] {
             mesh_matrices[mi] = node_world[ni]
+            if si, skinned := node.skin.?; skinned && skins[si].skeleton != NO_SKELETON do mesh_skins[mi] = int(si)
         }
     }
     mesh_model_keys := make([]string, len(data.meshes), context.temp_allocator)   // "" = mesh not imported
@@ -364,6 +379,9 @@ asset_system_import_gltf_models :: proc(path: string) {
         model: Model
         model.key = asset_intern(model_key)   // survives a reload (asset_keys)
         model.meshes = make([dynamic]u32, len(gltf_mesh.primitives))
+        model.skeleton = NO_SKELETON
+        skin := mesh_skins[gltf_mesh_idx]
+        if skin >= 0 do model.skeleton = skins[skin].skeleton
 
         for gltf_prim, gltf_prim_idx in gltf_mesh.primitives {
             mesh_key := fmt.aprintf("%v:%v", model_key, gltf_prim_idx)
@@ -375,21 +393,27 @@ asset_system_import_gltf_models :: proc(path: string) {
             uv_acc_idx, has_uv := gltf_prim.attributes["TEXCOORD_0"]
 
             mesh: Mesh
-            /* --------------------------------- Indices -------------------------------- */
-            if !has_indices {
-                log.errorf("No indices in gltf primitive. File: %v, mesh: %v", path, model_name)
+            mesh.skin_offset = NO_SKIN
+            if !has_pos {
+                log.errorf("No POSITION attribute in gltf primitive. File: %v, mesh: %v", path, model_name)
                 return
             }
 
+            /* --------------------------------- Indices -------------------------------- */
             mesh.index_offset = u32(len(asset_system.vertex_indices))
-            mesh.index_count = data.accessors[index_acc_idx].count
-            resize(&asset_system.vertex_indices, int(mesh.index_offset + mesh.index_count))
+            if has_indices {
+                mesh.index_count = data.accessors[index_acc_idx].count
+                resize(&asset_system.vertex_indices, int(mesh.index_offset + mesh.index_count))
 
-            #partial switch indices in gltf2.buffer_slice(data, index_acc_idx) {
-                case []u8:  for index, i in indices do asset_system.vertex_indices[mesh.index_offset + u32(i)] = u32(index)
-                case []u16: for index, i in indices do asset_system.vertex_indices[mesh.index_offset + u32(i)] = u32(index)
-                case []u32: for index, i in indices do asset_system.vertex_indices[mesh.index_offset + u32(i)] = index
-                case: log.errorf("Unsupported gltf indices format. File: %v", path)
+                #partial switch indices in gltf2.buffer_slice(data, index_acc_idx) {
+                    case []u8:  for index, i in indices do asset_system.vertex_indices[mesh.index_offset + u32(i)] = u32(index)
+                    case []u16: for index, i in indices do asset_system.vertex_indices[mesh.index_offset + u32(i)] = u32(index)
+                    case []u32: for index, i in indices do asset_system.vertex_indices[mesh.index_offset + u32(i)] = index
+                    case: log.errorf("Unsupported gltf indices format. File: %v", path)
+                }
+            } else {   // non-indexed: every three vertices are a triangle
+                mesh.index_count = data.accessors[position_acc_idx].count
+                for i in 0..<mesh.index_count do append(&asset_system.vertex_indices, i)
             }
 
             // Reverse winding: the X negate below mirrors geometry (RH -> LH), and this
@@ -402,11 +426,6 @@ asset_system_import_gltf_models :: proc(path: string) {
             }
 
             /* -------------------------------- Positions ------------------------------- */
-            if !has_pos {
-                log.errorf("No POSITION attribute in gltf primitive. File: %v, mesh: %v", path, model_name)
-                return
-            }
-
             mesh.vertex_offset = u32(len(asset_system.vertex_positions))
             mesh.vertex_count = data.accessors[position_acc_idx].count
             resize(&asset_system.vertex_positions, int(mesh.vertex_offset + mesh.vertex_count))
@@ -417,8 +436,11 @@ asset_system_import_gltf_models :: proc(path: string) {
                 return
             }
 
+            // A skinned vertex is baked into its rest pose, so drawing it unskinned shows that pose.
+            skin_bind: []mat4
+            if skin >= 0 do mesh.skin_offset, skin_bind = asset_import_skin_vertices(data, gltf_prim, skins[skin], mesh.vertex_count, path)
             for pos, i in positions {
-                p := node_mat * [4]f32{pos.x, pos.y, pos.z, 0}   // rotation/scale only (w=0 drops translation)
+                p := skin_bind != nil ? skin_bind[i] * [4]f32{pos.x, pos.y, pos.z, 1} : node_mat * [4]f32{pos.x, pos.y, pos.z, 0}   // rotation/scale only (w=0 drops translation)
                 asset_system.vertex_positions[mesh.vertex_offset + u32(i)] = {-p.x, p.y, p.z}   // negate X: RH -> LH (keeps +Z forward)
             }
 
@@ -460,7 +482,7 @@ asset_system_import_gltf_models :: proc(path: string) {
                 normals, normal_ok := gltf2.buffer_slice(data, normal_acc_idx).([][3]f32)
                 if normal_ok {
                     for nm, i in normals {
-                        n := node_mat * [4]f32{nm.x, nm.y, nm.z, 0}
+                        n := (skin_bind != nil ? skin_bind[i] : node_mat) * [4]f32{nm.x, nm.y, nm.z, 0}
                         asset_system.vertex_attributes[mesh.vertex_offset + u32(i)].normal = la.normalize([3]f32{-n.x, n.y, n.z})
                     }
                 } else {
@@ -468,8 +490,7 @@ asset_system_import_gltf_models :: proc(path: string) {
                     for i in mesh.vertex_offset..<mesh.vertex_offset + mesh.vertex_count do asset_system.vertex_attributes[i].normal = {0, 1, 0}
                 }
             } else {
-                log.warnf("Can't find normal attribute in gltf. Fallback to default. File: %v", path)
-                for i in mesh.vertex_offset..<mesh.vertex_offset + mesh.vertex_count do asset_system.vertex_attributes[i].normal = {0, 1, 0}
+                mesh_compute_normals(mesh)
             }
 
             // UV
@@ -511,6 +532,7 @@ asset_system_import_gltf_models :: proc(path: string) {
         if !has_mesh || !node_reached[ni] || mesh_model_keys[mi] == "" do continue
         w := node_world[ni]
         pos := vec3{-w[0, 3], w[1, 3], w[2, 3]}   // glTF RH -> engine LH: negate X, like the vertices
+        if mesh_skins[mi] >= 0 do pos = skins[mesh_skins[mi]].origin   // placed by its skeleton, not its node
         key := mesh_model_keys[mi]
         if key not_in model_pos do model_pos[key] = pos
         if strings.has_suffix(key, COLLISION_SUFFIX) do continue
@@ -521,6 +543,7 @@ asset_system_import_gltf_models :: proc(path: string) {
         })
     }
     append(&asset_system.kits, kit)
+    asset_import_clips(data, path, file_key, skins)
 
     for key, pos in model_pos {
         if !strings.has_suffix(key, COLLISION_SUFFIX) do continue
@@ -567,6 +590,37 @@ asset_cook_mesh :: proc(name: string, col: Model, offset: vec3) -> ^b3.MeshData 
     data := b3.CreateMesh(def, nil, 0)
     if data == nil do log.errorf("Collision for '%v': Box3D couldn't build the mesh", name)
     return data
+}
+
+// Smooth normals for a mesh the file gave none: each vertex gets the area-weighted face normals around its
+// position, so vertices split for UV seams still shade as one surface. Indices and engine-space positions first.
+@(private="file")
+mesh_compute_normals :: proc(mesh: Mesh) {
+    pos := asset_system.vertex_positions[mesh.vertex_offset:][:mesh.vertex_count]
+    idx := asset_system.vertex_indices[mesh.index_offset:][:mesh.index_count]
+    face_sum := make([]vec3, len(pos), context.temp_allocator)
+    for t := 0; t + 2 < len(idx); t += 3 {
+        a, b, c := pos[idx[t]], pos[idx[t + 1]], pos[idx[t + 2]]
+        n := la.cross(b - a, c - a)   // front faces: points out (CLAUDE.md), length = twice the area
+        for v in idx[t:][:3] do face_sum[v] += n
+    }
+    // Vertices sorted by position, so each run of equal positions is one point of the surface.
+    // (Absolute vertex indices: the comparator can't capture the mesh's offset.)
+    order := make([]u32, len(pos), context.temp_allocator)
+    for &o, i in order do o = mesh.vertex_offset + u32(i)
+    slice.sort_by(order, proc(a, b: u32) -> bool {
+        pa, pb := asset_system.vertex_positions[a], asset_system.vertex_positions[b]
+        return pa.x != pb.x ? pa.x < pb.x : pa.y != pb.y ? pa.y < pb.y : pa.z < pb.z
+    })
+    for start := 0; start < len(order); {
+        p := asset_system.vertex_positions[order[start]]
+        end := start + 1
+        for end < len(order) && asset_system.vertex_positions[order[end]] == p do end += 1
+        sum: vec3
+        for o in order[start:end] do sum += face_sum[o - mesh.vertex_offset]
+        for o in order[start:end] do asset_system.vertex_attributes[o].normal = la.normalize0(sum)
+        start = end
+    }
 }
 
 // World matrix of every node reachable from the glTF's default scene (or, if it declares no scenes,

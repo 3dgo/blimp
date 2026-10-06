@@ -227,7 +227,7 @@ interns it, and `world_add` does that for every entity.
 |---|---|---|
 | permanent | `app.allocators.perm` (tracked heap), the asset arena, the key arena | never (assets: on reload) |
 | level | a `World` (its entity map is a fixed-size value inside it) and its probe arena | when the world closes |
-| frame | `app.allocators.frame` | every frame (nothing uses it yet; animation will) |
+| frame | `app.allocators.frame` | every frame (animation poses) |
 | scratch | `context.temp_allocator` | every frame |
 
 Procs that return memory take an allocator parameter; procs that only need working space use scratch.

@@ -131,6 +131,8 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         mesh_buffer_slot      = asset_buffers.mesh_buffer.resource_view.heap_slot,
         position_buffer_slot  = asset_buffers.position_buffer.resource_view.heap_slot,
         attribute_buffer_slot = asset_buffers.attribute_buffer.resource_view.heap_slot,
+        skin_buffer_slot      = asset_buffers.skin_buffer.resource_view.heap_slot,
+        bone_buffer_slot      = world.render.bones[frame_slot].resource_view.heap_slot,
         material_buffer_slot  = asset_buffers.material_buffer.resource_view.heap_slot,
         sampler_slot          = ps1.point_sampling ? asset_buffers.sampler_point.heap_slot : asset_buffers.sampler.heap_slot,
 

@@ -33,8 +33,8 @@ complicates teardown.
   buffer, since it also wraps `temp` and must not allocate to report. `perm` is the
   `Tracking_Allocator`→heap directly, no guard — the OS heap won't realistically run dry.
   `mem.Tracking_Allocator` in debug.
-- The frame arena exists (reset each frame, `Panic_On_Fail`-wrapped like temp) but **nothing uses it
-  yet**; animation poses are its first user (claude/animation.md).
+- The frame arena (reset each frame, `Panic_On_Fail`-wrapped like temp) holds animation poses
+  (world_anim.odin, claude/animation.md), its first user.
 - The frame arena is **single-buffered for now**: frame data is CPU-only staging copied
   into GPU upload buffers before submit, so the GPU never reads the arena itself. Rotate
   per-flight (reset after the frame fence, indexed by the renderer's frame slot) only once

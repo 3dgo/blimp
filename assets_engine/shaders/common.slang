@@ -63,6 +63,8 @@ public struct FrameConstants {
     public float    fogEnd;           // all fog colour from here; <= fogStart: fog off
     public float2   _padFog;
     public float4x4 invProj;          // this view's projection, inverted: scene depth -> view space
+    public uint     skinBufferSlot;   // SkinVertex per skinned vertex (Mesh.skinOffset)
+    public uint     boneBufferSlot;   // the world's skin matrices this frame (MeshInstance.boneOffset)
 }
 
 public ConstantBuffer<FrameConstants> gFrame : register(b0, space0);

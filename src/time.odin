@@ -47,6 +47,14 @@ timer_delta_sec :: proc() -> f64 {
     return g_timer.delta_sec
 }
 
+// The delta game systems advance by: clamped, so a long frame (a breakpoint, a hitch, a level load) is one
+// short step rather than forty footsteps (claude/animation.md → Events).
+MAX_GAME_DT :: 0.1
+
+timer_game_delta_sec :: proc() -> f64 {
+    return min(g_timer.delta_sec, MAX_GAME_DT)
+}
+
 timer_frame_index :: proc() -> u64 {
     return g_timer.frame_index
 }

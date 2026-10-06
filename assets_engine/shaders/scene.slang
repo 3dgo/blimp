@@ -10,6 +10,8 @@ public struct MeshInstance {
     public uint material;
     public uint shading;   // SHADING_* (shading.slang)
     public float4 tint;    // the entity's color × intensity (entity_tint), alpha 1: multiplies the albedo
+    public uint boneOffset;   // its entity's skin matrices in the bone buffer; 0xFFFFFFFF = draw the mesh as stored (rest pose)
+    public uint3 _pad;
 }
 
 public struct Mesh {
@@ -18,6 +20,8 @@ public struct Mesh {
     public uint vertexOffset;
     public uint vertexCount;
     public uint material;   // asset default material; the shader reads material from the instance, not here
+    public uint skinOffset;   // into the skin buffer, parallel to the vertices; 0xFFFFFFFF = static
+    public uint2 _pad;
 }
 
 public struct Attributes {
@@ -73,7 +77,16 @@ public VSOut vert_main(VSIn input) {
 
     uint vertexIndex = mesh.vertexOffset + input.vertexID;
 
-    float4 worldPos = mul(float4(positionBuffer[vertexIndex], 1.0), transform);
+    // Skinning: model space, before the entity transform (and so before the PS1 snap below). Uniform per draw.
+    float3 localPos    = positionBuffer[vertexIndex];
+    float3 localNormal = attributeBuffer[vertexIndex].normal;
+    if (mesh.skinOffset != 0xFFFFFFFF && meshInstance.boneOffset != 0xFFFFFFFF) {
+        float4x4 skin = skinMatrix(gFrame.skinBufferSlot, gFrame.boneBufferSlot, mesh.skinOffset + input.vertexID, meshInstance.boneOffset);
+        localPos    = mul(float4(localPos, 1.0), skin).xyz;
+        localNormal = mul(float4(localNormal, 0.0), skin).xyz;
+    }
+
+    float4 worldPos = mul(float4(localPos, 1.0), transform);
 
     // Cofactor of the upper 3x3 = inverse-transpose up to scale: correct under non-uniform scale.
     // Rows are the basis vectors (row-vector convention, as in mul(p, transform) above).
@@ -93,14 +106,14 @@ public VSOut vert_main(VSIn input) {
     clip.y = clip.y * cover.y + (1 - cover.y) * clip.w;
     // PS1 vertex jitter: round the screen position to whole scene pixels, then multiply back by w so the
     // depth and perspective division are untouched. Skip vertices behind the eye (w <= 0), which the
-    // divide would fling across the screen; the clipper handles them. Skinning, when it lands, goes before this.
+    // divide would fling across the screen; the clipper handles them.
     if (gFrame.vertexSnap.x > 0 && clip.w > 0) {
         clip.xy = round(clip.xy / clip.w * gFrame.vertexSnap) / gFrame.vertexSnap * clip.w;
     }
     output.position = clip;
     output.worldPos = worldPos.xyz;
     output.color = attributeBuffer[vertexIndex].color * meshInstance.tint;   // constant per draw, so per vertex is per pixel
-    output.normal = mul(attributeBuffer[vertexIndex].normal, cofactor) * flip;
+    output.normal = mul(localNormal, cofactor) * flip;
     output.uv0 = attributeBuffer[vertexIndex].uv0;
     output.uvAffine = output.uv0;
     output.material = meshInstance.material;

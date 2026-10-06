@@ -62,6 +62,7 @@ lua_table_zh :: proc(table: string) -> string {
     case "Entity": return "实体"
     case "World":  return "世界"
     case "Input":  return "输入"
+    case "Anim":   return "动画"
     }
     return ""
 }

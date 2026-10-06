@@ -117,10 +117,13 @@ Frame_Constants :: struct {
     _pad_fog:     [2]f32,
     inv_proj:     mat4,  // the projection this view rendered with, inverted (the camera entity's in game mode)
 
-    _padding: [512 - 464]byte,   // CBVs come in 256-byte steps
+    skin_buffer_slot: u32,   // Skin_Vertex per skinned vertex (asset)
+    bone_buffer_slot: u32,   // the world's skin matrices this frame (World_Render.bones)
+
+    _padding: [512 - 472]byte,   // CBVs come in 256-byte steps
 }
 #assert(offset_of(Frame_Constants, signal_texture_slot) == 312)
-#assert(offset_of(Frame_Constants, _padding) == 464)
+#assert(offset_of(Frame_Constants, _padding) == 472)
 #assert(offset_of(Frame_Constants, probe_layer_scale) % 16 == 0)
 #assert(MAX_PROBE_LAYERS <= 8)
 #assert(size_of(Frame_Constants) == 512)

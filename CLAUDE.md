@@ -107,6 +107,7 @@ design notes there.
    see. Do these first.
 2. **Reversed-Z**, before any shader assumes otherwise.
 3. ~~Shader hot reload, and asset hot reload~~ — done (directory watcher, no meta files).
-4. Simplest animation: one clip, one time, one pose. Blending after.
+4. ~~Simplest animation: one clip, one time, one pose. Blending after.~~ — done (skinning, Lua tree,
+   inertialization, events; claude/animation.md).
 5. PS1 post chain — small, and the fun visible one.
 6. Debug-only fence assertion layer for buffer/GPU write hazards.

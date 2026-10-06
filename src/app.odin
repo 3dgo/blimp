@@ -165,9 +165,11 @@ app_run :: proc() {
 
         app_process_closes()   // closes requested last frame, before anything this frame can reference them
         input_update(ui.game != nil)   // before anything the game runs reads it; live only in game mode
-        lua_update(timer_delta_sec())
-        world_play_tick(timer_delta_sec())     // which play worlds advance this frame (pause / F10 step), and their clocks
-        lua_worlds_update(timer_delta_sec())   // each open world's script (lua_world_script.odin)
+        lua_update(timer_game_delta_sec())
+        world_play_tick(timer_game_delta_sec())     // which play worlds advance this frame (pause / F10 step), and their clocks
+        lua_worlds_update(timer_game_delta_sec())   // each open world's script (lua_world_script.odin)
+        for w in worlds do anim_update(w)           // after the scripts posed their characters (world_anim.odin)
+        lua_worlds_anim_events()                    // the clip events that fired, back to the scripts
         physics_update()                       // after the game systems moved things: kinematic bodies follow
         sound_update(app_listener())           // after the game systems moved things: voices follow, pause, finish
 

@@ -1,5 +1,7 @@
 module shadow;
 
+import "utils";
+
 // Depth-only shadow map pass (render_shadows.odin): the scene's geometry from one slice's camera. No
 // pixel shader. Doesn't import common: its b0 is this pass's constants, not FrameConstants.
 
@@ -10,6 +12,8 @@ struct ShadowConstants {
     uint     meshInstanceBufferSlot;
     uint     meshBufferSlot;
     uint     positionBufferSlot;
+    uint     skinBufferSlot;
+    uint     boneBufferSlot;
 }
 ConstantBuffer<ShadowConstants> gShadow : register(b0, space0);
 
@@ -20,6 +24,8 @@ struct MeshInstance {
     uint material;
     uint shading;
     float4 tint;
+    uint   boneOffset;
+    uint3  _pad;
 }
 
 struct Mesh {
@@ -28,6 +34,8 @@ struct Mesh {
     uint vertexOffset;
     uint vertexCount;
     uint material;
+    uint skinOffset;   // into the skin buffer, parallel to the vertices; 0xFFFFFFFF = static
+    uint2 _pad;
 }
 
 struct VSIn {
@@ -47,6 +55,10 @@ float4 vert_main(VSIn input) : SV_Position {
     Mesh         mesh         = meshBuffer[meshInstance.mesh];
     float4x4     transform    = transformBuffer[meshInstance.transformIndex];
 
-    float4 worldPos = mul(float4(positionBuffer[mesh.vertexOffset + input.vertexID], 1.0), transform);
+    float3 localPos = positionBuffer[mesh.vertexOffset + input.vertexID];
+    if (mesh.skinOffset != 0xFFFFFFFF && meshInstance.boneOffset != 0xFFFFFFFF) {   // as in scene.slang
+        localPos = mul(float4(localPos, 1.0), skinMatrix(gShadow.skinBufferSlot, gShadow.boneBufferSlot, mesh.skinOffset + input.vertexID, meshInstance.boneOffset)).xyz;
+    }
+    float4 worldPos = mul(float4(localPos, 1.0), transform);
     return mul(worldPos, gShadow.viewProj);
 }

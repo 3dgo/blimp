@@ -38,6 +38,7 @@ Asset_Buffers :: struct {
     index_buffer: Resource_With_Upload,
     position_buffer: Resource_With_Upload,
     attribute_buffer: Resource_With_Upload,
+    skin_buffer: Resource_With_Upload,   // Skin_Vertex per skinned vertex (Mesh.skin_offset)
 
     material_buffer: Resource_With_Upload,
     material_buffer_data: [dynamic]Material,
@@ -62,6 +63,9 @@ World_Render :: struct {
 
     lights: [FRAMES_IN_FLIGHT]Resource_With_Upload,
     lights_data: [dynamic]GPU_Light,
+
+    bones: [FRAMES_IN_FLIGHT]Resource_With_Upload,   // animated entities' skin matrices (world_anim.odin), Mesh_Instance_Data.bone_offset into it
+    bone_data: [dynamic]mat4,
 
     // The world's baked probe grid (World.probes), one copy: it only changes on a bake or load, which wait
     // for the GPU first (world_render_probes_recreate). No handle when not baked.
@@ -103,8 +107,12 @@ Mesh_Instance_Data :: struct {
     material: u32,
     shading: u32,   // u32(ShadingModel): SHADING_* in shading.slang
     tint: vec4,     // entity_tint, alpha 1: multiplies the albedo
+    bone_offset: u32,   // its entity's skin matrices in World_Render.bones; NO_BONES = draw the mesh as stored (rest pose)
+    _pad: [3]u32,
 }
-#assert(size_of(Mesh_Instance_Data) == 32)
+#assert(size_of(Mesh_Instance_Data) == 48)
+
+NO_BONES :: max(u32)
 
 // One light entity, rebuilt each frame. Mirrors the Light struct in the shader.
 GPU_Light :: struct {
@@ -136,6 +144,7 @@ asset_buffers_create :: proc() {
     asset_buffers.index_buffer     = buffers_resource_create(size_of(u32), u32(len(asset_system.vertex_indices)), &renderer_dx.resource_heap)
     asset_buffers.position_buffer  = buffers_resource_create(size_of(vec3), u32(len(asset_system.vertex_positions)), &renderer_dx.resource_heap)
     asset_buffers.attribute_buffer = buffers_resource_create(size_of(Vertex_Attributes), u32(len(asset_system.vertex_attributes)), &renderer_dx.resource_heap)
+    asset_buffers.skin_buffer      = buffers_resource_create(size_of(Skin_Vertex), u32(len(asset_system.vertex_skins)), &renderer_dx.resource_heap)
 
     for img in asset_system.images {
         tex := buffers_texture_create(img.width, img.height, dx_format(img.format))
@@ -185,7 +194,7 @@ asset_buffers_destroy :: proc() {
     delete(asset_buffers.texture_ui)
     asset_buffers.texture_ui = nil
 
-    for b in ([?]Resource_With_Upload{asset_buffers.material_buffer, asset_buffers.attribute_buffer, asset_buffers.position_buffer, asset_buffers.index_buffer, asset_buffers.mesh_buffer}) {
+    for b in ([?]Resource_With_Upload{asset_buffers.material_buffer, asset_buffers.skin_buffer, asset_buffers.attribute_buffer, asset_buffers.position_buffer, asset_buffers.index_buffer, asset_buffers.mesh_buffer}) {
         dx.descriptor_heap_free(&renderer_dx.resource_heap, b.resource_view.heap_slot)
         buffers_resource_destroy(b)
     }
@@ -202,6 +211,7 @@ world_render_create :: proc(world: ^World) {
     r.transform_data     = make([dynamic]mat4, 0, MAX_MESH_INSTANCES, app.allocators.perm)
     r.mesh_instance_data = make([dynamic]Mesh_Instance_Data, 0, MAX_MESH_INSTANCES, app.allocators.perm)
     r.lights_data        = make([dynamic]GPU_Light, 0, MAX_LIGHTS, app.allocators.perm)
+    r.bone_data          = make([dynamic]mat4, 0, MAX_BONES, app.allocators.perm)
 
     for i in 0..<FRAMES_IN_FLIGHT {
         r.draw_cmd[i]     = dx.buffer_create(renderer_dx.render_context, {element_size = size_of(d3d12.DRAW_INDEXED_ARGUMENTS), num_elements = MAX_MESH_INSTANCES, heap_type = .UPLOAD})
@@ -210,6 +220,7 @@ world_render_create :: proc(world: ^World) {
         r.transform[i]     = buffers_resource_create(size_of(mat4), MAX_MESH_INSTANCES, &renderer_dx.resource_heap)
         r.mesh_instance[i] = buffers_resource_create(size_of(Mesh_Instance_Data), MAX_MESH_INSTANCES, &renderer_dx.resource_heap)
         r.lights[i]        = buffers_resource_create(size_of(GPU_Light), MAX_LIGHTS, &renderer_dx.resource_heap)
+        r.bones[i]         = buffers_resource_create(size_of(mat4), MAX_BONES, &renderer_dx.resource_heap)
     }
     world_render_probes_create(world)
     world_shadows_create(world)
@@ -222,9 +233,11 @@ world_render_destroy :: proc(world: ^World) {
         dx.descriptor_heap_free(&renderer_dx.resource_heap, r.transform[i].resource_view.heap_slot)
         dx.descriptor_heap_free(&renderer_dx.resource_heap, r.mesh_instance[i].resource_view.heap_slot)
         dx.descriptor_heap_free(&renderer_dx.resource_heap, r.lights[i].resource_view.heap_slot)
+        dx.descriptor_heap_free(&renderer_dx.resource_heap, r.bones[i].resource_view.heap_slot)
         buffers_resource_destroy(r.transform[i])
         buffers_resource_destroy(r.mesh_instance[i])
         buffers_resource_destroy(r.lights[i])
+        buffers_resource_destroy(r.bones[i])
         dx.buffer_unmap(r.draw_cmd[i])
         dx.buffer_destroy(r.draw_cmd[i])
     }
@@ -234,6 +247,7 @@ world_render_destroy :: proc(world: ^World) {
     world_render_probes_destroy(world)
     world_shadows_destroy(world)
     delete(r.lights_data)
+    delete(r.bone_data)
 }
 
 // ============================ Scene build ============================
@@ -247,6 +261,7 @@ buffers_build_scene :: proc(world: ^World) {
     clear(&r.transform_data)
     clear(&r.mesh_instance_data)
     clear(&r.lights_data)
+    clear(&r.bone_data)
     clear(&r.shadow_cameras)
     r.shadow_missed = 0
     defer light_shadow_report(r)
@@ -273,7 +288,7 @@ buffers_build_scene :: proc(world: ^World) {
     group_scales := light_group_scales(world)   // world_light_groups.odin: power cuts, flicker
 
     it := hm.iterator_make(&world.entities)
-    for entity, _ in hm.iterate(&it) {
+    for entity, handle in hm.iterate(&it) {
         if entity_drawn(entity) && entity.light_type != .None {
             light := entity_gpu_light(entity)
             light.intensity *= group_scales[entity_light_group(entity)]
@@ -297,6 +312,11 @@ buffers_build_scene :: proc(world: ^World) {
         drawn := entity_drawn(entity)   // instances for every entity, draw commands only for drawn ones
         shading := entity_shading(world, entity)
         tint := entity_tint(entity)
+        bone_offset := NO_BONES
+        if skin := anim_skin(world, handle); skin != nil && len(r.bone_data) + len(skin) <= MAX_BONES {
+            bone_offset = u32(len(r.bone_data))
+            append(&r.bone_data, ..skin)
+        }
 
         for mesh_idx in model.meshes {
             if len(r.mesh_instance_data) >= MAX_MESH_INSTANCES {
@@ -312,6 +332,7 @@ buffers_build_scene :: proc(world: ^World) {
                 material = mesh.material,
                 shading = u32(shading),
                 tint = {tint.r, tint.g, tint.b, 1},
+                bone_offset = bone_offset,
             })
             if !drawn do continue
             cmd := d3d12.DRAW_INDEXED_ARGUMENTS {
@@ -333,6 +354,10 @@ buffers_build_scene :: proc(world: ^World) {
                 casters = hash.fnv64a(mem.ptr_to_bytes(&m), casters)
                 id := mesh_idx
                 casters = hash.fnv64a(mem.ptr_to_bytes(&id), casters)
+                if bone_offset != NO_BONES {   // a pose change is a caster change
+                    bones := r.bone_data[bone_offset:]
+                    casters = hash.fnv64a(([^]byte)(raw_data(bones))[:len(bones) * size_of(mat4)], casters)
+                }
             }
         }
     }
@@ -424,6 +449,7 @@ buffers_upload_static :: proc(cmd: dx.Command_List) {
     buffers_resource_copy(cmd, &asset_buffers.index_buffer,     asset_system.vertex_indices[:])
     buffers_resource_copy(cmd, &asset_buffers.position_buffer,  asset_system.vertex_positions[:])
     buffers_resource_copy(cmd, &asset_buffers.attribute_buffer, asset_system.vertex_attributes[:])
+    buffers_resource_copy(cmd, &asset_buffers.skin_buffer,      asset_system.vertex_skins[:])
     buffers_resource_copy(cmd, &asset_buffers.material_buffer,  asset_buffers.material_buffer_data[:])
 
     for img, i in asset_system.images {
@@ -456,6 +482,7 @@ world_render_upload :: proc(world: ^World, frame_slot: u64) {
     buffers_resource_copy(renderer_dx.cmd_copy, &r.transform[frame_slot],     r.transform_data[:])
     buffers_resource_copy(renderer_dx.cmd_copy, &r.mesh_instance[frame_slot], r.mesh_instance_data[:])
     buffers_resource_copy(renderer_dx.cmd_copy, &r.lights[frame_slot],        r.lights_data[:])
+    buffers_resource_copy(renderer_dx.cmd_copy, &r.bones[frame_slot],         r.bone_data[:])
     mem.copy(r.draw_cmd_ptr[frame_slot], raw_data(r.draw_cmd_data), size_of(d3d12.DRAW_INDEXED_ARGUMENTS) * len(r.draw_cmd_data))
     world_shadows_upload(world, frame_slot)
     if r.probes_upload {
@@ -471,6 +498,7 @@ world_render_begin :: proc(world: ^World, frame_slot: u64) {
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.mesh_instance[frame_slot].resource, {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.transform[frame_slot].resource,     {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.lights[frame_slot].resource,        {.ALL_SHADING}, {.SHADER_RESOURCE})
+    dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.bones[frame_slot].resource,         {.ALL_SHADING}, {.SHADER_RESOURCE})
     if world.render.probes.resource.handle != nil {
         dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probes.resource,      {.ALL_SHADING}, {.SHADER_RESOURCE})
         dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probe_depth.resource, {.ALL_SHADING}, {.SHADER_RESOURCE})
@@ -485,6 +513,7 @@ world_render_end :: proc(world: ^World, frame_slot: u64) {
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.transform[frame_slot].resource,     {}, {.NO_ACCESS})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.mesh_instance[frame_slot].resource, {}, {.NO_ACCESS})
     dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.lights[frame_slot].resource,        {}, {.NO_ACCESS})
+    dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.bones[frame_slot].resource,         {}, {.NO_ACCESS})
     if world.render.probes.resource.handle != nil {
         dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probes.resource,      {}, {.NO_ACCESS})
         dx.buffer_transition(renderer_dx.cmd_gfx, &world.render.probe_depth.resource, {}, {.NO_ACCESS})
@@ -497,6 +526,7 @@ asset_buffers_begin :: proc() {
     dx.buffer_transition(renderer_dx.cmd_gfx, &asset_buffers.material_buffer.resource,  {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &asset_buffers.position_buffer.resource,  {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &asset_buffers.attribute_buffer.resource, {.ALL_SHADING}, {.SHADER_RESOURCE})
+    dx.buffer_transition(renderer_dx.cmd_gfx, &asset_buffers.skin_buffer.resource,      {.ALL_SHADING}, {.SHADER_RESOURCE})
     dx.buffer_transition(renderer_dx.cmd_gfx, &asset_buffers.index_buffer.resource,     {.INDEX_INPUT}, {.INDEX_BUFFER})
     for &tex in asset_buffers.texture_buffers {
         dx.texture_transition(renderer_dx.cmd_gfx, &tex.resource, {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)

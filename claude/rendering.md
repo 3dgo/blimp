@@ -84,7 +84,7 @@ Material :: struct {
 }
 
 Transform     :: struct { world, prev_world: matrix[3,4]f32 }
-Mesh_Instance :: struct { transform, mesh, material, shading: u32 }
+Mesh_Instance :: struct { transform, mesh, material, shading: u32, tint: vec4, bone_offset: u32 }
 
 Draw_Command :: struct {              // 24-byte stride
     instance_index: u32,              // root constant in the command signature
@@ -147,12 +147,14 @@ All lighting lives in `shading.slang`: `light_surface` (everything lighting a po
 
 ### Skinning
 
-- Same shared buffers. Skinning data in a parallel stream with `skin_offset` as a
-  sentinel for static meshes; the shader branch is uniform per draw.
-- Bone matrices in a per-frame suballocated buffer with `bone_offset` on the instance.
-  Double-buffered.
-- Vertex skinning, not compute skinning. Apply vertex snapping **after** skinning, in
-  clip space.
+- Same shared buffers. `Skin_Vertex {joints [4]u8, weights [4]u8}` in a parallel stream (`skin_buffer`,
+  asset) with `Mesh.skin_offset` (`NO_SKIN` for static meshes).
+- Skin matrices (`model × inv_bind`, claude/animation.md) per world per flight (`World_Render.bones`, built in
+  `buffers_build_scene` like lights) with `bone_offset` on the instance; `NO_BONES` draws the mesh as stored,
+  which is its rest pose. The shader branch (`skinMatrix`, utils.slang) is uniform per draw.
+- Vertex skinning, not compute skinning, in model space before the entity transform, in both scene.slang and
+  shadow.slang. Vertex snapping comes **after** it, in clip space.
+- A pose change changes the shadow casters' hash (render_shadows_draw's static cache), so cached slices redraw.
 
 ### Particles
 

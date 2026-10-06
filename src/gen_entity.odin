@@ -19,6 +19,9 @@ Entity :: struct {
     rotation: quat `section:Transform`,
     scale: vec3 `section:Transform`,
     model: string `widget:model, section:Render`,
+    // A clip of the model's skeleton (its short name, e.g. Walk) the entity loops while playing when
+    // its script outputs no pose (claude/animation.md). Empty: the rest pose.
+    anim: sbuf64 `section:Render`,
     // How the model's surfaces take light (the ShadingModel members; shading.slang). Default: the
     // level's World Settings → Shading.
     shading: EntityShading `section:Render`,
@@ -220,6 +223,7 @@ entity_field_labels :: proc(name: string) -> (l: [Lang]string) {
     case "rotation": l = {.EN = "Rotation", .ZH = "旋转"}
     case "scale": l = {.EN = "Scale", .ZH = "缩放"}
     case "model": l = {.EN = "Model", .ZH = "模型"}
+    case "anim": l = {.EN = "Animation", .ZH = "动画"}
     case "shading": l = {.EN = "Shading", .ZH = "着色"}
     case "blend": l = {.EN = "Blend", .ZH = "混合"}
     case "camera_type": l = {.EN = "Camera", .ZH = "相机"}

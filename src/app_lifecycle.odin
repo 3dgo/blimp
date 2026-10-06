@@ -56,6 +56,7 @@ app_play :: proc(w: ^World) -> ^World {
     ui_retarget_world(level, p)
     physics_world_start(p)
     sound_world_start(p)
+    anim_world_start(p)
     return p
 }
 
@@ -70,13 +71,14 @@ app_stop :: proc(w: ^World) {
     ui_retarget_world(p, level)
 }
 
-// Everything that only runs while a world plays: its script, its voices, its physics. Idempotent: Stop
+// Everything that only runs while a world plays: its script, its voices, its physics, its animation. Idempotent: Stop
 // and close both call it.
 @(private="file")
 app_world_runtime_stop :: proc(w: ^World) {
     lua_world_script_unload(w)
     sound_world_stop(w)
     physics_world_stop(w)
+    anim_world_stop(w)
 }
 
 // ============================ Close ============================
@@ -144,4 +146,5 @@ app_reload_assets :: proc() {
     asset_buffers_upload()
     for w in worlds do w.render.shadow_drawn = {}   // cached shadow slices hold the old geometry
     for w in worlds do if w.play_source != nil do physics_world_start(w)
+    for w in worlds do anim_world_reset(w)   // its clip and skeleton indices are the old assets'
 }

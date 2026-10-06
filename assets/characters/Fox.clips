@@ -1,0 +1,12 @@
+# Clips and events for Fox.gltf (claude/animation.md -> Clips file). Numbers are frames at fps.
+# Its three animations are already separate clips, so no ranges; events count from each clip's start.
+# The hind feet touching down, read off each clip (the foot joint at its lowest).
+fps 30
+
+[Walk]
+footstep 9
+footstep 19.5
+
+[Run]
+footstep 2.4
+footstep 6.3
