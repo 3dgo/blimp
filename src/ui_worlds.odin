@@ -44,7 +44,7 @@ ui_draw_worlds :: proc() {
     if len(worlds) > 0 do worlds_open_panel()
 }
 
-// Scenes and kits.
+// Scenes, characters and kits.
 @(private="file")
 worlds_browse :: proc(filter: string) {
     // Scenes: .level files under assets/ and assets_engine/ (rescanned on refresh).
@@ -74,25 +74,33 @@ worlds_browse :: proc(filter: string) {
         if shown == 0 do im.TextDisabled("%s", tr(.Worlds_None))
     }
 
-    // Kits: glTF files, loaded at startup.
-    if worlds_section(ICON_KIT, tr(.Worlds_Kits), len(asset_system.kits), "kits") {
-        im.PushID("kits")
-        defer im.PopID()
-        shown := 0
-        for &kit, i in asset_system.kits {
-            if !search_matches(kit.path, filter) do continue
-            shown += 1
-            im.PushIDInt(i32(i))
-            open := world_find_open(kit.path)
-            if worlds_row(ICON_KIT, filepath.base(kit.path), filepath.dir(kit.path), open != nil ? tr(.Worlds_Opened_Tag) : nil) {
-                if open != nil do ui_world_focus(open)
-                else do app_open_kit(&kit)
-            }
-            worlds_row_menu(kit.path)
-            im.PopID()
+    // glTF files, loaded at startup: characters (a skinned model in them), then the other kits.
+    worlds_kits(ICON_CHARACTER, tr(.Worlds_Characters), "characters", true, filter)
+    worlds_kits(ICON_KIT, tr(.Worlds_Kits), "kits", false, filter)
+}
+
+// One section of glTF files: the kits that are characters, or the ones that aren't.
+@(private="file")
+worlds_kits :: proc(icon: string, title: cstring, id: string, characters: bool, filter: string) {
+    count := 0
+    for kit in asset_system.kits do if kit.character == characters do count += 1
+    if !worlds_section(icon, title, count, id) do return
+    im.PushID(fmt.ctprintf("%s", id))
+    defer im.PopID()
+    shown := 0
+    for &kit, i in asset_system.kits {
+        if kit.character != characters || !search_matches(kit.path, filter) do continue
+        shown += 1
+        im.PushIDInt(i32(i))
+        open := world_find_open(kit.path)
+        if worlds_row(icon, filepath.base(kit.path), filepath.dir(kit.path), open != nil ? tr(.Worlds_Opened_Tag) : nil) {
+            if open != nil do ui_world_focus(open)
+            else do app_open_kit(&kit)
         }
-        if shown == 0 do im.TextDisabled("%s", tr(.Worlds_None))
+        worlds_row_menu(kit.path)
+        im.PopID()
     }
+    if shown == 0 do im.TextDisabled("%s", tr(.Worlds_None))
 }
 
 // Fits its rows, up to WORLDS_OPEN_MAX_SHARE of the height left; past that the panel scrolls.

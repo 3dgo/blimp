@@ -93,7 +93,8 @@ URIs are re-rooted, see below). The game build (`odin run build.odin -file -- ga
   clips in the skin's own file bind to it.)
 - **Skins and clips** (`asset_anim.odin`, claude/animation.md → Assets): a skeleton per skin, the rest pose
   baked into skinned vertices, clips resampled at import and made in place. A skinned model's kit node is
-  where its skeleton's parent sits. A `<kit>.clips` file next to the glTF cuts its timeline into named clips
+  where its skeleton's parent sits. A kit with a skinned model is a character (`Kit.character`), listed
+  in its own section of the Worlds window. A `<kit>.clips` file next to the glTF cuts its timeline into named clips
   and gives them events (claude/animation.md → Clips file; written by `tools/max/blimp_clips.ms`), reloaded
   with the assets.
 - The importer also takes non-indexed primitives, computes smooth normals for meshes without them, and drops

@@ -28,6 +28,7 @@ ICON_REFRESH      :: "\uE5D5"   // refresh
 ICON_PASTE        :: "\uE14F"   // content_paste
 ICON_SCENE        :: "\uE55B"   // map
 ICON_KIT          :: "\uE1A1"   // inventory_2
+ICON_CHARACTER    :: "\uE7FD"   // person
 ICON_SEARCH       :: "\uE8B6"   // search (the older codepoint: this font file predates the EF7A one)
 ICON_COPY         :: "\uE14D"   // content_copy
 ICON_DUPLICATE    :: "\uE3BB"   // control_point_duplicate

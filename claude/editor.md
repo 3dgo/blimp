@@ -12,7 +12,8 @@
   - First launch opens the Worlds window docked on the right. After that imgui.ini keeps the
     layout, the UI language and which project-wide windows are open (`ui_saved_state.odin`); world windows, views and entity
     panels belong to a world and aren't reopened. Worlds lists open worlds, scenes (`.level`
-    files under `assets/` and `assets_engine/` only: the extension decides) and kits.
+    files under `assets/` and `assets_engine/` only: the extension decides), characters and kits. A glTF with a
+    skinned model is a character (`Kit.character`, set at import): content decides, not its folder or name.
   - **Show in Explorer** (`app_show_in_explorer`, Explorer with the file selected) is how a level or kit
     gets edited outside the engine and resaved: right-click a row in Worlds, the folder button beside Save
     on a viewport toolbar, or right-click a block in GPU Resources.

@@ -78,6 +78,7 @@ Image :: struct {
 Kit :: struct {
     path:  string,              // project-relative glTF path
     nodes: [dynamic]Kit_Node,   // one per mesh node in the glTF's default scene
+    character: bool,            // a model in it is skinned: the editor lists it under Characters, not Kits
 }
 
 Kit_Node :: struct {
@@ -532,7 +533,10 @@ asset_system_import_gltf_models :: proc(path: string) {
         if !has_mesh || !node_reached[ni] || mesh_model_keys[mi] == "" do continue
         w := node_world[ni]
         pos := vec3{-w[0, 3], w[1, 3], w[2, 3]}   // glTF RH -> engine LH: negate X, like the vertices
-        if mesh_skins[mi] >= 0 do pos = skins[mesh_skins[mi]].origin   // placed by its skeleton, not its node
+        if mesh_skins[mi] >= 0 {
+            pos = skins[mesh_skins[mi]].origin   // placed by its skeleton, not its node
+            kit.character = true
+        }
         key := mesh_model_keys[mi]
         if key not_in model_pos do model_pos[key] = pos
         if strings.has_suffix(key, COLLISION_SUFFIX) do continue
