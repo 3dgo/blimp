@@ -15,6 +15,7 @@
         "引入": "require"
     },
     "Lua.completion.showWord": "Disable",
+    "Lua.misc.parameters": ["--locale=zh-cn"],
     "[lua]": {
         "editor.wordBasedSuggestions": "off"
     }

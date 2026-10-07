@@ -160,3 +160,29 @@ Mat4 = nil
 
 ---@class Blimp
 Blimp = nil
+
+-- ── Hooks ─────────────────────────────────────────────────────────────
+-- Scripts define these and the engine calls them; declared here only for completion and hover.
+
+---Called once after main.lua loads (and after it hot reloads). main.lua defines it.
+function Blimp.start() end
+
+---Called every frame, while editing and playing. Not in any world: World, Entity and Anim don't work here; Input does.
+---@param dt number this frame's seconds
+function Blimp.update(dt) end
+
+---Called once before the engine shuts down. main.lua defines it.
+function Blimp.finish() end
+
+---Called on every Play (and after a script reload). Look up the level's fixed entities here with World.get.
+function World.start() end
+
+---Called each tick the level advances: not while paused, once per F10 step. Animate from World.time().
+---@param dt number this tick's seconds
+function World.update(dt) end
+
+---Called after a character's clip passes an event (a frame marked in its .clips file, like a footstep). Only a
+---clip with over half the current pose fires, so a blend doesn't fire it twice; seeking doesn't fire.
+---@param entity Entity_Handle the entity playing the clip
+---@param name string the event's name, like "footstep"
+function World.anim_event(entity, name) end

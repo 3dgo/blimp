@@ -18,6 +18,7 @@ generate_lua_defs :: proc(out_path: string) {
     fmt.sbprintln(&sb, "")
     for name, backing in codegen.int_types {
         fmt.sbprintfln(&sb, "---@alias %v integer   -- Odin %v", name, backing)
+        if zh := lua_int_type_zh(name); zh != "" do fmt.sbprintfln(&sb, "---@alias %v %v", zh, name)
     }
 
     procs := sorted_values(codegen.procs)
@@ -33,6 +34,7 @@ generate_lua_defs :: proc(out_path: string) {
             global := zh ? lua_table_zh(table) : table
             if global == "" do continue
             fmt.sbprintfln(&sb, "\n-- ── %v ──\n", global)
+            fmt.sbprintfln(&sb, "---%v", lua_table_doc(table, zh))
             fmt.sbprintfln(&sb, "---@class %v", global)
             fmt.sbprintfln(&sb, "%v = {{}}", global)
             for p in procs {
@@ -40,13 +42,16 @@ generate_lua_defs :: proc(out_path: string) {
                 name := zh ? p.lua_name_zh : p.lua_name
                 if name == "" do continue
                 fmt.sbprintln(&sb, "")
-                if p.docs != "" do fmt.sbprint(&sb, p.docs)
+                fmt.sbprint(&sb, zh && p.docs_zh != "" ? p.docs_zh : p.docs)
                 for param in p.params {
-                    fmt.sbprintfln(&sb, "---@param %v%v %v", param.name, param.default != "" ? "?" : "", lua_type(param.type, zh))
+                    fmt.sbprintfln(&sb, "---@param %v%v %v", lua_name(param.name, zh), param.default != "" ? "?" : "", lua_type(param.type, zh))
                 }
-                for r in p.returns do fmt.sbprintfln(&sb, "---@return %v", lua_type(r.type, zh))
+                for r in p.returns {
+                    if r.name != "" do fmt.sbprintfln(&sb, "---@return %v %v", lua_type(r.type, zh), lua_name(r.name, zh))
+                    else do fmt.sbprintfln(&sb, "---@return %v", lua_type(r.type, zh))
+                }
                 fmt.sbprintf(&sb, "function %v.%v(", global, name)
-                for param, i in p.params do fmt.sbprintf(&sb, "%v%v", i > 0 ? ", " : "", param.name)
+                for param, i in p.params do fmt.sbprintf(&sb, "%v%v", i > 0 ? ", " : "", lua_name(param.name, zh))
                 fmt.sbprintln(&sb, ") end")
             }
         }
@@ -67,6 +72,77 @@ lua_table_zh :: proc(table: string) -> string {
     return ""
 }
 
+// What completion shows when hovering the table's global.
+lua_table_doc :: proc(table: string, zh: bool) -> string {
+    switch table {
+    case "Entity": return zh ? "实体：按句柄读写运行中脚本所在世界的实体。句柄无效时读返回零值，写什么也不做。" : "Read and write entities of the world whose script is running, by handle. An invalid handle reads zero and writes nothing."
+    case "World":  return zh ? "世界：查找、添加、移除实体，声音、灯光组、射线检测、调试线。" : "Find, add and remove entities; sounds, light groups, raycasts, debug lines."
+    case "Input":  return zh ? "输入：键盘、鼠标、手柄。只在游戏模式下有效（运行后，或按 F8）；其他时候按键都读作松开，轴都读作 0。" : "Keyboard, mouse and gamepad. Live only in game mode (Play, or F8); otherwise keys read up and axes 0."
+    case "Anim":   return zh ? "动画：每次更新采样、混合片段，再输出一个姿态。姿态只在得到它的那次更新里有效。" : "Each update, sample and blend clips, then output one pose. A pose is valid only in the update that made it."
+    }
+    return ""
+}
+
+// The Chinese alias for each @(lua_int) type, for the Chinese names' params and returns.
+lua_int_type_zh :: proc(name: string) -> string {
+    switch name {
+    case "Entity_Handle": return "实体句柄"
+    case "Anim_Pose":     return "姿态"
+    }
+    return ""
+}
+
+// A param or named return as completion shows it: the Odin name, or its Chinese name for the Chinese API. One
+// table for every proc, so a name means the same thing everywhere; an unlisted name stays English.
+lua_name :: proc(name: string, zh: bool) -> string {
+    if !zh do return name
+    switch name {
+    case "handle", "e", "entity": return "实体"
+    case "found":       return "找到"
+    case "field":       return "字段"
+    case "value":       return "值"
+    case "position":    return "位置"
+    case "rotation":    return "朝向"
+    case "scale":       return "缩放"
+    case "brightness":  return "强度"
+    case "delta":       return "位移"
+    case "by":          return "转动"
+    case "radius":      return "半径"
+    case "height":      return "高度"
+    case "name":        return "名称"
+    case "model":       return "模型"
+    case "sound":       return "声音"
+    case "volume":      return "音量"
+    case "origin":      return "起点"
+    case "direction":   return "方向"
+    case "distance":    return "距离"
+    case "hit":         return "命中"
+    case "point":       return "点"
+    case "normal":      return "法线"
+    case "from":        return "起点"
+    case "to":          return "终点"
+    case "color":       return "颜色"
+    case "key":         return "键"
+    case "button":      return "按键"
+    case "axis":        return "轴"
+    case "locked":      return "锁定"
+    case "clip":        return "片段"
+    case "speed":       return "速度"
+    case "loop":        return "循环"
+    case "pose":        return "姿态"
+    case "blend_time":  return "过渡秒数"
+    case "a":           return "甲"
+    case "b":           return "乙"
+    case "base":        return "底"
+    case "over":        return "上"
+    case "joint":       return "关节名"
+    case "weight":      return "权重"
+    case "time":        return "秒数"
+    case "length":      return "长度"
+    }
+    return name
+}
+
 // The LuaLS type for an Odin param/return type; FFI types use the hand-written classes (Vec3 / Vec3ZH).
 lua_type :: proc(odin_type: string, zh: bool) -> string {
     switch odin_type {
@@ -76,19 +152,28 @@ lua_type :: proc(odin_type: string, zh: bool) -> string {
     case "int", "i8", "i16", "i32", "i64", "uint", "u8", "u16", "u32", "u64": return "integer"
     }
     if info, ok := codegen.ffi_types[odin_type]; ok do return zh ? fmt.tprintf("%vZH", info.lua_global) : info.lua_global
-    if odin_type in codegen.int_types do return odin_type
+    if odin_type in codegen.int_types do return zh && lua_int_type_zh(odin_type) != "" ? lua_int_type_zh(odin_type) : odin_type
     if codegen.enum_types[odin_type] || codegen.flag_types[odin_type] do return "integer"
     return "any"
 }
 
-// An Odin doc comment (// lines above the proc) as LuaLS doc lines, one "---" line per comment line.
-lua_doc_lines :: proc(lines: []string) -> string {
-    sb: strings.Builder
-    strings.builder_init(&sb)
+// An Odin doc comment (// lines above the proc) as LuaLS doc lines, one "---" line per comment line. The
+// lines from the first "// zh:" on are the Chinese doc (the prefix dropped), the lines before it the English.
+lua_doc_lines :: proc(lines: []string) -> (en, zh: string) {
+    sb_en, sb_zh: strings.Builder
+    strings.builder_init(&sb_en)
+    strings.builder_init(&sb_zh)
+    in_zh := false
     for line in lines {
         text := strings.trim_prefix(line, "//")
         text = strings.trim_prefix(text, " ")
-        fmt.sbprintfln(&sb, "---%v", text)
+        if !in_zh && strings.has_prefix(text, "zh:") {
+            in_zh = true
+            text = strings.trim_left_space(strings.trim_prefix(text, "zh:"))
+        } else if in_zh {
+            text = strings.trim_left_space(text)   // continuation lines are indented under "zh:"
+        }
+        fmt.sbprintfln(in_zh ? &sb_zh : &sb_en, "---%v", text)
     }
-    return strings.to_string(sb)
+    return strings.to_string(sb_en), strings.to_string(sb_zh)
 }

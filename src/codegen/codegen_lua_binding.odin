@@ -42,7 +42,8 @@ Proc_Info :: struct {
     lua_name_zh: string,
     lua_table: string,
     is_method: bool,
-    docs: string,   // the proc's // doc comment as LuaLS "---" lines (codegen_lua_defs.odin); "" = none
+    docs: string,      // the proc's // doc comment as LuaLS "---" lines (codegen_lua_defs.odin); "" = none
+    docs_zh: string,   // the same comment's lines from "// zh:" on, for the Chinese name; "" = use docs
     params: [dynamic]Proc_Param,
     returns: [dynamic]Proc_Return,
 }
@@ -55,6 +56,7 @@ Proc_Param :: struct {
 
 Proc_Return :: struct {
     type: string,
+    name: string,   // a named Odin result's name, shown in completion; "" = unnamed
 }
 
 scan_folder :: proc(path: string) {
@@ -143,7 +145,7 @@ parse_file :: proc(path: string) {
                         if val.docs != nil {
                             lines := make([dynamic]string, context.temp_allocator)
                             for tok in val.docs.list do if strings.has_prefix(tok.text, "//") do append(&lines, tok.text)
-                            proc_info.docs = lua_doc_lines(lines[:])
+                            proc_info.docs, proc_info.docs_zh = lua_doc_lines(lines[:])
                         }
                         codegen.procs[proc_info.odin_proc_name] = proc_info
                     }
@@ -244,7 +246,16 @@ parse_proc :: proc(proc_name: ^ast.Ident, proc_type: ^ast.Proc_Type, attributes:
                 log.errorf("Codegen: Unrecognised result type: %v", field.type.derived_expr)
                 return Proc_Info{}, false
             }
-            append(&proc_info.returns, Proc_Return {strings.clone(result_type.name)})
+            if len(field.names) == 0 {
+                append(&proc_info.returns, Proc_Return {type = strings.clone(result_type.name)})
+            }
+            for fname in field.names {
+                result_name, _ := fname.derived_expr.(^ast.Ident)
+                append(&proc_info.returns, Proc_Return {
+                    type = strings.clone(result_type.name),
+                    name = result_name != nil ? strings.clone(result_name.name) : "",
+                })
+            }
         }
     }
 

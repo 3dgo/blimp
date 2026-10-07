@@ -601,8 +601,8 @@ _lua_world_remove_lua :: proc "c" (L: ^lua.State) -> c.int {
 _lua_world_set_light_group_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
     name := string(lua.L_checkstring(L, 1))
-    scale := f32(lua.L_checknumber(L, 2))
-    r0 := world_set_light_group_lua(name, scale)
+    brightness := f32(lua.L_checknumber(L, 2))
+    r0 := world_set_light_group_lua(name, brightness)
     lua.pushboolean(L, b32(r0))
     return 1
 }

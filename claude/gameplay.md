@@ -79,7 +79,11 @@ on every Play; the converter skips unchanged output, so those passes don't trigg
   scans for the attribute and marshals params and returns.
 - The same scan writes `assets_engine/scripts/gen_lua_api_defs.lua`, the LuaLS types for those procs (English
   names on `World`, Chinese on `世界`, as the hand-written `lua_*_defs.lua` split them), so completion and hover
-  in .lua/.luacn follow the API with no hand edits. A proc's `//` doc comment becomes its hover text.
+  in .lua/.luacn follow the API with no hand edits. A proc's `//` doc comment becomes its hover text: the
+  lines before `// zh:` for the English name, from `// zh:` on for the Chinese one. Param and named-return
+  names show translated on the Chinese side through one shared table (`lua_name` in codegen_lua_defs.odin),
+  so a name means the same thing in every proc. Multi-value returns are named Odin results so completion
+  labels them. LuaLS runs with `--locale=zh-cn`, so the standard library's built-in docs are Chinese too.
 - They act on `lua_world()`, the world whose script is running. There is no hidden world: called from an
   engine hook (`引擎.更新`), World/Entity procs log an error and do nothing; engine hooks are for
   session-level logic and Input.
