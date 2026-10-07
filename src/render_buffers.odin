@@ -90,7 +90,7 @@ World_Render :: struct {
     shadow_views:     [FRAMES_IN_FLIGHT]dx.Resource,   // Shadow_View per slice (UPLOAD)
     shadow_views_ptr: [FRAMES_IN_FLIGHT]rawptr,
     shadow_views_srv: [FRAMES_IN_FLIGHT]dx.Resource_View,
-    shadow_cameras:   [dynamic]mat4,   // this frame's slices in use, rebuilt by buffers_build_scene
+    shadow_slices:    [dynamic]Shadow_Slice,   // this frame's slices in use, rebuilt by buffers_build_scene
     // Static shadow caching (render_shadows_draw): a slice is redrawn only when its camera changed or
     // something that casts changed since it was last drawn. Slices keep their depth between frames.
     shadow_casters:       u64,   // hash of everything that casts this frame (transform + mesh per instance)
@@ -262,7 +262,7 @@ buffers_build_scene :: proc(world: ^World) {
     clear(&r.mesh_instance_data)
     clear(&r.lights_data)
     clear(&r.bone_data)
-    clear(&r.shadow_cameras)
+    clear(&r.shadow_slices)
     r.shadow_missed = 0
     defer light_shadow_report(r)
     casters := u64(0xcbf29ce484222325)   // FNV-1a offset basis: what casts shadows this frame (shadow caching, render_shadows_draw)

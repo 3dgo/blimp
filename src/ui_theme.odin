@@ -31,6 +31,7 @@ ui_apply_theme :: proc(scale: f32) {
     style.TabBorderSize     = 0
     style.SeparatorTextBorderSize = 1
     style.DockingSeparatorSize    = 2
+    style.DisabledAlpha           = 0.35   // greyed-out buttons (Save with nothing to save) read clearly as off
 
     im.Style_ScaleAllSizes(style, scale)
 
@@ -42,7 +43,7 @@ ui_apply_theme :: proc(scale: f32) {
     SELECTION    :: 0x264F78   // VS Code selection blue (list selections, tree nodes)
 
     c := &style.Colors
-    c[im.Col.Text]                  = hex(0xCCCCCC)
+    c[im.Col.Text]                  = hex(0xE2E2E2)
     c[im.Col.TextDisabled]          = hex(0x808080)
     c[im.Col.WindowBg]              = hex(0x1F1F1F)
     c[im.Col.ChildBg]               = hex(0x1F1F1F, 0)
@@ -69,8 +70,8 @@ ui_apply_theme :: proc(scale: f32) {
     c[im.Col.SliderGrab]            = hex(ACCENT)
     c[im.Col.SliderGrabActive]      = hex(ACCENT_LIGHT)
 
-    c[im.Col.Button]                = hex(0x313131)
-    c[im.Col.ButtonHovered]         = hex(0x3C3C3C)
+    c[im.Col.Button]                = hex(0x3A3A3A)
+    c[im.Col.ButtonHovered]         = hex(0x4A4A4A)
     c[im.Col.ButtonActive]          = hex(ACCENT)   // also marks the active toolbar tool
 
     // Header* = Selectable / TreeNode / CollapsingHeader / MenuItem. One colour has to serve both
@@ -115,7 +116,7 @@ ui_apply_theme :: proc(scale: f32) {
     c[im.Col.TreeLines]             = hex(0x585858)
     c[im.Col.DragDropTarget]        = hex(ACCENT)
     c[im.Col.DragDropTargetBg]      = hex(ACCENT, 0.15)
-    c[im.Col.UnsavedMarker]         = hex(0xCCCCCC)
+    c[im.Col.UnsavedMarker]         = hex(0xE2E2E2)
     c[im.Col.NavCursor]             = hex(ACCENT)
     c[im.Col.NavWindowingHighlight] = hex(0xFFFFFF, 0.7)
     c[im.Col.NavWindowingDimBg]     = hex(0x000000, 0.4)

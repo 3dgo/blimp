@@ -272,6 +272,10 @@ renderer_dx_draw_frame :: proc() {
     //=== Shadow maps (one set per world, shared by its views) ===
     t_shadows := gpu_timer_begin(renderer_dx.cmd_gfx, "shadows")
     for w in worlds do render_shadows_draw(w, f.slot)
+    if w := render_shadows.debug_world; w != nil {   // the Shadow Maps window is open on it (ui_shadows.odin)
+        render_shadows_debug_draw(w, f.slot)
+        render_shadows.debug_world = nil
+    }
     gpu_timer_end(renderer_dx.cmd_gfx, t_shadows)
 
     //=== Scene passes (one per view → its target) ===

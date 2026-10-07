@@ -90,7 +90,7 @@ ui_draw_views :: proc() {
 
 VIEW_WINDOW_SIZE     :: [2]f32{960, 540}   // first-open size of a floating view/world window (× display scale)
 VIEW_WINDOW_MIN_SIZE :: [2]f32{320, 180}   // floating view/world windows can't be shrunk below this
-HOST_PANEL_RATIO     :: 0.3                 // share of a world window's width given to its list/inspector column
+HOST_PANEL_WIDTH     :: 380                 // a world window's list/inspector column, at its first layout (then the user's)
 
 VIEW_WINDOW_CASCADE  :: 30                  // per-window offset so several new windows don't stack exactly
 
@@ -157,11 +157,19 @@ ui_draw_host :: proc(h: ^World_Host, title: cstring) -> bool {
     } else {
         im.DockSpace(dockspace_id, {0, 0}, {.AutoHideTabBar})
         if !h.built {
-            // Same technique as ui_build_default_layout: reuse the node DockSpace just made.
+            // Same technique as ui_build_default_layout: reuse the node DockSpace just made. The column gets
+            // HOST_PANEL_WIDTH in pixels, not a share of the window: on this first frame the window may not have
+            // its docked size yet, and the viewport (the central node) is what grows with it afterwards, so a
+            // share of a too-small window stayed narrow. Sized against the main window when it's that small (or has
+            // no height yet, as when docked from a saved imgui.ini: DockBuilderSetNodeSize asserts on 0).
             im.DockBuilderRemoveNodeChildNodes(dockspace_id)
+            s := app.display_scale
+            size := im.GetContentRegionAvail()
+            if size.x < 2 * HOST_PANEL_WIDTH * s || size.y < 1 do size = im.GetMainViewport().WorkSize
+            im.DockBuilderSetNodeSize(dockspace_id, size)
             left := dockspace_id
             right, list, inspector: im.ID
-            im.DockBuilderSplitNode(left, .Right, HOST_PANEL_RATIO, &right, &left)
+            im.DockBuilderSplitNode(left, .Right, clamp(HOST_PANEL_WIDTH * s / size.x, 0.1, 0.5), &right, &left)
             im.DockBuilderSplitNode(right, .Down, 0.5, &inspector, &list)
             im.DockBuilderDockWindow(fmt.ctprintf("###view%d", v.id), left)
             im.DockBuilderDockWindow(fmt.ctprintf("###entity_list%d", h.list_id), list)

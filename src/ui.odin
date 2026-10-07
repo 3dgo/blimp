@@ -15,6 +15,7 @@ UI :: struct {
     show_schema_editor: bool,
     show_worlds: bool,
     show_resources: bool,
+    show_shadow_maps: bool,
 
     build_default_layout: bool,   // true on first launch (no imgui.ini yet)
     main_dockspace: im.ID,        // the dockspace over the main window (DockSpaceOverViewport)
@@ -227,6 +228,7 @@ ui_update :: proc() {
             im.MenuItemBoolPtr(tr(.Menu_Game_Settings), nil, &ui.show_game_settings)
             menu_section(tr(.Menu_Section_Profile))
             im.MenuItemBoolPtr(tr(.Menu_Resources), nil, &ui.show_resources)
+            im.MenuItemBoolPtr(tr(.Menu_Shadow_Maps), nil, &ui.show_shadow_maps)
             menu_end()
         }
         if menu_begin(tr(.Menu_Language)) {
@@ -259,6 +261,10 @@ ui_update :: proc() {
 
     if ui.show_resources {
         ui_draw_resources()
+    }
+
+    if ui.show_shadow_maps {
+        ui_draw_shadow_maps()
     }
 
     if ui.show_stats {
@@ -312,7 +318,7 @@ menu_section :: proc(label: cstring) {
     im.Indent()
 }
 
-// Builds the default editor dock layout — [ world windows | Worlds ] — on first launch only;
+// Builds the default editor dock layout — [ Worlds | world windows ] — on first launch only;
 // ImGui's saved imgui.ini takes over afterwards. Reuses the node DockSpaceOverViewport already made
 // (RemoveNodeChildNodes keeps it a dockspace, so we avoid the private DockSpace flag). Windows dock
 // by their current label; the ### id in each keeps the assignment stable across language switches.
@@ -320,10 +326,10 @@ ui_build_default_layout :: proc(dockspace_id: im.ID) {
     im.DockBuilderRemoveNodeChildNodes(dockspace_id)
     im.DockBuilderSetNodeSize(dockspace_id, im.GetMainViewport().Size)
 
-    left := dockspace_id
-    right: im.ID
-    im.DockBuilderSplitNode(left, .Right, 0.22, &right, &left)   // Worlds on the right, world windows fill the rest
-    im.DockBuilderDockWindow(tr(.Win_Worlds), right)
+    right := dockspace_id
+    left: im.ID
+    im.DockBuilderSplitNode(right, .Left, 0.2, &left, &right)   // Worlds on the left, world windows fill the rest
+    im.DockBuilderDockWindow(tr(.Win_Worlds), left)
     im.DockBuilderFinish(dockspace_id)
 }
 

@@ -89,6 +89,9 @@ design notes there.
   Windows locks `bin/blimp.exe`.
 - Game: `odin run build.odin -file -- game` → `out/game/game.exe` (release: no editor, plays
   `game.ini`'s start level) with the DLLs and assets beside it.
+- Editor for non-builders: `odin run build.odin -file -- editor` → `out/editor.zip` (optimized `-debug`
+  exe, blimpctl, DLLs under `bin/`), for a GitHub release matching its commit. Unzipped at a project root
+  it needs no Odin: shaders and `.luacn` compile at runtime; only Odin code and `entity_schema.ini` need a build.
 - Type-check only (faster): `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib -custom-attribute:lua,lua_zh,table,method,lua_ffi,as,lua_int`
 - A debug build serves `bin/blimpctl.exe` on `127.0.0.1:47800` (`blimpctl help`). Commands and the
   RenderDoc workflow are in `claude/editor.md`.

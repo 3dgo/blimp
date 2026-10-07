@@ -22,7 +22,14 @@ GAME_DIR :: "out/game"
 GAME_EXE :: "out/game/game.exe"
 GAME_SKIP_EXTS :: [?]string{".max", ".psd", ".blend", ".bak", ".luacn", ".kra", ".xcf"}   // sources, not loaded at runtime
 
-BLIMPCTL_SRC :: "tools/blimpctl"   // remote-control CLI for a running debug build (src/app_remote.odin)
+// `odin run build.odin -file -- editor`: the editor for people who don't build the engine, zipped to
+// EDITOR_ZIP for a GitHub release: an optimized -debug build (ODIN_DEBUG keeps the editor, hot reload
+// and blimpctl), blimpctl and the DLLs, under bin/. Unzipped at a project root, it runs like a local build
+// of the same commit; shaders and .luacn compile at runtime, only Odin and entity_schema.ini need Odin.
+EDITOR_BIN :: "out/editor/bin"
+EDITOR_ZIP :: "out/editor.zip"
+
+BLIMPCTL_SRC ::"tools/blimpctl"   // remote-control CLI for a running debug build (src/app_remote.odin)
 BLIMPCTL_OUT :: "bin/blimpctl.exe"
 
 CUSTOM_ATTRIBUTES :[7]string : {"lua", "lua_zh", "table", "method", "lua_ffi", "as", "lua_int"}
@@ -37,39 +44,68 @@ main :: proc() {
         build_game()
         return
     }
-
-    sb: strings.Builder
-    strings.builder_init(&sb, context.temp_allocator)
-    fmt.sbprintf(&sb, "odin build %v -debug -vet -collection:lib=%v -out:%v -extra-linker-flags:/ignore:4075", SRC_PATH, LIB_PATH, OUT)
-    
-    for ca in CUSTOM_ATTRIBUTES {
-        fmt.sbprintf(&sb, " -custom-attribute:%v", ca)
+    if slice.contains(os.args, "editor") {
+        build_editor()
+        return
     }
-    run_str(strings.to_string(sb))
+
+    build_src("-debug", OUT)
     run_str(fmt.aprintf("odin build %v -vet -out:%v", BLIMPCTL_SRC, BLIMPCTL_OUT, allocator = context.temp_allocator))
 
     if slice.contains(os.args, "run") do run_str(OUT)
 }
 
-build_game :: proc() {
-    if os.exists(GAME_DIR) {
-        if err := os.remove_all(GAME_DIR); err != nil {
-            log.errorf("Can't clear %v (is the game running?): %v", GAME_DIR, err)
-            os.exit(1)
-        }
-    }
-    if err := os.make_directory_all(GAME_DIR); err != nil {
-        log.errorf("Can't create %v: %v", GAME_DIR, err)
-        os.exit(1)
-    }
-
+// Compiles the engine (src/) to `out` with `flags` (space-separated) on top of the shared ones.
+build_src :: proc(flags, out: string) {
     sb: strings.Builder
     strings.builder_init(&sb, context.temp_allocator)
-    fmt.sbprintf(&sb, "odin build %v -o:speed -vet -subsystem:windows -collection:lib=%v -out:%v -extra-linker-flags:/ignore:4075", SRC_PATH, LIB_PATH, GAME_EXE)
+    fmt.sbprintf(&sb, "odin build %v %v -vet -collection:lib=%v -out:%v -extra-linker-flags:/ignore:4075", SRC_PATH, flags, LIB_PATH, out)
     for ca in CUSTOM_ATTRIBUTES {
         fmt.sbprintf(&sb, " -custom-attribute:%v", ca)
     }
     run_str(strings.to_string(sb))
+}
+
+// Deletes `dir` if it exists and creates it empty.
+fresh_dir :: proc(dir: string) {
+    if os.exists(dir) {
+        if err := os.remove_all(dir); err != nil {
+            log.errorf("Can't clear %v (is something in it running?): %v", dir, err)
+            os.exit(1)
+        }
+    }
+    if err := os.make_directory_all(dir); err != nil {
+        log.errorf("Can't create %v: %v", dir, err)
+        os.exit(1)
+    }
+}
+
+build_editor :: proc() {
+    fresh_dir(EDITOR_BIN)
+    build_src("-debug -o:speed", join({EDITOR_BIN, "blimp.exe"}))
+    run_str(fmt.aprintf("odin build %v -o:speed -vet -out:%v", BLIMPCTL_SRC, join({EDITOR_BIN, "blimpctl.exe"}), allocator = context.temp_allocator))
+
+    bin, _ := os.read_all_directory_by_path("bin", context.temp_allocator)
+    for fi in bin do if filepath.ext(fi.name) == ".dll" do copy_or_exit(join({EDITOR_BIN, fi.name}), fi.fullpath)
+
+    // Only the exes and DLLs go in the zip, under bin/ (the debug build's .pdb stays in EDITOR_BIN).
+    // Windows' own tar (bsdtar) writes zips; Git's GNU tar on PATH can't.
+    tar := join({os.get_env("SystemRoot", context.temp_allocator), "System32", "tar.exe"})
+    cmd := make([dynamic]string, context.temp_allocator)
+    append(&cmd, tar, "-a", "-c", "-f", EDITOR_ZIP, "-C", filepath.dir(EDITOR_BIN))
+    built, _ := os.read_all_directory_by_path(EDITOR_BIN, context.temp_allocator)
+    for fi in built {
+        ext := filepath.ext(fi.name)
+        if ext == ".exe" || ext == ".dll" do append(&cmd, fmt.aprintf("bin/%v", fi.name, allocator = context.temp_allocator))
+    }
+    os.remove(EDITOR_ZIP)
+    run(cmd[:])
+    log.infof("Editor: %v (unzip at a project root, beside assets/)", EDITOR_ZIP)
+}
+
+build_game :: proc() {
+    fresh_dir(GAME_DIR)
+    build_src("-o:speed -subsystem:windows", GAME_EXE)
 
     bin, _ := os.read_all_directory_by_path("bin", context.temp_allocator)
     for fi in bin do if filepath.ext(fi.name) == ".dll" do copy_or_exit(join({GAME_DIR, fi.name}), fi.fullpath)

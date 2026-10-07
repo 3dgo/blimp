@@ -9,7 +9,7 @@
   - Any number of worlds can be open at once. They live in a pointer-stable registry,
     `worlds: [dynamic]^World` (`world_registry.odin`), where each world is individually allocated
     because views, panels and undo hold `^World`.
-  - First launch opens the Worlds window docked on the right. After that imgui.ini keeps the
+  - First launch opens the Worlds window docked on the left. After that imgui.ini keeps the
     layout, the UI language and which project-wide windows are open (`ui_saved_state.odin`); world windows, views and entity
     panels belong to a world and aren't reopened. Worlds lists open worlds, scenes (`.level`
     files under `assets/` and `assets_engine/` only: the extension decides), characters and kits. A glTF with a
@@ -183,7 +183,10 @@
   the button lights while anything differs from plain Lit. **GPU Resources** (Show menu, `ui_resources.odin`):
   treemap of every GPU resource by owner — assets, each world, each view, engine. Click a group to show
   only it (Back / Backspace returns); texture tooltips show the picture (an ImGui-heap SRV per asset
-  texture, `asset_buffers.texture_ui`).
+  texture, `asset_buffers.texture_ui`). **Shadow Maps** (Show menu, `ui_shadows.odin`): the active world's
+  slices in use (of MAX_SHADOW_SLICES) and each one as grey linear depth with its light; hover for a bigger
+  tile and its texel size. While open, `render_shadows_debug_draw` draws the slices into a 2048×1024 RGBA8
+  atlas (made on first open, kept), from the slice's Shadow_View.
 - **The clipboard is the scene `[entity]` text format** (`entity_to_text` / `scene_load_from_text` over
   the generic codec in `serialize.odin`).
   - One format backs save, duplicate and instantiate-from-kit or from the templates level. There is no drag
@@ -244,7 +247,8 @@ A debug build listens on `127.0.0.1:47800` (`src/app_remote.odin`). `bin/blimpct
 built by `build.odin`) sends one text command and prints the reply. `blimpctl help` lists the commands:
 worlds, open/save/close, entities/get/set/paste/delete/select, play/stop/pause, game, undo/redo, views/camera/frame/pick/menu, tool,
 timings (GPU time per pass, `render_gpu_timer.odin`), resources (every GPU resource by owner — assets, worlds,
-views, engine — the data behind the GPU Resources treemap window, `ui_resources.odin`), bake / probe (claude/rendering.md → Baker),
+views, engine — the data behind the GPU Resources treemap window, `ui_resources.odin`), shadows (a world's shadow
+map slices, the Shadow Maps window's data, `ui_shadows.odin`), bake / probe (claude/rendering.md → Baker),
 screenshot (writes a PNG, replies with its path), sounds (clips and live voices), and lua.
 
 - `lua <code>` runs against the active world. `lua <world> -` (code on stdin) points the World / Entity calls

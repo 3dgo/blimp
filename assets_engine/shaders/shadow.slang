@@ -14,6 +14,11 @@ struct ShadowConstants {
     uint     positionBufferSlot;
     uint     skinBufferSlot;
     uint     boneBufferSlot;
+    // The Shadow Maps window's pass (frag_debug) only.
+    uint     shadowMapSlot;
+    uint     slice;
+    float    near;
+    float    far;   // perspective planes, to show depth linearly; far 0 = orthographic (already linear)
 }
 ConstantBuffer<ShadowConstants> gShadow : register(b0, space0);
 
@@ -61,4 +66,30 @@ float4 vert_main(VSIn input) : SV_Position {
     }
     float4 worldPos = mul(float4(localPos, 1.0), transform);
     return mul(worldPos, gShadow.viewProj);
+}
+
+// The Shadow Maps window (render_shadows_debug_draw): one slice drawn into its tile of the atlas as grey
+// depth, white at the light and black at the far plane; dark blue where nothing casts (still cleared).
+static const float SHADOW_DEBUG_TILE = 256;   // SHADOW_DEBUG_TILE in render_shadows.odin
+
+[shader("vertex")]
+float4 vert_debug(uint vertexID : SV_VertexID) : SV_Position {
+    float2 uv = float2((vertexID << 1) & 2, vertexID & 2);   // (0,0) (2,0) (0,2): covers the tile's viewport
+    return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+}
+
+[shader("fragment")]
+float4 frag_debug(float4 pos : SV_Position) : SV_Target {
+    Texture2DArray<float> shadowMap = DescriptorHandle<Texture2DArray<float>>(gShadow.shadowMapSlot);
+    uint size, height, slices;
+    shadowMap.GetDimensions(size, height, slices);
+    float2 local = pos.xy - floor(pos.xy / SHADOW_DEBUG_TILE) * SHADOW_DEBUG_TILE;   // SV_Position is in atlas pixels
+    float d = shadowMap.Load(int4(int2(local * size / SHADOW_DEBUG_TILE), gShadow.slice, 0));
+    if (d <= 0) return float4(0.05, 0.07, 0.14, 1);
+    float v = d;   // orthographic: reversed-Z depth is already linear, 1 at the light
+    if (gShadow.far > 0) {   // perspective reversed-Z: d = n(f - z) / (z(f - n)), solved for z
+        float n = gShadow.near, f = gShadow.far;
+        v = 1 - n * f / (d * (f - n) + n) / f;
+    }
+    return float4(v.xxx, 1);
 }

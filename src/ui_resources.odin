@@ -105,7 +105,7 @@ resource_items :: proc(allocator := context.temp_allocator) -> []Resource_Item {
         add(&items, w.title, trs(.Res_Lights),         .Frame_Data, MAX_LIGHTS * size_of(GPU_Light) * F, capacity(MAX_LIGHTS, size_of(GPU_Light), F, allocator))
         add(&items, w.title, trs(.Res_Draw_Commands),  .Frame_Data, MAX_MESH_INSTANCES * size_of(d3d12.DRAW_INDEXED_ARGUMENTS) * F, capacity(MAX_MESH_INSTANCES, size_of(d3d12.DRAW_INDEXED_ARGUMENTS), F, allocator))
         add(&items, w.title, trs(.Res_Shadow_Maps),    .Target, MAX_SHADOW_SLICES * SHADOW_MAP_SIZE * SHADOW_MAP_SIZE * 4,
-            fmt.aprintf("%d × %d R32 × %d · %d in use", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, MAX_SHADOW_SLICES, len(w.render.shadow_cameras), allocator = allocator))
+            fmt.aprintf("%d × %d R32 × %d · %d in use", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, MAX_SHADOW_SLICES, len(w.render.shadow_slices), allocator = allocator))
         add(&items, w.title, trs(.Res_Shadow_Views),   .Frame_Data, MAX_SHADOW_SLICES * size_of(Shadow_View) * F, capacity(MAX_SHADOW_SLICES, size_of(Shadow_View), F, allocator))
         g := &w.probes
         if w.render.probes.resource.handle != nil {

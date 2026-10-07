@@ -242,6 +242,8 @@ Views  (<view> = view id, see 'views')
   tool [select|move|...] [global|local] [center|pivots]   get or set the viewport tool, gizmo space and pivot
   resources [show|hide]                   GPU resources by owner (assets, worlds, views, engine), largest first;
                                           shows/hides the GPU Resources window
+  shadows <world> [show|hide]             shadow map slices in use: index, light, type, face, texel size;
+                                          shows/hides the Shadow Maps window (it shows the active world)
 Engine
   restart [--gpu-validation] [--renderdoc]   relaunch with exactly these launch options (none = plain);
                                           refuses while anything is unsaved
@@ -557,6 +559,16 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         if len(args) > 0 do ui.show_resources = args[0] == "show"
         for it in resource_items() {
             fmt.sbprintf(out, "%-10v %10s  %s / %s  (%s)\n", it.kind, bytes_text(it.bytes), it.owner, it.name, it.detail)
+        }
+
+    case "shadows":
+        // The Shadow Maps window's data as text (ui_shadows.odin).
+        w := remote_world(args) or_return
+        if len(args) > 1 do ui.show_shadow_maps = args[1] == "show"
+        r := &w.render
+        fmt.sbprintf(out, "%d / %d slices, %d shadowed lights without one, %dx%d each\n", len(r.shadow_slices), MAX_SHADOW_SLICES, r.shadow_missed, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE)
+        for &s, i in r.shadow_slices {
+            fmt.sbprintf(out, "%2d  %-24s %-11v face %d  texel %.4f%s\n", i, sbuf_str(&s.light), s.light_type, s.face, s.texel, s.far > 0 ? " at 1 m" : "")
         }
 
     case "timings":
