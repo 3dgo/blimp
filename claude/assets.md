@@ -12,8 +12,10 @@ the top of each frame, waits 0.3 s after the last change (Max writes `.bin` then
   stopped, the asset arena (`asset_system_reload`) and GPU asset buffers thrown away and rebuilt, physics
   started again. Entities keep working because the keys they hold are interned in their own
   arena, `asset_keys` (`asset_intern`), which outlives every reload — so do undo snapshots and the
-  clipboard. Anything that keeps an asset key must intern it (`entity_intern_keys` after reading
-  fields from text). Play worlds' physics are rebuilt with it.
+  clipboard. Anything that keeps an asset key must intern it: after reading fields from text,
+  `asset_intern_keys(v)` interns every string field tagged `widget:model`, `widget:texture` or `widget:sound`
+  (the asset pickers' tags), nested structs included. **A string field is an asset key exactly when it has one
+  of those tags**, so a new key field, a schema-editor one too, needs only its tag. Play worlds' physics are rebuilt with it.
 - `.slang` → every pipeline recompiled, all or nothing (`render_shaders_reload`, a fresh Slang session).
 - `.wav .ogg .mp3 .flac` → every sound clip (`sound_reload`).
 - `.luacn` → transpiled to its `.lua` (`common.luacn_convert`, shared with the build's codegen); `.lua` →
@@ -55,15 +57,17 @@ several nodes bakes the last node's rotation/scale, since geometry is stored onc
 
 **Artist workflow (3ds Max).** One `.max` per kit, saved under `assets/` next to its export with
 the same base name (`assets/models/castle.max` → `castle.gltf` + `castle.bin`). Shared textures live
-under `assets/` too and the Max scene references them there. The scan imports only `.gltf`/`.glb`
-and textures load only when a glTF references them, so `.max`, `.psd` and autobackups in `assets/`
-cost nothing. Export `.gltf`, not `.glb`, so textures stay external and are shared by path. Setting
+under `assets/` too and the Max scene references them there. The scan imports only `.gltf`/`.glb` and
+`.png`, so `.max`, `.psd` and autobackups in `assets/` cost nothing. Export `.gltf`, not `.glb`, so textures stay external and are shared by path. Setting
 the Max project folder to the repo root keeps bitmap paths relative, but it isn't required (absolute
 URIs are re-rooted, see below). The game build (`odin run build.odin -file -- game`) copies `assets/` and
 `assets_engine/` without the DCC sources (`.max .psd .blend .bak .luacn …`, `GAME_SKIP_EXTS`); there is no cook step.
 
-- Scan for glTF files, parse each, load all meshes and textures into RAM and VRAM.
-  Textures are **not** scanned up front — each glTF pulls in the images it references.
+- Scan `assets/` and `assets_engine/`: **every `.png` loads first**, keyed by its project path, whether or not a
+  glTF uses it (a sky panorama, `World_Settings.sky`, is referenced by key from a world, never from a glTF). Then
+  each glTF is parsed and its meshes and textures loaded into RAM and VRAM; an external image it references
+  is found by key, so it's decoded once. The cost: an unused PNG still takes RAM and VRAM, so don't leave
+  big work files as `.png` under `assets/`.
 - Keys: **project-relative, forward-slash path** plus a name, e.g. model
   `assets/models/car.gltf:body`, mesh `…:body:0` (primitive), material `…:mat_name`,
   image `assets/models/colormap.png`. Path form makes keys identical across machines and

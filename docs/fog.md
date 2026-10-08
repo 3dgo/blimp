@@ -3,9 +3,9 @@
 A guide to rebuilding the fog we had, one working stage at a time. Each step ends with something you can
 see and check before going on. The final stage has:
 
-- **Distance fog**: the PS1 ramp between a start and an end distance, in its own colour.
-- **Height fog**: exponential ground mist, in its own colour.
-- **Lit fog**: both colours brightened, darkened and tinted by the baked probe light in the air.
+- **Distance fog**: the PS1 ramp between a start and an end distance.
+- **Height fog**: exponential ground mist. The two share one colour, and a max opacity caps how much they hide.
+- **Lit fog**: the colour brightened, darkened and tinted by the baked probe light in the air.
 - **Lamp halos**: point and spot lights glowing in the fog, with a per-light Halo Intensity.
 
 All of it is **analytic**, worked out exactly per pixel instead of ray-marched through a grid. It needs no
@@ -55,7 +55,7 @@ Things to read first:
 **How to check your work** (CLAUDE.md lists the cheapest checks):
 
 ```
-blimpctl settings 0 fog.on true          # one field per call
+blimpctl settings 0 fog.distance_fog true   # one field per call
 blimpctl screenshot 1 out.png
 blimpctl timings                         # the GPU time of "view 1"
 blimpctl log 20 warn                     # shader compile errors show up here (shaders hot-reload)
@@ -93,19 +93,19 @@ Getting the distance:
 fog: Fog_Settings `loc:World_Fog`,   // distance fog into the background colour
 
 Fog_Settings :: struct {
-    on:    bool `loc:World_Fog_On`,
-    start: f32  `loc:World_Fog_Start`,   // full colour nearer than this
-    end:   f32  `loc:World_Fog_End`,     // all background colour from here on
+    distance_fog: bool `loc:World_Fog_Distance_On`,
+    start:        f32  `loc:World_Fog_Start`,   // full colour nearer than this
+    end:          f32  `loc:World_Fog_End`,     // all background colour from here on
 }
 
 fog = {start = 20, end = 60},
 ```
 
-`loc.odin`: add `World_Fog, World_Fog_On, World_Fog_Start, World_Fog_End` to the enum, and the rows:
+`loc.odin`: add `World_Fog, World_Fog_Distance_On, World_Fog_Start, World_Fog_End` to the enum, and the rows:
 
 ```odin
 .World_Fog       = { .EN = "Fog",       .ZH = "雾" },
-.World_Fog_On    = { .EN = "On",        .ZH = "开启" },
+.World_Fog_Distance_On = { .EN = "Distance Fog", .ZH = "距离雾" },
 .World_Fog_Start = { .EN = "Start (m)", .ZH = "起始距离（米）" },
 .World_Fog_End   = { .EN = "End (m)",   .ZH = "结束距离（米）" },
 ```
@@ -141,7 +141,7 @@ public float4x4 invProj;
 
 ```odin
 frame_constants.inv_proj = linalg.inverse(frame_constants.proj_mat)
-if fog := world.settings.fog; fog.on && fog.end > fog.start {
+if fog := world.settings.fog; fog.distance_fog && fog.end > fog.start {
     frame_constants.fog_color = world.settings.background
     frame_constants.fog_start, frame_constants.fog_end = fog.start, fog.end
 }
@@ -341,24 +341,40 @@ as off.
 
 ---
 
-## Step 5: A colour for each fog
+## Step 5: One colour, and a cap on the distance fog
 
-**You'll learn:** mixing two media.
+**You'll learn:** combining two fogs into one transmittance, and which of them needs a cap.
 
-**The idea:** each fog has its own linear colour (step 2). Where both overlap, mix the colours by **each one's
-share of the optical depth**, so the thicker one along this ray shows more. The distance ramp isn't a
-density, but it has an equivalent optical depth: `τ_d = −ln(T_d)` (clamp T_d ≥ 1e-6 first).
+**The idea:** the two fogs already combine as one transmittance, `T = T_d × T_h`. They share one linear colour
+(step 2): separate colours cost a mix by each one's share of the optical depth (`τ_d = −ln T_d`), and in
+practice you pick the same colour for both.
+
+The background is a ray that is "infinitely" long, and the two fogs treat that differently:
+
+- **Distance fog** reaches 0 at `end`, so it covers the background (or a sky) completely. Give its ramp a
+  **max opacity**: it goes from 1 down to `1 − max_opacity` instead of to 0. Capping a density wouldn't do it:
+  density is per metre, and a long enough ray still reaches full fog.
+- **Height fog** thins going up, so a ray up to infinity only collects a finite optical depth
+  (≈ `density × falloff / dir.y`). On the background it's thick at the horizon and clear overhead by itself:
+  leave it uncapped. (Capping the product `T_d × T_h` instead would flatten that gradient whenever distance fog is
+  on, since `T_d` is 0 on every miss.)
 
 ```
-color   = (τ_d · C_distance + τ_h · C_height) / (τ_d + τ_h)
+T_d     = 1 − max_opacity × ramp(t)
+T       = T_d × T_h
 fog     = color × (1 − T)
 pixel   = scene × T + fog           (the background too: its scene light is the clear colour)
 ```
 
-Since step 2, the background is just a pixel whose ray never hit anything, so it needs no special case.
+Since step 2, the background is just a pixel whose ray never hit anything, so it needs no special case. The cap
+applies to every pixel, not just the background: capping only the background would leave a fully fogged
+distant mountain as a flat fog-coloured shape against a background that still shows through. The halos (step 6)
+and lit fog (step 7) read `fog_transmittance`, so they take the cap too.
 
-**Check:** with distance fog only, the sky becomes the distance colour (the fog is fully opaque at `end`). With
-height fog only, the sky above the horizon stays the background colour.
+**Check:** with distance fog only and max opacity 1, the sky becomes the fog colour (the fog is fully opaque at
+`end`). At max opacity 0.6, the sky and distant geometry are 60% fog colour and 40% themselves. With height fog
+only, the sky is fog-coloured at the horizon and clear overhead; adding distance fog lays its veil over that
+without flattening it.
 
 <details><summary>Reference code</summary>
 
@@ -387,20 +403,26 @@ float4 frag_signal(VSOut input) : SV_Target {
 `fog_inscatter`, without lit fog (step 7 extends it):
 
 ```slang
+float fog_distance_transmittance(float t) {
+    if (gFrame.fogEnd <= gFrame.fogStart) return 1;
+    return 1 - gFrame.fogMaxOpacity * saturate((t - gFrame.fogStart) / (gFrame.fogEnd - gFrame.fogStart));
+}
+
+float fog_transmittance(FogRay r, float t) {
+    return fog_distance_transmittance(t) * exp(-fog_height_depth(r, t));
+}
+
 float3 fog_inscatter(FogRay r, uint2 px, out float T) {
-    float distanceT = fog_distance_transmittance(r.len);
-    float heightDepth = fog_height_depth(r, r.len);
-    T = distanceT * exp(-heightDepth);
+    T = fog_transmittance(r, r.len);
     if (T == 1) return 0;
-    float distanceDepth = -log(max(distanceT, 1e-6));
-    float3 color = (distanceDepth * gFrame.fogDistanceColor + heightDepth * gFrame.fogHeightColor)
-                 / (distanceDepth + heightDepth);
+    float3 color = gFrame.fogColor;
     return color * (1 - T);
 }
 ```
 
 On the CPU, send each fog's settings only when it's on. Leave the rest of the fields zero, which the shader
-treats as "off".
+treats as "off". Send `fog_max_opacity` (clamped to 0..1) with the distance fog's fields, and always send
+`fog_color`: it means nothing while every part is off.
 
 </details>
 
@@ -655,9 +677,10 @@ the mean isn't zero.
 
 | Field | Meaning |
 |---|---|
-| `on`, `start`, `end`, `color` | distance fog: the ramp, and its colour (linear, `widget:linear_color`) |
-| `height_fog`, `height`, `density`, `falloff`, `height_color` | height fog (its colour linear too) |
-| `lit` | 0..1: how far both colours follow the probes' light |
+| `color` | both fogs' colour (linear, `widget:linear_color`) |
+| `lit` | 0..1: how far the colour follows the probes' light |
+| `distance_fog`, `start`, `end`, `max_opacity` | distance fog: the ramp, and its top (0..1, default 1) |
+| `height_fog`, `height`, `density`, `falloff` | height fog (not capped) |
 | `halos`, `glow` | lamp halos, and the haze per metre that shows them with no mist |
 
 Fog fields in `Frame_Constants`, inserted between `brightness` (which ends at offset 372) and
@@ -670,8 +693,8 @@ Fog fields in `Frame_Constants`, inserted between `brightness` (which ends at of
 | 400 | `inv_proj: mat4` | |
 | 464 | `skin_buffer_slot`, `bone_buffer_slot` | (existing) |
 | 472 | `fog_falloff`, `fog_glow` | |
-| 480 | `fog_distance_color: vec3`, `fog_lit` | |
-| 496 | `fog_height_color: vec3`, `_pad_fog` | |
+| 480 | `fog_color: vec3`, `fog_lit` | |
+| 496 | `fog_max_opacity`, `_pad_fog: [3]f32` | |
 | 512 | `fog_light_mean: vec3` | |
 | 524 | `_padding: [768 − 524]byte` | |
 

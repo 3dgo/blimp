@@ -25,7 +25,7 @@ complicates teardown.
   isn't (asset load), accept the transient stranding and report real size with a
   `len × size_of` helper rather than the arena's used bytes.
 - **No per-world string arena.** Strings decoded from text (`deserialize_value`) are temp. The only
-  `string` fields are asset keys, and whoever keeps one interns it (`world_add` → `entity_intern_keys`),
+  `string` fields are asset keys, and whoever keeps one interns it (`world_add` → `asset_intern_keys`),
   so loads and pastes strand nothing.
 - `delete` on a nil slice is a no-op. Nil means "owns nothing" — unconditional cleanup is fine.
 - The fixed-budget arenas (frame, temp) get a panic-on-failure wrapper so exhaustion fails

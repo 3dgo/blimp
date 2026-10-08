@@ -5,6 +5,7 @@ import "core:log"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:reflect"
 import "core:path/filepath"
 import "core:mem"
 import "core:slice"
@@ -131,6 +132,33 @@ asset_intern :: proc(key: string) -> string {
     return s
 }
 
+// Interns (asset_intern) every asset key in `v`, a struct, nested structs included: its string fields tagged
+// `widget:model`, `widget:texture` or `widget:sound`, the asset pickers' tags. The one way keys are kept, for
+// anything decoded from text (deserialize_value leaves strings in temp memory, gone next frame): an entity in
+// world_add, World_Settings on scene load. A new key field, a schema-editor one too, needs only its tag. Pass
+// the variable itself: `v` aliases it, as with struct_field_by_path.
+asset_intern_keys :: proc(v: any) {
+    for i in 0 ..< reflect.struct_field_count(v.id) {
+        sf    := reflect.struct_field_at(v.id, i)
+        field := reflect.struct_field_value(v, sf)
+        if type_is_struct(sf.type.id) {
+            asset_intern_keys(field)
+        } else if key, is_string := field.(string); is_string && asset_key_field(sf.tag) {
+            (^string)(field.data)^ = asset_intern(key)
+        }
+    }
+}
+
+@(private="file")
+asset_key_field :: proc(tag: reflect.Struct_Tag) -> bool {
+    for t in strings.split(string(tag), ",", context.temp_allocator) {
+        switch strings.trim_space(t) {
+        case "widget:model", "widget:texture", "widget:sound": return true
+        }
+    }
+    return false
+}
+
 // Throws every asset away and loads them again from disk. Only the asset part: app_reload_assets
 // (app_lifecycle.odin) rebuilds the GPU copies and play worlds' physics around it.
 asset_system_reload :: proc() {
@@ -181,8 +209,14 @@ asset_system_load :: proc() {
     append(&asset_system.materials, Material{color = {1, 1, 1, 1}, color_tex = asset_system.image_ids["white"]})
     asset_system.material_ids["default"] = u32(len(asset_system.materials)) - 1
 
-    // Textures are not scanned up front; each glTF imports the images it
-    // references (embedded, or its own external files loaded on demand).
+    // Every PNG loads, keyed by its project path, whether or not a glTF uses it (a sky, say). First, so a glTF
+    // that references one finds it by key (asset_system_import_gltf_models) instead of decoding it again.
+    for fi in asset_files {
+        if strings.to_lower(filepath.ext(fi.fullpath), context.temp_allocator) == ".png" {
+            asset_system_import_png_image(fi.fullpath)
+        }
+    }
+    // Then the kits, with their embedded images (.glb, data URIs) and any external one outside the scan.
     for fi in asset_files {
         ext := strings.to_lower(filepath.ext(fi.fullpath), context.temp_allocator)
         switch ext {

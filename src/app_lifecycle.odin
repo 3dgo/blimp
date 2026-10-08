@@ -113,7 +113,7 @@ app_process_closes :: proc() {
 
     for w in pending_close_worlds {
         app_world_runtime_stop(w)
-        undo_forget_world(w)   // no undo entry or pinned panel may outlive its world
+        undo_forget_world(w)   // no undo entry may outlive its world
         ui_forget_world(w)
         editor_world_forget(w)
         world_render_destroy(w)
@@ -144,7 +144,6 @@ app_reload_assets :: proc() {
     asset_system_reload()
     asset_buffers_create()
     asset_buffers_upload()
-    for w in worlds do w.render.shadow_drawn = {}   // cached shadow slices hold the old geometry
     for w in worlds do if w.play_source != nil do physics_world_start(w)
     for w in worlds do anim_world_reset(w)   // its clip and skeleton indices are the old assets'
 }

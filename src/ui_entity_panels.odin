@@ -6,31 +6,19 @@ import "core:strings"
 import hm "core:container/handle_map"
 import im "lib:odin-imgui"
 
-// Entity list and inspector windows, any number of each. A panel either follows the active world
-// (the viewport you last focused) or is pinned to one world via the combo at its top. Each world
-// keeps its own selection, so a pinned panel keeps showing its world's selection while you work
-// in another. Closing a panel removes it.
-Entity_Panel_Kind :: enum { List, Inspector }
+// A world window's entity list and inspector (World_Host, ui_view.odin): docked beside its viewport and
+// showing that view's world (the running copy while it plays). Each world keeps its own selection. The
+// toolbar's panels button hides both, and the viewport takes their space.
 
-Entity_Panel :: struct {
-    kind:   Entity_Panel_Kind,
-    id:     u32,      // window id suffix: "###entity_list<id>" / "###entity_inspector<id>"
-    pinned: ^World,   // nil = follow the active world
-    owner:  ^Render_View,   // non-nil = docked inside that view's world window and closes with it (World_Host in
-                            // ui_view.odin). Layout + lifetime only: what it shows is still `pinned` (starts as that
-                            // window's world), re-targetable via the combo like any panel.
-    open:   bool,
-    search: [64]u8,   // the search box's text (NUL-terminated): entity names in a list, fields in an inspector
-}
-
-PANEL_WINDOW_SIZE :: [2]f32{360, 480}   // first-open size of a floating panel (× display scale)
-
-// Opens another panel; `owner` non-nil docks it inside that view's world window. Returns its id.
-ui_entity_panel_new :: proc(kind: Entity_Panel_Kind, owner: ^Render_View = nil) -> u32 {
-    ui.next_panel_id += 1
-    pinned := owner != nil ? owner.world : nil   // a world window's panels start pinned to its world
-    append(&ui.panels, Entity_Panel{kind = kind, id = ui.next_panel_id, pinned = pinned, owner = owner, open = true})
-    return ui.next_panel_id
+// Draws h's list and inspector, unless they're hidden or the window hasn't docked them yet (so they never
+// flash up floating).
+ui_draw_entity_panels :: proc(h: ^World_Host) {
+    if !h.built || !h.show_panels do return
+    w := h.view.world
+    if im.Begin(fmt.ctprintf("%s###entity_list%d", tr(.Panel_Entity_List), h.view.id)) do ui_entity_list_body(w, &h.list_search)
+    im.End()
+    if im.Begin(fmt.ctprintf("%s###entity_inspector%d", tr(.Panel_Entity_Inspector), h.view.id)) do ui_entity_inspector_body(w, &h.inspector_search)
+    im.End()
 }
 
 // Above an inspector: a line saying edits to `w` won't be kept — a play world (thrown away on Stop) or
@@ -42,79 +30,9 @@ ui_world_unsaved_note :: proc(w: ^World) {
     }
 }
 
-// Play / Stop moved the views from one world to the other: panels pinned to it follow, a rename ends.
-ui_entity_panels_retarget :: proc(from, to: ^World) {
-    if rename.world == from do rename = {}
-    for &p in ui.panels do if p.pinned == from do p.pinned = to
-}
-
-// A world is closing: panels pinned to it go back to following, a rename in it ends.
-ui_entity_panels_forget :: proc(w: ^World) {
-    for &p in ui.panels do if p.pinned == w do p.pinned = nil
+// `w` is closing, or its views moved to another world (Play / Stop): a rename in it ends.
+ui_entity_rename_forget :: proc(w: ^World) {
     if rename.world == w do rename = {}
-}
-
-ui_draw_entity_panels :: proc() {
-    for i := 0; i < len(ui.panels); i += 1 {
-        p := &ui.panels[i]
-        if !p.open {
-            ordered_remove(&ui.panels, i)
-            i -= 1
-            continue
-        }
-        ui_draw_entity_panel(p)
-    }
-}
-
-@(private="file")
-ui_draw_entity_panel :: proc(p: ^Entity_Panel) {
-    // A world window's own panels wait until it has docked them, so they never flash up floating.
-    if p.owner != nil {
-        h := ui_host_find(p.owner)
-        if h == nil || !h.built do return
-    }
-
-    w := p.pinned != nil ? p.pinned : active_world()   // nil: following, and nothing open
-
-    base := p.kind == .List ? "entity_list" : "entity_inspector"
-    name := p.kind == .List ? tr(.Menu_Entity_List) : tr(.Menu_Entity_Inspector)
-    if p.owner == nil {
-        s := app.display_scale
-        im.SetNextWindowSize({PANEL_WINDOW_SIZE.x * s, PANEL_WINDOW_SIZE.y * s}, .FirstUseEver)
-    }
-    if im.Begin(fmt.ctprintf("%s — %s###%s%d", name, w != nil ? w.title : "—", base, p.id), &p.open) {
-        ui_panel_target_combo(p)
-        im.Separator()
-        if w == nil {
-            im.TextDisabled("%s", tr(.Panel_No_World))
-            im.End()
-            return
-        }
-        switch p.kind {
-        case .List:      ui_entity_list_body(p, w)
-        case .Inspector: ui_entity_inspector_body(p, w)
-        }
-    }
-    im.End()
-}
-
-// "Follow active (castle.level)" / one entry per open world.
-@(private="file")
-ui_panel_target_combo :: proc(p: ^Entity_Panel) {
-    active := active_world()
-    preview := p.pinned == nil \
-        ? fmt.ctprintf("%s (%s)", tr(.Panel_Follow), active != nil ? active.title : "—") \
-        : fmt.ctprintf("%s", p.pinned.title)
-    im.SetNextItemWidth(-1)
-    if im.BeginCombo("##target", preview, {}) {
-        if im.Selectable(tr(.Panel_Follow), p.pinned == nil) do p.pinned = nil
-        for w, i in worlds {
-            im.PushIDInt(i32(i))
-            if im.Selectable(fmt.ctprintf("%s", w.title), p.pinned == w) do p.pinned = w
-            im.PopID()
-        }
-        im.EndCombo()
-    }
 }
 
 // Click: just this one. Ctrl+click: toggle it. Shift+click: the range from the anchor (the last
@@ -123,9 +41,9 @@ ui_panel_target_combo :: proc(p: ^Entity_Panel) {
 // space it opens the menu for the current selection. Paste lands at the centre of a view on the world.
 // F2 turns the active entity's row into a text field (ui_entity_rename_begin).
 @(private="file")
-ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
-    ui_panel_search_box(p, tr(.Entity_List_Search))
-    search := string(cstring(&p.search[0]))
+ui_entity_list_body :: proc(w: ^World, search_buf: ^[64]u8) {
+    ui_panel_search_box(search_buf, tr(.Entity_List_Search))
+    search := string(cstring(&search_buf[0]))
 
     // The rows scroll under the search box, which stays put.
     im.BeginChild("##rows")
@@ -134,8 +52,8 @@ ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
     open_menu := false
     it := hm.iterator_make(&w.entities)
     for e, h in hm.iterate(&it) {
-        if rename.world == w && rename.handle == h && (rename.panel == 0 || rename.panel == p.id) {
-            rename_row(p, w, h)
+        if rename.world == w && rename.handle == h {
+            rename_row(w, h)
             continue
         }
         if !search_matches(sbuf_str(&e.name), search) do continue
@@ -182,13 +100,11 @@ ui_entity_list_body :: proc(p: ^Entity_Panel, w: ^World) {
     ui_context_menu()
 }
 
-// F2 rename, in place in the entity list (Unity's hierarchy). One at a time; the first list showing the
-// world claims it, so two lists on one world don't both open a field.
+// F2 rename, in place in the entity list (Unity's hierarchy). One at a time.
 @(private="file")
 rename: struct {
     world:  ^World,
     handle: Entity_Handle,
-    panel:  u32,        // the list panel drawing the field; 0 = not claimed yet
     focus:  bool,       // put the keyboard in the field on its first frame
     buf:    [128]u8,
 }
@@ -204,8 +120,7 @@ ui_entity_rename_begin :: proc(w: ^World) {
 // The field replacing a row. Enter or clicking away keeps the name, Esc cancels. One undo step;
 // names stay unique per world.
 @(private="file")
-rename_row :: proc(p: ^Entity_Panel, w: ^World, h: Entity_Handle) {
-    rename.panel = p.id
+rename_row :: proc(w: ^World, h: Entity_Handle) {
     first := rename.focus
     if first do im.SetKeyboardFocusHere()
     rename.focus = false
@@ -235,14 +150,14 @@ selection_has_anchor :: proc(w: ^World) -> bool {
 }
 
 @(private="file")
-ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
+ui_entity_inspector_body :: proc(w: ^World, search_buf: ^[64]u8) {
     ui_world_unsaved_note(w)
 
     e, ok := entity_get(w, editor_world(w).active)
     if !ok do return
     if n := selection_count(w); n > 1 do im.TextDisabled("%s", fmt.ctprintf(string(tr(.Inspector_Multi)), n))
 
-    ui_panel_search_box(p, tr(.Inspector_Search))
+    ui_panel_search_box(search_buf, tr(.Inspector_Search))
     im.Separator()
 
     // The fields scroll under the header (buttons, search), which stays put.
@@ -260,7 +175,7 @@ ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
 
     opts := DEFAULT_PARAM_UI_OPTIONS
     opts.headerless = true
-    opts.filter     = strings.trim_space(string(cstring(&p.search[0])))
+    opts.filter     = strings.trim_space(string(cstring(&search_buf[0])))
     opts.defaults   = &defaults
     opts.others     = others[:]
     before := e^
@@ -287,9 +202,9 @@ ui_entity_inspector_body :: proc(p: ^Entity_Panel, w: ^World) {
 
 // A panel's search box, full width on its own row (search_matches: Chinese also by pinyin).
 @(private="file")
-ui_panel_search_box :: proc(p: ^Entity_Panel, hint: cstring) {
+ui_panel_search_box :: proc(buf: ^[64]u8, hint: cstring) {
     im.SetNextItemWidth(-1)
-    im.InputTextWithHint("##search", fmt.ctprintf("%s  %s", ICON_SEARCH, hint), cstring(&p.search[0]), len(p.search))
+    im.InputTextWithHint("##search", fmt.ctprintf("%s  %s", ICON_SEARCH, hint), cstring(&buf[0]), len(buf))
 }
 
 // A one-line selectable with an icon column (blank when `icon` is "") and `name` after it, so names

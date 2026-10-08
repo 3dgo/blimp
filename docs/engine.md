@@ -40,7 +40,7 @@ it costs.
 | **Schema-generated entity** (`entity_schema.ini` → `gen_entity.odin`) | The struct, defaults and English/Chinese labels have one source. The in-engine schema editor can add a field without hand-writing UI. | You edit the schema, never the generated file, and rebuild to see a change. |
 | **GPU-driven, bindless, indirect draws** | Shaders reach every buffer and texture by heap index. Draw commands live in a buffer and run through `ExecuteIndirect`, so moving culling to a compute pass later changes only who writes that buffer. | Needs Resource Binding Tier 3 (about 2015 GPUs); there's no fallback path. |
 | **Simple forward rendering**, not clustered | Clustered pays off at hundreds of dynamic lights; this game has a few. | Many realtime lights would be slow. |
-| **Baked probe lighting** (L2 SH + depth, DDGI format) for indirect; realtime direct with hard shadows | Fits the look, lights static and moving geometry alike, needs no lightmap UVs or atlas packing. The DDGI format leaves room for a realtime update later. | Probes are coarse; bakes take seconds. Static shadow caching isn't done yet. |
+| **Baked probe lighting** (L2 SH + depth, DDGI format) for indirect; realtime direct with hard shadows | Fits the look, lights static and moving geometry alike, needs no lightmap UVs or atlas packing. The DDGI format leaves room for a realtime update later. | Probes are coarse; bakes take seconds. Every shadow slice redraws every frame. |
 | **Reversed-Z**, float HDR target, quantize only at the end | Depth precision everywhere; the retro quantize is a deliberate last step, not an accident of format. | None worth noting. |
 | **Left-handed, Y-up, +Z forward, clockwise fronts.** glTF import reflects −X *and* swaps winding | One convention through the whole engine. Both import steps are needed for correct front faces. | Every import pays the conversion. |
 | **Assets load at init and never change at runtime** | No streaming, no manifests, no meta files, no UUIDs. Keys are project paths plus a name (`assets/models/castle.gltf:flag001`). Debug hot reload just rebuilds everything, as init would. | Everything must fit in memory. Fine for this scope. |
@@ -266,8 +266,7 @@ Each walkthrough follows one action through every file it touches.
    - every entity with a model → a transform; each of its meshes → a `Mesh_Instance_Data` with the
      material, the resolved shading model (`entity_shading`) and tint (`entity_tint`);
    - drawn instances → draw commands, bucketed by blend: Opaque, Cutout, Alpha (sorted back to front),
-     Additive;
-   - a hash of everything that casts shadows, for the shadow cache.
+     Additive.
 3. The arrays are staged on the copy queue; per-view `Frame_Constants` are written
    (`render_view_update_constants`): camera (or the camera entity in game mode), buffer slots, retro
    settings, exposure, fog, probe grid.
@@ -313,7 +312,7 @@ instead: `undo_push_edited`, and `settings_window_track_edit` for the settings w
      registers it, and switches every view of the level to it;
    - `editor_world_copy` carries over the active entity;
    - `world_render_create` gives it a GPU mirror;
-   - `ui_retarget_world` moves pinned panels and settings windows to it;
+   - `ui_retarget_world` moves settings windows to it;
    - `physics_world_start` builds Box3D bodies; `sound_world_start` starts Play On Start sounds.
 3. Next frame `lua_worlds_update` loads the world's script and runs its `start` hook. From then on,
    every ticking frame runs `update(dt)`, physics follows, sound follows.
@@ -591,7 +590,7 @@ Fastest check: `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib
 | `render_buffers.odin` | Asset buffers, world mirrors, scene build, uploads |
 | `render_view.odin` | Views, render modes, frame constants, scene pass |
 | `render_camera.odin` | Camera maths |
-| `render_shadows.odin` | Shadow maps, pass and cache |
+| `render_shadows.odin` | Shadow maps and their pass |
 | `render_post.odin` | Post passes |
 | `render_probes.odin` | GPU probe buffers |
 | `render_debug_draw.odin` | Debug lines |

@@ -44,6 +44,7 @@ ICON_STOP         :: "\uE047"   // stop
 ICON_STEP         :: "\uE044"   // skip_next
 ICON_FULLSCREEN   :: "\uE5D0"   // fullscreen
 ICON_FULLSCREEN_EXIT :: "\uE5D1"   // fullscreen_exit
+ICON_PANELS       :: "\uF114"   // view_sidebar
 ICON_RENAME       :: "\uE3C9"   // edit
 ICON_LIGHT_POINT  :: "\uE42E"   // wb_incandescent
 ICON_LIGHT_SPOT   :: "\uF00B"   // flashlight_on

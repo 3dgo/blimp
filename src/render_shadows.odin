@@ -11,8 +11,7 @@ import "dx"
 // light six (a cube's faces, +X −X +Y −Y +Z −Z; the scene shader picks the face). Each frame the shadow
 // pass draws the world's drawn geometry into every slice in use; the scene pass then compares against
 // one texel per light. Lights claim slices in entity order until MAX_SHADOW_SLICES runs out; the rest
-// light unshadowed. Slices are cached: redrawn only when their camera or the casters change
-// (render_shadows_draw).
+// light unshadowed.
 
 SHADOW_MAP_SIZE   :: 512   // texels per side; SHADOW_MAP_SIZE in common.slang
 MAX_SHADOW_SLICES :: 32    // per world: 32 × 512² × 4 B = 32 MB
@@ -217,28 +216,13 @@ world_shadows_upload :: proc(w: ^World, frame_slot: u64) {
     }
 }
 
-// gfx: draws the world's drawn geometry into each slice that needs it, then leaves the map shader-readable
-// for the scene passes. Every drawn Opaque or Cutout mesh casts; there's no per-entity opt-out yet.
-//
-// Static caching: the map keeps its depth between frames, so a slice is redrawn only when its camera changed
-// (the light moved, or the slice now belongs to another light) or anything that casts changed since the
-// slices were last drawn (r.shadow_casters, hashed by buffers_build_scene). A level standing still draws no
-// shadow maps at all; one moving light redraws only its own slices; anything moving redraws them all.
+// gfx: draws the world's drawn geometry into every slice in use, every frame, then leaves the map
+// shader-readable for the scene passes. Every drawn Opaque or Cutout mesh casts; there's no per-entity
+// opt-out yet.
 render_shadows_draw :: proc(w: ^World, frame_slot: u64) {
     r   := &w.render
     cmd := renderer_dx.cmd_gfx
-    if r.shadow_casters != r.shadow_casters_drawn {
-        r.shadow_drawn = {}
-        r.shadow_casters_drawn = r.shadow_casters
-    }
-    dirty: [MAX_SHADOW_SLICES]bool
-    any_dirty := false
-    for s, i in r.shadow_slices {
-        held, ok := r.shadow_drawn[i].?
-        dirty[i] = !ok || held != s.camera
-        any_dirty ||= dirty[i]
-    }
-    if any_dirty {
+    if len(r.shadow_slices) > 0 {
         dx.texture_transition(cmd, &r.shadow_map, {.DEPTH_STENCIL}, {.DEPTH_STENCIL_WRITE}, .DEPTH_STENCIL_WRITE)
 
         dx.descriptor_heap_bind(cmd, {renderer_dx.resource_heap, renderer_dx.sampler_heap})
@@ -256,9 +240,7 @@ render_shadows_draw :: proc(w: ^World, frame_slot: u64) {
         // shader to cut it), Alpha and Additive don't.
         #assert(EntityBlend.Opaque == EntityBlend(0) && EntityBlend.Cutout == EntityBlend(1))
         casters := r.draw_count[.Opaque] + r.draw_count[.Cutout]
-        for s, i in r.shadow_slices {
-            if !dirty[i] do continue
-            r.shadow_drawn[i] = s.camera
+        for _, i in r.shadow_slices {
             dsv := r.shadow_dsv[i].cpu_handle
             cmd.handle->OMSetRenderTargets(0, nil, false, &dsv)
             cmd.handle->ClearDepthStencilView(dsv, {.DEPTH}, 0.0, 0, 0, nil)   // reversed-Z: 0 = far, nothing casts

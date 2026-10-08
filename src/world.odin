@@ -51,6 +51,7 @@ World_Settings :: struct {
     background: [3]f32 `loc:World_Background, widget:linear_color`,   // the viewport clear colour: linear scene light, through exposure and the tonemap like every pixel
     exposure:   f32 `loc:World_Exposure`,   // stops (EV): the HDR scene is scaled by 2^exposure before the tonemap
     fog:        Fog_Settings `loc:World_Fog`,   // distance and height fog, lamp halos
+    sky:        Sky_Settings `loc:World_Sky`,   // a panorama behind everything, in place of the background colour
     shading:    ShadingModel `loc:World_Shading`,   // what an entity's shading Default means (entity_shading)
     script:     sbuf256 `loc:World_Script`,   // the world's Lua script (start + update hooks, run while playing), e.g. assets/scripts/castle.lua
     light_groups: Light_Groups `loc:World_Light_Groups`,   // where the switchable light groups start (world_light_groups.odin)
@@ -60,28 +61,43 @@ World_Settings :: struct {
 }
 
 // Fog (claude/rendering.md → Fog), in the post signal pass before the tonemap, so it gets exposure, the
-// tonemap and the dither like everything else. Three parts, each with its own switch:
-//   distance (`on`): PS1-style, geometry fades into `color` between `start` and `end` (metres along the ray);
-//   height: exponential ground mist of `height_color`, `density` per metre at `height`, thinning by e every
-//           `falloff` metres up;
-//   halos: lamp light (point and spot) the air scatters toward the eye, `glow` per metre plus the mist's
-//          density, × each light's `halo`.
-// Colours are linear scene light, like light colours. `lit` scales them by the probes' light in the air over
-// the level's average (probe_light_mean): the colour as picked where the light is average, warmer and brighter
-// by a lamp, darker in a dark corner, dimming with its light group. No probes: flat.
+// tonemap and the dither like everything else. Laid out as the inspector shows it: what both fogs share, then
+// each part under its own switch.
+//   shared: one `color`, linear scene light like light colours; `lit` scales it by the probes' light in the air
+//           over the level's average (probe_light_mean): the colour as picked where the light is average, warmer
+//           and brighter by a lamp, darker in a dark corner, dimming with its light group. No probes: flat.
+//   distance (`distance_fog`): PS1-style, geometry fades out between `start` and `end` (metres along the ray), up
+//           to `max_opacity`; below 1 far geometry and the sky (a ray that hit nothing, "infinitely" far) show through.
+//   height (`height_fog`): exponential ground mist, `density` per metre at `height`, thinning by e every `falloff`
+//           metres up. Not capped: looking up it stays finite on its own, thick at the horizon, clear overhead.
+//   halos (`halos`): lamp light (point and spot) the air scatters toward the eye, `glow` per metre plus the
+//           mist's density, × each light's `halo`. In the lights' colours, not `color`.
+// The distance and height fogs multiply into one transmittance.
 Fog_Settings :: struct {
-    on:           bool   `loc:World_Fog_On`,
+    color:        [3]f32 `loc:World_Fog_Color, widget:linear_color`,   // distance and height fog alike
+    lit:          f32    `loc:World_Fog_Lit`,       // 0..1: how far the colour follows the baked light around it
+
+    distance_fog: bool   `loc:World_Fog_Distance_On`,
     start:        f32    `loc:World_Fog_Start`,     // clear nearer than this
-    end:          f32    `loc:World_Fog_End`,       // all fog from here on
-    color:        [3]f32 `loc:World_Fog_Color, widget:linear_color`,
+    end:          f32    `loc:World_Fog_End`,       // max_opacity of fog from here on
+    max_opacity:  f32    `loc:World_Fog_Max_Opacity`,   // 0..1: the ramp's top; 1 = fully hides what's past `end`
+
     height_fog:   bool   `loc:World_Fog_Height_On`,
     height:       f32    `loc:World_Fog_Height`,    // world y where the mist has `density`; denser below, thinner above
     density:      f32    `loc:World_Fog_Density`,   // per metre at `height`
     falloff:      f32    `loc:World_Fog_Falloff`,   // metres up for the density to fall by e
-    height_color: [3]f32 `loc:World_Fog_Height_Color, widget:linear_color`,
-    lit:          f32    `loc:World_Fog_Lit`,       // 0..1: how far both colours follow the baked light around them
+
     halos:        bool   `loc:World_Fog_Halos`,
     glow:         f32    `loc:World_Fog_Glow`,      // per metre: haze that scatters lamp light even with no mist
+}
+
+// The sky (claude/rendering.md → Sky): an equirectangular panorama (2:1, any loaded PNG) drawn behind the
+// scene in place of the background colour. Its texels are sRGB, decoded to linear and × `intensity`: scene light
+// like everything else, so exposure, fog and the tonemap apply. No texture: the background colour.
+Sky_Settings :: struct {
+    texture:   string `loc:World_Sky_Texture, widget:texture`,
+    intensity: f32    `loc:World_Sky_Intensity`,   // × the texture's linear colour
+    rotation:  f32    `loc:World_Sky_Rotation`,    // degrees about +Y
 }
 
 // The retro look (claude/rendering.md → Retro look): what a view in render mode .Retro does, effect by
@@ -108,9 +124,9 @@ Bake_Settings :: struct {
     quality:       Bake_Quality,   // a preset sets rays and bounces; editing either makes it Custom
     rays:          i32,    // per probe per pass, on a Fibonacci sphere (BAKE_RAYS_MIN..BAKE_RAYS_MAX)
     bounces:       i32,    // passes (1..BAKE_BOUNCES_MAX)
-    sky:           bool,   // the sky lights the probes
-    sky_color:     [3]f32,   // radiance of a bake ray that escapes the level (linear), × sky_intensity
-    sky_intensity: f32,
+    sky:           bool,   // the sky lights the probes: a bake ray that escapes the level sees World_Settings.sky's
+                           // texture, or else the background colour
+    sky_intensity: f32,    // × that sky, for the bake only
     probe_spacing: f32,      // metres between probes, each axis
     bounds:        Bake_Bounds,
     bounds_min:    [3]f32,   // the grid's box when bounds = .Manual
@@ -130,7 +146,8 @@ BAKE_QUALITY_PRESETS := [Bake_Quality][2]i32{   // rays, bounces; Custom keeps w
 WORLD_SETTINGS_DEFAULT :: World_Settings{
     background   = {19.0 / 255, 19.0 / 255, 19.0 / 255},   // linear: a dark grey after the tonemap
     shading      = .Lambert,
-    fog          = {start = 20, end = 60, color = {0.2, 0.2, 0.2}, density = 0.1, falloff = 2, height_color = {0.2, 0.2, 0.2}, glow = 0.05},
+    fog          = {color = {0.2, 0.2, 0.2}, start = 20, end = 60, max_opacity = 1, density = 0.1, falloff = 2, glow = 0.05},
+    sky          = {intensity = 1},
     bake         = {quality = .Medium, rays = 256, bounces = 3, sky = true,sky_intensity = 1, probe_spacing = 1},
     light_groups = {group_1 = {scale = 1}, group_2 = {scale = 1}, group_3 = {scale = 1}, group_4 = {scale = 1}},
     retro        = {low_res = true, lines = 216, vertex_snap = true, snap = 1, affine = true, warp = 1,
@@ -155,7 +172,7 @@ world_shutdown :: proc(world: ^World) {
 world_add :: proc(world: ^World, e: Entity) -> (Entity_Handle, bool) #optional_ok {
     e := e
     e.handle = {}
-    entity_intern_keys(&e)
+    asset_intern_keys(e)   // model, sound, any key field the schema adds
     unique := world_unique_name(world, sbuf_str(&e.name))
     if unique != sbuf_str(&e.name) do sbuf_set(&e.name, unique)   // only write when it changed: `unique` may alias e.name
     return hm.add(&world.entities, e)

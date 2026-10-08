@@ -25,8 +25,6 @@ UI :: struct {
     scene_paths: [dynamic]string,     // scene files listed in the Worlds window (rescanned on Refresh)
     scene_paths_scanned: bool,
 
-    panels: [dynamic]Entity_Panel,    // entity lists + inspectors (ui_entity_panels.odin)
-    next_panel_id: u32,
     hosts: [dynamic]World_Host,       // world windows: an opened world's viewport + its own list/inspector
 
     tool: Edit_Tool,                  // viewport tool, shared by every view (toolbar, Q/W)
@@ -171,7 +169,7 @@ settings_window_track_edit :: proc(win: ^Settings_Window, before: World_Settings
 // Views switched from one world to another (Play / Stop, app_lifecycle.odin). UI state pinned to the old
 // world follows, and drags in progress on those views end: they were editing the world being left.
 ui_retarget_world :: proc(from, to: ^World) {
-    ui_entity_panels_retarget(from, to)
+    ui_entity_rename_forget(from)
     ui_world_settings_retarget(from, to)
     ui_context_menu_forget(from, nil)
     for v in views do if v.world == to {
@@ -183,7 +181,7 @@ ui_retarget_world :: proc(from, to: ^World) {
 
 // A world is closing (app_process_closes): every window that points at it lets go.
 ui_forget_world :: proc(w: ^World) {
-    ui_entity_panels_forget(w)
+    ui_entity_rename_forget(w)
     ui_world_settings_forget(w)
     ui_bake_forget(w)
     ui_context_menu_forget(w, nil)
@@ -217,10 +215,6 @@ ui_update :: proc() {
     if(im.BeginMainMenuBar()) {
         if menu_begin(tr(.Menu_Show)) {
             im.MenuItemBoolPtr(tr(.Menu_Worlds), nil, &ui.show_worlds)
-            menu_section(tr(.Menu_Section_Entities))
-            // Each opens another floating panel (world windows have their own list and inspector).
-            if im.MenuItem(tr(.Menu_Entity_List))      do ui_entity_panel_new(.List)
-            if im.MenuItem(tr(.Menu_Entity_Inspector)) do ui_entity_panel_new(.Inspector)
             menu_section(tr(.Menu_Section_Project))
             im.MenuItemBoolPtr(tr(.Menu_Schema_Editor), nil, &ui.show_schema_editor)
             im.MenuItemBoolPtr(tr(.Menu_Game_Settings), nil, &ui.show_game_settings)
@@ -246,7 +240,7 @@ ui_update :: proc() {
         ui_draw_worlds()
     }
 
-    ui_draw_entity_panels()
+    for &h in ui.hosts do ui_draw_entity_panels(&h)
     ui_draw_world_settings()
     ui_draw_bake()
     ui_draw_game_settings()
@@ -346,7 +340,6 @@ ui_draw :: proc() {
 ui_shutdown :: proc() {
     for p in ui.scene_paths do delete(p, app.allocators.perm)
     delete(ui.scene_paths)
-    delete(ui.panels)
     delete(ui.hosts)
     editor_views_shutdown()
     editor_worlds_shutdown()

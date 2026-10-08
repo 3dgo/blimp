@@ -140,6 +140,7 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         color_levels           = r.quantize ? f32(u32(1) << u32(bits) - 1) : 0,
         scene_cover            = {f32(view.target.width)  / f32(scale * view.target.scene_width),
                                   f32(view.target.height) / f32(scale * view.target.scene_height)},
+        scene_size             = {f32(view.target.scene_width), f32(view.target.scene_height)},
         vertex_snap            = r.vertex_snap ? {f32(view.target.scene_width), f32(view.target.scene_height)} / (2 * max(r.snap, 0.1)) : {},
         affine                 = r.affine ? clamp(r.warp, 0, 1) : 0,
 
@@ -170,23 +171,40 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
     }
     frame_constants.inv_proj = linalg.inverse(frame_constants.proj_mat)
     render_view_fog(&frame_constants, world.settings.fog, world_level(world).probes.light_mean)
+    render_view_sky(&frame_constants, world.settings.sky)
     mem.copy(view.frame_constants_ptr[frame_slot], &frame_constants, size_of(Frame_Constants))
 }
 
 // World_Settings.fog → the frame constants, each part left at 0 when it's off (post.slang skips it). Lit fog
 // needs probes in the frame constants (fc.probe_dims) and their average light.
 render_view_fog :: proc(fc: ^Frame_Constants, fog: Fog_Settings, light_mean: vec3) {
-    if fog.on && fog.end > fog.start {
-        fc.fog_start, fc.fog_end, fc.fog_distance_color = fog.start, fog.end, fog.color
+    fc.fog_color = fog.color
+    if fog.distance_fog && fog.end > fog.start {
+        fc.fog_start, fc.fog_end, fc.fog_max_opacity = fog.start, fog.end, clamp(fog.max_opacity, 0, 1)
     }
     if fog.height_fog && fog.density > 0 {
         fc.fog_height, fc.fog_density, fc.fog_falloff = fog.height, fog.density, max(fog.falloff, 0.01)
-        fc.fog_height_color = fog.height_color
     }
     if fog.halos do fc.fog_glow = max(fog.glow, 0)
     if fc.probe_dims.x > 0 && light_mean != {} {
         fc.fog_lit, fc.fog_light_mean = clamp(fog.lit, 0, 1), light_mean
     }
+}
+
+// The sky's image: its texture setting, when that names a loaded image. A key nothing loaded under (a missing
+// file) draws the background colour instead.
+render_sky_image :: proc(sky: Sky_Settings) -> (image: u32, ok: bool) {
+    if sky.texture == "" do return
+    return asset_system.image_ids[sky.texture]
+}
+
+// World_Settings.sky → the frame constants, when there's a sky to draw.
+render_view_sky :: proc(fc: ^Frame_Constants, sky: Sky_Settings) {
+    image, ok := render_sky_image(sky)
+    if !ok do return
+    fc.sky_texture_slot = asset_buffers.texture_buffers[image].resource_view.heap_slot
+    fc.sky_intensity    = max(sky.intensity, 0)
+    fc.sky_rotation     = sky.rotation / 360
 }
 
 // Records the scene pass: clears the view's HDR scene target and draws its world's mesh instances into it.
@@ -214,6 +232,12 @@ render_view_draw :: proc(view: ^Render_View, frame_slot: u64) {
 
     cmd.handle->SetGraphicsRootConstantBufferView(0, dx.resource_get_gpu_address(view.frame_constants[frame_slot]))
     asset_buffers_bind_indices(cmd)
+
+    // The sky first, over the clear: everything else draws over it.
+    if _, ok := render_sky_image(world.settings.sky); ok {
+        cmd.handle->SetPipelineState(renderer_dx.sky.pso.handle)
+        cmd.handle->DrawInstanced(3, 1, 0, 0)
+    }
     // One range per blend, in EntityBlend order: everything opaque is in the depth buffer before anything blends.
     r := &world.render
     for blend in EntityBlend {

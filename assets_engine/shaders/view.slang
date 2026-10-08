@@ -17,11 +17,10 @@ public float4 scene_cover_clip(float4 clip) {
     return clip;
 }
 
-// Scene pixel px's centre as the projection's NDC: scene_cover_clip undone.
+// Scene pixel px's centre as the projection's NDC: scene_cover_clip undone. Reads no texture, so any pass at the
+// scene size can use it, the scene pass too (the sky), where the depth texture is the bound depth target.
 public float2 scene_ndc(uint2 px) {
-    uint w, h;
-    getTexture2dF1(gFrame.depthTextureSlot).GetDimensions(w, h);
-    float2 uv  = (float2(px) + 0.5) / float2(w, h);
+    float2 uv  = (float2(px) + 0.5) / gFrame.sceneSize;
     float2 ndc = float2(uv.x * 2 - 1, 1 - uv.y * 2);
     float2 cover = gFrame.sceneCover;
     return float2((ndc.x - (cover.x - 1)) / cover.x, (ndc.y - (1 - cover.y)) / cover.y);
@@ -69,6 +68,12 @@ public struct ViewRay {
     public float  len;      // metres to the scene surface; VIEW_RAY_MISS where nothing was drawn
 }
 
+// The world direction of the ray through ndc (scene_ndc): two points on it in view space, the near plane and
+// depth 0.5, rotated into world space. Perspective and ortho alike (ortho: the same for every pixel).
+public float3 view_ray_dir(float2 ndc) {
+    return normalize(world_dir(view_pos(ndc, 0.5) - view_pos(ndc, 1)));
+}
+
 // Scene pixel px's ray, from the near plane to the scene depth.
 public ViewRay view_ray(uint2 px) {
     float2 ndc   = scene_ndc(px);
@@ -76,7 +81,7 @@ public ViewRay view_ray(uint2 px) {
     float  depth = scene_depth(px);
     ViewRay r;
     r.origin = world_pos(nearV);
-    r.dir    = normalize(world_dir(view_pos(ndc, 0.5) - nearV));
+    r.dir    = view_ray_dir(ndc);
     r.len    = depth == 0 ? VIEW_RAY_MISS : length(view_pos(ndc, depth) - nearV);
     return r;
 }

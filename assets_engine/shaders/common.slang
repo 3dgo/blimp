@@ -45,20 +45,26 @@ public struct FrameConstants {
     public float    dither;               // Bayer threshold spread, 0..1
 
     // Fog (World_Settings.fog, post.slang), each part off at 0: distance when fogEnd <= fogStart, height at
-    // fogDensity 0, halos at fogGlow 0, lit at fogLit 0. Colours are linear scene light.
+    // fogDensity 0, halos at fogGlow 0, lit at fogLit 0. The colour is linear scene light.
     public float    fogStart;         // metres along the ray: clear nearer
     public float    fogEnd;           // all fog from here
     public float    fogHeight;        // height fog: world y where it has fogDensity
     public float    fogDensity;       // per metre
-    public float3   fogDistanceColor;
-    public float    fogLit;           // 0..1: how far the colours follow the probes' light over fogLightMean
+    public float3   fogColor;         // distance and height fog alike
+    public float    fogLit;           // 0..1: how far the colour follows the probes' light over fogLightMean
     public float4x4 invProj;          // this view's projection, inverted: scene depth -> view space
-    public float3   fogHeightColor;
+    public float    fogMaxOpacity;    // 0..1: the distance ramp's top (its transmittance ends at 1 - this)
+    public float    _padFog0;
+    public float    _padFog1;
     public float    fogFalloff;       // metres up for the density to fall by e
     public float3   fogLightMean;     // the level's average light in the air (Probe_Grid.light_mean)
     public float    fogGlow;          // halos: per metre of haze, plus the height fog's density
+    public uint     skyTextureSlot;   // the sky panorama (sky.slang); set only when the view draws a sky
+    public float    skyIntensity;
+    public float    skyRotation;      // turns about +Y
     public uint     skinBufferSlot;   // SkinVertex per skinned vertex (Mesh.skinOffset)
     public uint     boneBufferSlot;   // the world's skin matrices this frame (MeshInstance.boneOffset)
+    public float2   sceneSize;        // the scene target in pixels (view.slang: scene_ndc)
 }
 
 public ConstantBuffer<FrameConstants> gFrame : register(b0, space0);

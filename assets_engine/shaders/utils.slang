@@ -1,5 +1,7 @@
 module utils;
 
+public static const float PI = 3.14159265;
+
 // Bindless access: a descriptor heap slot (a Frame_Constants *Slot field, or a material's texture) as the
 // resource it holds.
 

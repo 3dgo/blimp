@@ -93,7 +93,7 @@ BAKE_BOUNDS_COLOR   :: vec4{1, 0.85, 0.1, 1}   // the manual grid box in the lev
 @(private="file")
 ui_bake_settings :: proc(w: ^World) {
     b := &w.settings.bake
-    labels := [?]Loc_ID{.Bake_Quality, .Bake_Rays, .Bake_Bounces, .Bake_Sky, .World_Sky_Color, .World_Sky_Intensity,
+    labels := [?]Loc_ID{.Bake_Quality, .Bake_Rays, .Bake_Bounces, .Bake_Sky, .World_Sky_Intensity,
         .World_Probe_Spacing, .Bake_Bounds, .Bake_Bounds_Min, .Bake_Bounds_Max}
     o := DEFAULT_PARAM_UI_OPTIONS
     o.label_w = ui_label_column(labels[:])
@@ -116,7 +116,6 @@ ui_bake_settings :: proc(w: ^World) {
     im.SeparatorText(tr(.Bake_Section_Sky))
     ui_param_bool(string(tr(.Bake_Sky)), &b.sky, o)
     im.BeginDisabled(!b.sky)
-    ui_param_color(string(tr(.World_Sky_Color)), &b.sky_color, true, o)
     oi := o
     oi.max = 1000
     ui_param_f32(string(tr(.World_Sky_Intensity)), &b.sky_intensity, oi)

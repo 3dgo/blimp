@@ -56,7 +56,8 @@ design notes there.
 - **Assets** load at init and never change at runtime: no streaming, manifests or meta files. Debug
   hot reload rebuilds all of them, as init would (`app_hot_reload.odin`). A glTF file is a kit. Keys are
   project-relative forward-slash paths plus a name (`assets/models/car.gltf:body`), never absolute, no UUIDs.
-  Anything that keeps a key interns it (`asset_intern`), so it outlives a reload. Strings decoded from
+  Anything that keeps a key interns it (`asset_intern`; `asset_intern_keys` for every field tagged with an
+  asset picker's widget), so it outlives a reload. Strings decoded from
   text are temp; an entity enters a world only through `world_add`, which interns its keys.
 - **Coordinates:** left-handed, Y-up, +Z forward, clockwise front faces. glTF import reflects `-X`
   **and** swaps winding; both are required, don't remove the swap. Reversed-Z (`GREATER`, clear 0).
@@ -86,7 +87,10 @@ design notes there.
 ## Build, check, verify
 
 - Build: `odin run build.odin -file` (there is no build.exe). Close a running engine first, since
-  Windows locks `bin/blimp.exe`.
+  Windows locks `bin/blimp.exe`. Closing the user's engine is always fine, no need to ask:
+  `taskkill /IM blimp.exe /F`, and `build.exe` too if a previous `odin run` is still holding it.
+- `assets/scenes/castle.level` is the test level: modify it freely to set up a check (add lights,
+  casters, animated entities…).
 - Game: `odin run build.odin -file -- game` → `out/game/game.exe` (release: no editor, plays
   `game.ini`'s start level) with the DLLs and assets beside it.
 - Editor for non-builders: `odin run build.odin -file -- editor` → `out/editor.zip` (optimized `-debug`

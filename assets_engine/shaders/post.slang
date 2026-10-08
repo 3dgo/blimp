@@ -75,7 +75,7 @@ float fog_height_density(float y) {
 
 // Height fog's optical depth over the first t metres of r: the density's integral, closed form for an
 // exponential. x is how many falloffs the ray climbs; clamped below, and the result capped at FOG_OPAQUE, so a
-// long ray down stays finite (an infinite depth turns the colour mix in fog_inscatter into NaN).
+// long ray down stays finite.
 float fog_height_depth(ViewRay r, float t) {
     if (gFrame.fogDensity <= 0) return 0;
     float x = max(r.dir.y * t / gFrame.fogFalloff, -80);
@@ -83,10 +83,12 @@ float fog_height_depth(ViewRay r, float t) {
     return min(fog_height_density(r.origin.y) * min(t * s, 1e30), FOG_OPAQUE);
 }
 
-// Distance fog's transmittance t metres along the ray: the PS1 ramp, 1 nearer than fogStart, 0 from fogEnd.
+// Distance fog's transmittance t metres along the ray: the PS1 ramp, 1 nearer than fogStart, 1 - fogMaxOpacity
+// from fogEnd, so below 1 the sky (a ray that hit nothing) and far geometry show through alike. Only this ramp is
+// capped: height fog stays finite looking up on its own, and keeps its horizon-to-zenith gradient on the sky.
 float fog_distance_transmittance(float t) {
     if (gFrame.fogEnd <= gFrame.fogStart) return 1;
-    return 1 - saturate((t - gFrame.fogStart) / (gFrame.fogEnd - gFrame.fogStart));
+    return 1 - gFrame.fogMaxOpacity * saturate((t - gFrame.fogStart) / (gFrame.fogEnd - gFrame.fogStart));
 }
 
 // How much of what's t metres along r reaches the eye: 1 = clear.
@@ -103,20 +105,15 @@ float3 fog_lit_scale(float3 p) {
     return lerp(1, light / max(gFrame.fogLightMean, 1e-4), seen);
 }
 
-// The colour the fog adds along r, and in T its transmittance over the whole ray: (1 - T) of the two fogs'
-// colours, mixed by each one's share of the ray's optical depth (the distance ramp's is -ln of its
-// transmittance), so whichever fog is thicker along this ray shows its colour.
+// The colour the fog adds along r, and in T its transmittance over the whole ray: (1 - T) of fogColor.
 // Lit fog (fogLit) scales that by the light along the ray, summed over FOG_LIT_STEPS stretches from where the
 // fog begins to fogEnd (or FOG_LIT_REACH), each weighted by the fog it holds (the drop in transmittance across
-// it); the fog beyond takes the last stretch's light. The samples are offset by the pixel's Bayer threshold, so
-// the steps between them break up like the dither.
+// it; the weights add up to 1 - T); the fog beyond takes the last stretch's light. The samples are offset by
+// the pixel's Bayer threshold, so the steps between them break up like the dither.
 float3 fog_inscatter(ViewRay r, uint2 px, out float T) {
-    float distanceT = fog_distance_transmittance(r.len);
-    float heightDepth = fog_height_depth(r, r.len);
-    T = distanceT * exp(-heightDepth);
+    T = fog_transmittance(r, r.len);
     if (T == 1) return 0;
-    float distanceDepth = -log(max(distanceT, 1e-6));
-    float3 color = (distanceDepth * gFrame.fogDistanceColor + heightDepth * gFrame.fogHeightColor) / (distanceDepth + heightDepth);
+    float3 color = gFrame.fogColor;
     if (gFrame.fogLit <= 0) return color * (1 - T);
 
     bool  distance = gFrame.fogEnd > gFrame.fogStart;

@@ -18,8 +18,8 @@ views:  [dynamic]^Render_View
 
 @(private="file") next_view_id: u32 = 1
 
-// The viewport the user last focused. Its world is the "active world": the target of Ctrl+C/V and
-// what follow-mode entity panels show. nil when no world is open. Written only by view_activate.
+// The viewport the user last focused. Its world is the "active world": the target of Ctrl+C/V.
+// nil when no world is open. Written only by view_activate.
 active_view: ^Render_View
 
 // Closing is deferred to the start of the next frame (app_process_closes): frames still in flight may be

@@ -30,6 +30,7 @@ Renderer_DX :: struct {
 
     slang_compiler: dx.Slang_Compiler,
     scene: [EntityBlend]Shader_Pipeline,   // scene.slang's vert_main with each blend's fragment entry point
+    sky: Shader_Pipeline,
 
     frame_fence_copy: dx.Fence,
     frame_fence_gfx: dx.Fence,
@@ -98,26 +99,32 @@ Frame_Constants :: struct {
 
     // Fog (World_Settings.fog, post.slang), along each pixel's ray from the scene depth through inv_proj. Each
     // part is off at 0 (render_view_fog): distance when fog_end <= fog_start, height at fog_density 0, halos at
-    // fog_glow 0, lit at fog_lit 0. Colours are linear scene light. Ordered so no vector straddles a row.
+    // fog_glow 0, lit at fog_lit 0. The colour is linear scene light. Ordered so no vector straddles a row.
     fog_start:          f32,
     fog_end:            f32,
     fog_height:         f32,   // height fog: world y where it has fog_density
     fog_density:        f32,   // per metre
-    fog_distance_color: vec3,
-    fog_lit:            f32,   // 0..1: how far the colours follow the probes' light over fog_light_mean
+    fog_color:          vec3,  // distance and height fog alike
+    fog_lit:            f32,   // 0..1: how far the colour follows the probes' light over fog_light_mean
     inv_proj:           mat4,  // the projection this view rendered with, inverted (the camera entity's in game mode)
-    fog_height_color:   vec3,
+    fog_max_opacity:    f32,   // 0..1: the distance ramp's top (its transmittance ends at 1 - this)
+    _pad_fog:           [2]f32,
     fog_falloff:        f32,   // metres up for the density to fall by e
     fog_light_mean:     vec3,  // the level's average light in the air (Probe_Grid.light_mean)
     fog_glow:           f32,   // halos: per metre of haze, plus the height fog's density
 
+    sky_texture_slot: u32,
+    sky_intensity:    f32,
+    sky_rotation:     f32,   // turns about +Y
+
     skin_buffer_slot: u32,   // Skin_Vertex per skinned vertex (asset)
     bone_buffer_slot: u32,   // the world's skin matrices this frame (World_Render.bones)
+    scene_size:       vec2,  // the scene target in pixels: scene pixel → NDC without reading a texture (view.slang)
 
-    _padding: [512 - 456]byte,   // CBVs come in 256-byte steps
+    _padding: [512 - 476]byte,   // CBVs come in 256-byte steps
 }
 #assert(offset_of(Frame_Constants, signal_texture_slot) == 312)
-#assert(offset_of(Frame_Constants, _padding) == 456)
+#assert(offset_of(Frame_Constants, _padding) == 476)
 #assert(offset_of(Frame_Constants, probe_layer_scale) % 16 == 0)
 #assert(MAX_PROBE_LAYERS <= 8)
 #assert(size_of(Frame_Constants) == 512)
@@ -130,10 +137,10 @@ Frame_Constants :: struct {
 #assert(offset_of(Frame_Constants, vertex_snap) % 16 + size_of(vec2)  <= 16)
 #assert(offset_of(Frame_Constants, probe_origin) % 16 + size_of(vec3)  <= 16)
 #assert(offset_of(Frame_Constants, probe_dims) % 16 + size_of(uvec3) <= 16)
-#assert(offset_of(Frame_Constants, fog_distance_color) % 16 + size_of(vec3)  <= 16)
+#assert(offset_of(Frame_Constants, fog_color) % 16 + size_of(vec3)  <= 16)
 #assert(offset_of(Frame_Constants, inv_proj) % 16 == 0)
-#assert(offset_of(Frame_Constants, fog_height_color) % 16 + size_of(vec3)  <= 16)
 #assert(offset_of(Frame_Constants, fog_light_mean) % 16 + size_of(vec3)  <= 16)
+#assert(offset_of(Frame_Constants, scene_size) % 16 + size_of(vec2)  <= 16)
 
 renderer_dx_init :: proc() {
     // --gpu-validation (debug builds): D3D12 GPU-based validation, for a bad descriptor index or resource state.
@@ -195,6 +202,18 @@ renderer_dx_init :: proc() {
         }
         renderer_dx.scene[blend] = shader_pipeline_create("scene", "vert_main", frag, opts)
     }
+    
+    // The sky: a fullscreen triangle under everything, so it neither tests nor writes depth (the clear's 0
+    // stays, and the post pass's fog sees a ray that hit nothing).
+    {
+        opts := dx.PIPELINE_OPTIONS_DEFAULT
+        opts.rtv_format  = VIEW_HDR_FORMAT
+        opts.cull_mode   = .NONE
+        opts.depth_test  = false
+        opts.depth_write = false
+        renderer_dx.sky = shader_pipeline_create("sky", "vert_main", "frag_main", opts)
+    }
+
     render_post_init()   // post chain: HDR scene target → display target (render_post.odin)
     render_shadows_init()   // depth-only shadow map pass (render_shadows.odin)
 
@@ -267,7 +286,7 @@ renderer_dx_draw_frame :: proc() {
 
     //=== Shadow maps (one set per world, shared by its views) ===
     t_shadows := gpu_timer_begin(renderer_dx.cmd_gfx, "shadows")
-    for w in worlds do render_shadows_draw(w, f.slot)
+    for w in worlds do if world_viewed(w) do render_shadows_draw(w, f.slot)   // a level whose copy is playing has no views
     if w := render_shadows.debug_world; w != nil {   // the Shadow Maps window is open on it (ui_shadows.odin)
         render_shadows_debug_draw(w, f.slot)
         render_shadows.debug_world = nil
@@ -329,6 +348,7 @@ renderer_dx_shutdown :: proc() {   // the GPU is idle (app_shutdown waited)
     gpu_timer_shutdown()
 
     for p in renderer_dx.scene do shader_pipeline_destroy(p)
+    shader_pipeline_destroy(renderer_dx.sky)
     dx.slang_compiler_destroy(&renderer_dx.slang_compiler)
 
     dx.swapchain_destroy(&renderer_dx.swapchain)
@@ -387,6 +407,7 @@ shader_pipeline_destroy :: proc(p: Shader_Pipeline) {
 renderer_dx_pipelines :: proc() -> []^Shader_Pipeline {
     list := make([dynamic]^Shader_Pipeline, context.temp_allocator)
     for &p in renderer_dx.scene do append(&list, &p)
+    append(&list, &renderer_dx.sky)
     append(&list, &render_post.signal, &render_post.upscale)
     append(&list, &render_shadows.pipeline, &debug_draw.pipeline)
     return list[:]

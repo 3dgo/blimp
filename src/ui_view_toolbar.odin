@@ -74,6 +74,11 @@ ui_view_toolbar :: proc(view: ^Render_View) {
     if toggle_button(fmt.ctprintf("%s##bake", ICON_BAKE), ui_bake_open_for(level)) do ui_bake_toggle(level)
     im.SetItemTooltip("%s", tr(.Win_Bake))
     im.SameLine()
+    if h := ui_host_find(view); h != nil {   // a world window: its list and inspector
+        if toggle_button(fmt.ctprintf("%s##panels", ICON_PANELS), h.show_panels) do h.show_panels = !h.show_panels
+        im.SetItemTooltip("%s", tr(.Tool_Panels))
+        im.SameLine()
+    }
     maximized := ui.maximized == view
     if toggle_button(fmt.ctprintf("%s##maximize", maximized ? ICON_FULLSCREEN_EXIT : ICON_FULLSCREEN), maximized) do ui_maximize_toggle(view)
     im.SetItemTooltip("%s  (F11)", tr(.Tool_Maximize))

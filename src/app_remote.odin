@@ -343,7 +343,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         before := entity_to_text(e, context.temp_allocator)
         snapshot := e^
         deserialize_field(e, args[2], strings.join(args[3:], " ", context.temp_allocator))
-        entity_intern_keys(e)
+        asset_intern_keys(e^)
         world_fix_duplicate_name(w, e.handle)
         after := entity_to_text(e, context.temp_allocator)
         if after == before do return fmt.tprintf("nothing changed (unknown field '%s', or same value)", args[2])
@@ -391,6 +391,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
             v, ok := struct_field_by_path(w.settings, args[1])
             if !ok do return fmt.tprintf("no world setting '%s'", args[1])
             deserialize_value(v, strings.join(args[2:], " ", context.temp_allocator))
+            asset_intern_keys(w.settings)
             undo_push_settings_edited(w, before)
         }
         serialize_struct(out, w.settings)

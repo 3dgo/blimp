@@ -2,7 +2,6 @@ package blimp
 
 import "core:log"
 import "core:mem"
-import "core:hash"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -91,11 +90,6 @@ World_Render :: struct {
     shadow_views_ptr: [FRAMES_IN_FLIGHT]rawptr,
     shadow_views_srv: [FRAMES_IN_FLIGHT]dx.Resource_View,
     shadow_slices:    [dynamic]Shadow_Slice,   // this frame's slices in use, rebuilt by buffers_build_scene
-    // Static shadow caching (render_shadows_draw): a slice is redrawn only when its camera changed or
-    // something that casts changed since it was last drawn. Slices keep their depth between frames.
-    shadow_casters:       u64,   // hash of everything that casts this frame (transform + mesh per instance)
-    shadow_casters_drawn: u64,   // the hash the slices were last drawn with
-    shadow_drawn:         [MAX_SHADOW_SLICES]Maybe(mat4),   // the camera each slice holds depth for; nil = must draw
     shadow_missed, shadow_missed_logged: int,   // shadowed lights that got no slices this frame / when last logged
 }
 
@@ -267,7 +261,6 @@ buffers_build_scene :: proc(world: ^World) {
     clear(&r.shadow_slices)
     r.shadow_missed = 0
     defer light_shadow_report(r)
-    casters := u64(0xcbf29ce484222325)   // FNV-1a offset basis: what casts shadows this frame (shadow caching, render_shadows_draw)
     // Opaque draws go straight into draw_cmd_data; the other blends gather here and follow it in
     // EntityBlend order once every entity is in (deferred, so the MAX_MESH_INSTANCES return does it too).
     // Alpha draws back to front from sort_eye (blending isn't order-independent); Additive is, and stays in
@@ -277,7 +270,6 @@ buffers_build_scene :: proc(world: ^World) {
     alpha_depth := make([dynamic]f32, context.temp_allocator)   // per later[.Alpha] command: its distance from sort_eye
     sort_eye := world_sort_eye(world)
     defer {
-        r.shadow_casters = casters
         r.draw_count[.Opaque] = u32(len(r.draw_cmd_data))
         alpha_sort(later[.Alpha][:], alpha_depth[:])
         for blend in EntityBlend {
@@ -350,16 +342,6 @@ buffers_build_scene :: proc(world: ^World) {
                 append(&later[.Alpha], cmd)
                 append(&alpha_depth, linalg.length(mesh_world_center(mesh_idx, r.transform_data[transform_idx]) - sort_eye))
             case .Cutout, .Additive: append(&later[entity.blend], cmd)
-            }
-            if entity.blend == .Opaque || entity.blend == .Cutout {   // the casters (render_shadows_draw)
-                m := r.transform_data[transform_idx]
-                casters = hash.fnv64a(mem.ptr_to_bytes(&m), casters)
-                id := mesh_idx
-                casters = hash.fnv64a(mem.ptr_to_bytes(&id), casters)
-                if bone_offset != NO_BONES {   // a pose change is a caster change
-                    bones := r.bone_data[bone_offset:]
-                    casters = hash.fnv64a(([^]byte)(raw_data(bones))[:len(bones) * size_of(mat4)], casters)
-                }
             }
         }
     }

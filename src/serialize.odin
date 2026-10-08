@@ -17,7 +17,7 @@ import "core:reflect"
 //   (string, sbuf, bool, f32, float vectors, quaternion, bit_set flags, integers, enums).
 //
 // Strings decoded from text are temp: a `string` field is an asset key everywhere it appears, and whoever
-// keeps one interns it (entity_intern_keys), so nothing is cloned into an arena that later strands it.
+// keeps one interns it (asset_intern_keys), so nothing is cloned into an arena that later strands it.
 
 // One line of INI text that means something: a [section] header (header = true, `section` its name)
 // or a `key = value` pair.

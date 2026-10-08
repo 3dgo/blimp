@@ -49,7 +49,9 @@ Bake :: struct {
     light_layer: []u8,            // each light's probe layer (its group's; layer 0 for group 0)
     light_shadow: []bool,         // each light's `shadow`: its shadow ray is cast
     layers: int,
-    sky:    vec3,                 // linear radiance of a miss (layer 0)
+    sky:    vec3,                 // linear radiance of a miss (layer 0): the background colour × sky_intensity
+    sky_table: []vec3,            // or, with a sky texture, the miss radiance by direction (bake_sky_table); nil = sky
+    sky_turn:  f32,               // the sky's rotation, turns
     dirs:   []vec3,               // the rays, the same for every probe
     basis:  [][9]f32,             // sh_basis(dirs[k])
     prev:   Probe_Grid,           // the previous pass (all zero on the first); only origin..probes are used
@@ -114,7 +116,15 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     b.light_layer = make([]u8, len(lights), context.temp_allocator)
     for g, i in groups do b.light_layer[i] = group_layer[g]
     stats.lights, stats.layers = len(lights), b.layers
-    if set.sky do b.sky = set.sky_color * set.sky_intensity
+    if set.sky {
+        // The sky the views show lights the probes: the sky texture, or else the background colour.
+        b.sky = w.settings.background * set.sky_intensity
+        if image, found := render_sky_image(w.settings.sky); found {
+            sky := w.settings.sky
+            b.sky_table = bake_sky_table(asset_system.images[image], max(sky.intensity, 0) * set.sky_intensity)
+            b.sky_turn  = sky.rotation / 360
+        }
+    }
 
     // The grid covers the geometry's bounds plus one spacing all round, or the manual box.
     spacing := max(set.probe_spacing, 0.05)
@@ -253,7 +263,7 @@ bake_radiance :: proc(b: ^Bake, r: Ray, back: ^u32, t: ^f32) -> (L: Bake_Layers)
     hit, ok := scene_bvh_closest_hit(&b.scene, r)
     if !ok {
         t^ = max(f32)
-        L[0] = b.sky
+        L[0] = bake_sky(b, r.dir)
         return
     }
     t^ = hit.t
@@ -276,6 +286,40 @@ bake_radiance :: proc(b: ^Bake, r: Ray, back: ^u32, t: ^f32) -> (L: Bake_Layers)
         L[l] = albedo * (L[l] + probe_grid_sample(&b.prev, p, n, one))
     }
     return
+}
+
+// The sky texture for the bake: box-filtered down to SKY_TABLE_W × SKY_TABLE_H cells of linear radiance. The
+// probes hold only low-frequency light, and a few hundred rays per probe sampling the full texture would only add
+// noise.
+SKY_TABLE_W :: 32
+SKY_TABLE_H :: 16
+
+@(private="file")
+bake_sky_table :: proc(img: Image, scale: f32) -> []vec3 {
+    lut: [256]f32   // byte → linear
+    for i in 0..<256 do lut[i] = img.format == .RGBA8_SRGB ? srgb_to_linear(f32(i) / 255) : f32(i) / 255
+    table := make([]vec3, SKY_TABLE_W * SKY_TABLE_H, context.temp_allocator)
+    count := make([]f32, len(table), context.temp_allocator)
+    w, h := int(img.width), int(img.height)
+    for y in 0..<h do for x in 0..<w {
+        px := img.pixels[4 * (y * w + x):][:3]
+        cell := (y * SKY_TABLE_H / h) * SKY_TABLE_W + x * SKY_TABLE_W / w
+        table[cell] += {lut[px[0]], lut[px[1]], lut[px[2]]}
+        count[cell] += 1
+    }
+    for &c, i in table do c *= scale / max(count[i], 1)
+    return table
+}
+
+// A miss's radiance along unit direction d: the sky table's cell, mapped like sky.slang, or the sky colour.
+@(private="file")
+bake_sky :: proc(b: ^Bake, d: vec3) -> vec3 {
+    if b.sky_table == nil do return b.sky
+    u := math.atan2(d.x, d.z) / (2 * math.PI) + 0.5 - b.sky_turn
+    v := math.acos(clamp(d.y, -1, 1)) / math.PI
+    x := clamp(int((u - math.floor(u)) * SKY_TABLE_W), 0, SKY_TABLE_W - 1)
+    y := clamp(int(v * SKY_TABLE_H), 0, SKY_TABLE_H - 1)
+    return b.sky_table[y * SKY_TABLE_W + x]
 }
 
 // Direct light at p facing n, into each light's layer, as scene.slang's frag_main lights it (diffuse only, no 1/π), with one

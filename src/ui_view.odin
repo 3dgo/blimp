@@ -12,18 +12,16 @@ import "dx"
 // label of every node that holds a single window, so it reads as one panel. The host window carries
 // the title and the close button; closing it closes the view (and the world, if it was the last one).
 World_Host :: struct {
-    view:         ^Render_View,
-    list_id:      u32,    // panel ids of its two docked panels
-    inspector_id: u32,
-    built:        bool,   // dock layout applied (done on the first frame the window is visible)
+    view:        ^Render_View,
+    built:       bool,   // dock layout applied (done on the first frame the window is visible)
+    show_panels: bool,   // the entity list and inspector (the toolbar's panels button); hidden, the viewport fills the window
+    // The panels' search boxes (NUL-terminated): entity names in the list, fields in the inspector.
+    list_search:      [64]u8,
+    inspector_search: [64]u8,
 }
 
 ui_host_open :: proc(v: ^Render_View) {
-    append(&ui.hosts, World_Host{
-        view         = v,
-        list_id      = ui_entity_panel_new(.List, v),
-        inspector_id = ui_entity_panel_new(.Inspector, v),
-    })
+    append(&ui.hosts, World_Host{view = v, show_panels = true})
 }
 
 ui_host_find :: proc(v: ^Render_View) -> ^World_Host {
@@ -52,12 +50,11 @@ ui_forget_view :: proc(v: ^Render_View) {
     editor_view_forget(v)
     ui_context_menu_forget(nil, v)
     for i := len(ui.hosts) - 1; i >= 0; i -= 1 do if ui.hosts[i].view == v do ordered_remove(&ui.hosts, i)
-    for i := len(ui.panels) - 1; i >= 0; i -= 1 do if ui.panels[i].owner == v do ordered_remove(&ui.panels, i)
 }
 
 // One window per view. A view opened with its world is a world window (viewport + its own list and
 // inspector); a "New Viewport" view is a plain window. Every one is labelled "<world title> 视口",
-// with ● on the active one (what Ctrl+C/V and follow-mode panels act on); closing it closes the view.
+// with ● on the active one (what Ctrl+C/V act on); closing it closes the view.
 ui_draw_views :: proc() {
     for v in views {
         mark  := v == active_view ? "● " : ""
@@ -172,8 +169,8 @@ ui_draw_host :: proc(h: ^World_Host, title: cstring) -> bool {
             im.DockBuilderSplitNode(left, .Right, clamp(HOST_PANEL_WIDTH * s / size.x, 0.1, 0.5), &right, &left)
             im.DockBuilderSplitNode(right, .Down, 0.5, &inspector, &list)
             im.DockBuilderDockWindow(fmt.ctprintf("###view%d", v.id), left)
-            im.DockBuilderDockWindow(fmt.ctprintf("###entity_list%d", h.list_id), list)
-            im.DockBuilderDockWindow(fmt.ctprintf("###entity_inspector%d", h.inspector_id), inspector)
+            im.DockBuilderDockWindow(fmt.ctprintf("###entity_list%d", v.id), list)
+            im.DockBuilderDockWindow(fmt.ctprintf("###entity_inspector%d", v.id), inspector)
             im.DockBuilderFinish(dockspace_id)
             h.built = true
         }

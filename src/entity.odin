@@ -46,14 +46,6 @@ entity_bakes :: proc(e: ^Entity) -> bool {
     return entity_drawn(e) && .Static in e.basic_static_flags && .Cast_Indirect in e.basic_static_flags
 }
 
-// An entity's asset references as interned keys (asset_intern), so they outlive whatever arena they were
-// read into (a level, the clipboard, a remote command) and survive an asset reload. Call after reading
-// fields from text.
-entity_intern_keys :: proc(e: ^Entity) {
-    e.model = asset_intern(e.model)
-    e.sound = asset_intern(e.sound)
-}
-
 // A new entity with the schema's defaults (rotation identity, scale 1, user fields…): the starting point
 // of every entity built from text or code, so a field missing from a file gets its default, not zero.
 entity_default :: proc() -> (e: Entity) {

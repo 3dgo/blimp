@@ -103,5 +103,6 @@ scene_load_from_text :: proc(world: ^World, text: string, out_handles: ^[dynamic
 // paste never touches a world's settings. A scene without the section keeps the defaults.
 scene_load_world_settings :: proc(world: ^World, text: string) {
     ini_read_section(text, "world", world.settings)
+    asset_intern_keys(world.settings)   // its keys (sky.texture) outlive the text
 }
 

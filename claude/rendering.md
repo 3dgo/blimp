@@ -36,7 +36,7 @@ PBR version later is additive.
   colours are linear scene light too (`widget:linear_color`); the scene target clears to the
   background and every pixel takes exposure, the tonemap and the dither. So a picked colour shifts
   through ACES and follows exposure: sky and fog colours are judged in the engine. Chosen over
-  pinning picked colours with an inverse tonemap, for one pipe with no special cases. A future sky
+  pinning picked colours with an inverse tonemap, for one pipe with no special cases. The sky (see Sky)
   is a fullscreen pass writing linear light before the opaques (no mesh: one would fight the
   baker's bounds and misses, the shadow pass and the far plane); nothing reads the clear alpha.
 - Light data lives in a GPU buffer indexed from the shader, not root constants.
@@ -158,7 +158,6 @@ All lighting lives in `shading.slang`: `light_surface` (everything lighting a po
   which is its rest pose. The shader branch (`skinMatrix`, utils.slang) is uniform per draw.
 - Vertex skinning, not compute skinning, in model space before the entity transform, in both scene.slang and
   shadow.slang. Vertex snapping comes **after** it, in clip space.
-- A pose change changes the shadow casters' hash (render_shadows_draw's static cache), so cached slices redraw.
 
 ### Particles
 
@@ -263,8 +262,8 @@ is worth more than a 100× speedup.
   `Static`, `Cast_Indirect`). The asset layer never reads a world: the baker hands it the instances.
   Closest-hit and any-hit (shadow rays) queries, iterative with a fixed stack.
 - **Indirect only.** Every light stays realtime direct; a light reaches a probe only off a
-  surface it lit. The sky (`bake.sky_color × sky_intensity`, linear) is in the probes unless `bake.sky`
-  is off. A light bakes by the same rule as geometry, `entity_bakes`: clear `Static` for one that
+  surface it lit. The sky the views show (the sky texture, else `background`; × `bake.sky_intensity`) is in
+  the probes unless `bake.sky` is off. A light bakes by the same rule as geometry, `entity_bakes`: clear `Static` for one that
   moves (its bounce would stay where it was placed), `Cast_Indirect` for a fill or rim light that
   shouldn't bounce. Its `indirect` field (default 1) scales its baked bounce, not its direct light.
 - **Grid**: the static geometry's bounds plus one `probe_spacing` all round (`bake.bounds = Auto`), or
@@ -327,13 +326,10 @@ is worth more than a 100× speedup.
   and break the look.
 - Point lights use cube maps (6 faces). Cascades are a directional-light technique; 2–3
   cascades for exteriors if needed.
-- **Cache static shadow maps.** Biggest available win in this design. Done simply
-  (`render_shadows_draw`): the map keeps its depth between frames, and a slice is redrawn only when its
-  camera changed (its light moved, or the slice now belongs to another light) or anything that casts
-  changed since the slices were last drawn — `buffers_build_scene` hashes every caster's transform and
-  mesh into `World_Render.shadow_casters`. A still level draws no shadow maps; a moving light redraws only
-  its slices; any moving caster redraws them all (per-slice bounds tests would be the next step). An asset
-  reload clears the cache.
+- **Every slice redraws every frame.** A static cache (one world-wide hash of the casters) was tried and
+  removed: any moving caster, an animated character included, invalidated every slice, so in play it never
+  hit. If the shadow pass ever shows up in `timings`, the fix is a per-slice cache keyed on the casters
+  whose bounds touch that slice, not the world-wide one.
 - **Implementation** (`render_shadows.odin`, `shadow.slang`): one `R32` texture array per world,
   `MAX_SHADOW_SLICES` (32) × 512², shared by its views. Every shadow is a slice with its own
   reversed-Z camera: directional = an ortho box centred on the entity (`size` x, y across, z deep;
@@ -372,6 +368,27 @@ filmic (Hill's RRT+ODT fit) after `2^exposure` (world setting, EV), then sRGB-en
 space, not linear — these scenes sit at the bottom of the value range where linear 5-bit
 gives almost no levels.
 
+### Sky
+
+`World_Settings.sky` (`texture`, `intensity`, `rotation` in degrees about +Y): an equirectangular 2:1 PNG from
+`assets/` (every PNG loads at init, claude/assets.md; by convention skies live in `assets/skies/`), drawn in place of the
+background colour. No texture: the background colour, as before. A learning walkthrough is in `docs/sky.md`.
+
+- **LDR, sRGB × intensity; no HDR, no cubemap.** HDR skies exist for the sun, which here is a directional light
+  with its own direct light and shadows; the sky only adds soft fill. One PNG paints in any tool and loads
+  with the existing loader; a cubemap is six faces and a new texture type for less stretch at the poles.
+- **The pass** (`sky.slang`, `renderer_dx.sky`): one fullscreen triangle into the scene target right after the
+  clear, before the opaques, no depth test or write. Its pixels keep depth 0, so the fog sees a ray that hit
+  nothing (distance fog's `max_opacity` decides how much shows through it). Direction per pixel as the fog finds it: `scene_ndc` (from
+  `sceneSize`, no texture read, so it works in the scene pass) then `view_ray_dir`; an ortho camera sees one
+  colour. `u = atan2(x, z) / 2π + 0.5 − rotation` (+Z at the centre, +X to its right), `v = acos(y) / π`.
+  `SampleLevel(…, 0)`, not `Sample`: u wraps from 1 to 0 behind the camera, and derivatives would pick the
+  smallest mip there and draw a seam. The frame's sampler, so point-sampled in retro views like the scene.
+- **The bake** sees the same sky: a miss takes the texture in its direction, box-filtered at bake start to a
+  32 × 16 table of linear radiance (probes hold low-frequency light; a few hundred rays on the full texture
+  would only add noise), mapped like `sky.slang`, × `bake.sky_intensity`. No texture: `background` ×
+  `bake.sky_intensity`.
+
 ### Fog
 
 `World_Settings.fog`, all in the post signal pass (`post.slang`) along each scene pixel's ray (near plane to
@@ -384,13 +401,22 @@ ray-marched or froxels:** froxel fog hides its noise with temporal reprojection,
 lags; this has no history and reacts the same frame. A learning walkthrough of how it's built is in
 `docs/fog.md`.
 
-- **Distance** (`on`, `start`, `end`, `color`): the PS1 ramp, transmittance linear from 1 to 0.
-- **Height** (`height_fog`, `height`, `density` per metre there, `falloff` metres per e, `height_color`):
-  exponential ground mist; its optical depth is closed form, capped at 100 (a ray down into the void would
-  otherwise reach infinity and NaN the colour mix). T is the two multiplied.
-- **Colours** are linear (see "Shading is linear"). The two mix by each fog's share of the ray's optical
-  depth (distance's is −ln of its T), so the thicker one along a ray shows.
-- **Lit** (`lit`, 0..1): both colours × the probes' light in the air over the level's average
+`Fog_Settings` is laid out as the inspector shows it: the shared colour first, then each part under its switch.
+
+- **One colour** (`color`, linear: see "Shading is linear") for both fogs; the halos take their lights' colours.
+  Two colours mixed by each fog's share of the optical depth were dropped: the same colour was always picked.
+- **Distance** (`distance_fog`, `start`, `end`, `max_opacity` 0..1, default 1): the PS1 ramp, transmittance
+  linear from 1 down to `1 − max_opacity`. Below 1 the sky (a miss, "infinitely" far) shows through, and so does
+  far geometry: on every pixel, not only misses, so a distant mountain fades like the sky behind it rather than
+  showing as a flat fog-coloured cutout. A cap on the ramp, not on density: density is per metre, and a long
+  enough ray reaches full fog at any density.
+- **Height** (`height_fog`, `height`, `density` per metre there, `falloff` metres per e): exponential ground
+  mist; its optical depth is closed form, capped at 100 (a ray down into the void would otherwise reach
+  infinity). **Not capped by `max_opacity`:** looking up, its optical depth to infinity is finite
+  (≈ density × falloff / dir.y), so on the sky it is thick at the horizon and clear overhead by itself. A cap on
+  the product of both fogs flattened that gradient whenever distance fog was on (its ramp is 0 on every miss).
+  T is the two multiplied.
+- **Lit** (`lit`, 0..1): the colour × the probes' light in the air over the level's average
   (`Probe_Grid.light_mean`: every unburied probe's SH constant band, every layer at full scale, fixed per bake,
   so a light group dimming dims the fog). The colour as picked where the light is average; warmer and brighter
   by a lamp's bounce; darker in a dark corner. Air samples use the visibility test with no normal; where the

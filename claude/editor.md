@@ -103,10 +103,10 @@
   - The session's first world window docks into the main window's central node instead of floating.
   - Every window dragged outside the main window becomes an OS window parented to it
     (`ConfigViewportsNoDefaultParent = false`), so the main window never covers it.
-  - Its panels start pinned to that world. They keep the Follow/pin combo, so they can be retargeted.
-  - `Entity_Panel.owner` means only that the panel is docked in that window and closes with it.
+  - Its entity list and inspector are the only ones: there are no floating or extra panels, and they always
+    show that window's world (the running copy while it plays). The toolbar's panels button hides both
+    (`World_Host.show_panels`); the viewport then fills the window.
   - "New Viewport" adds a plain extra view window onto an open world.
-  - Panel targeting is explicit: follow the active world, or pin to one. Docking never links a panel.
 - **`active_view`** is the viewport you last focused, or the world you last clicked in a panel
   (`world_activate`). It may be nil. Its world is the target of Ctrl+C/V. Undo entries carry their
   own world.
