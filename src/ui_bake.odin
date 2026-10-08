@@ -12,8 +12,6 @@ import "dx"
 @(private="file")
 bake_ui: struct {
     using window: Settings_Window,   // always a level: probes are level data, so it doesn't follow Play
-    last:       Bake_Stats,   // the last bake this session, of last_world
-    last_world: ^World,
 }
 
 BAKE_WINDOW_SIZE :: [2]f32{420, 520}   // first-open size (× display scale)
@@ -35,7 +33,6 @@ ui_bake_open_for :: proc(level: ^World) -> bool { return settings_window_open_fo
 // The world is closing.
 ui_bake_forget :: proc(w: ^World) {
     settings_window_forget(&bake_ui.window, w)
-    if bake_ui.last_world == w do bake_ui.last_world = nil
     if probe_highlight.world == w do probe_highlight = {}
 }
 
@@ -53,22 +50,30 @@ ui_draw_bake :: proc() {
     ui_bake_settings(w)
     settings_window_track_edit(&bake_ui.window, before)
 
-    // Bake before drawing the atlas: a bake replaces the atlas texture, and this frame's draw list must
-    // not hold the old one.
+    // The bake runs on its own thread; each finished pass replaces the probes (and this atlas) at the
+    // start of a frame (bake_update). One bake at a time.
     im.Separator()
-    if im.Button(tr(.Btn_Bake_Probes)) {
-        if stats, ok := bake_probes(w); ok do bake_ui.last, bake_ui.last_world = stats, w
+    if running := bake_running(); running == w {
+        if im.Button(tr(.Btn_Cancel)) do bake_cancel()
+        im.SameLine()
+        fraction, pass, bounces := bake_progress()
+        im.ProgressBar(fraction, {-math.F32_MIN, 0}, fmt.ctprintf(string(tr(.Bake_Progress)), pass, bounces, 100 * fraction))
+    } else {
+        im.BeginDisabled(running != nil)
+        if im.Button(tr(.Btn_Bake_Probes)) do bake_start(w)
+        im.EndDisabled()
+        im.SameLine()
     }
-    im.SameLine()
     g := &w.probes
     if len(g.probes) == 0 {
         im.TextDisabled("%s", tr(.Bake_None))
         return
     }
     im.TextUnformatted(fmt.ctprintf(string(tr(.Bake_Status)), g.dims.x, g.dims.y, g.dims.z, g.layers))
-    if bake_ui.last_world == w {
-        l := bake_ui.last
+    if bake_last.world == w {
+        l := bake_last.stats
         im.TextDisabled("%s", fmt.ctprintf(string(tr(.Bake_Last)), l.seconds, l.threads, l.instances, l.lights, 100 * l.backface, l.buried))
+        if l.cancelled do im.TextDisabled("%s", fmt.ctprintf(string(tr(.Bake_Cancelled)), l.bounces))
     }
 
     im.Separator()

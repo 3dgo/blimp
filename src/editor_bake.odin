@@ -3,7 +3,11 @@ package blimp
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
+import "core:sync"
+import "core:thread"
 import "core:time"
+import vmem "core:mem/virtual"
 import hm "core:container/handle_map"
 
 // The probe baker (claude/rendering.md → Lighting, Baker). A CPU ray tracer over the level's static
@@ -16,6 +20,11 @@ import hm "core:container/handle_map"
 // bounces. A back-face hit means the probe sees the inside of something; it sends back black.
 // Passes run probes in parallel (parallel_for); each probe writes only its own slot. Rays, bounces and
 // what goes in come from World_Settings.bake.
+//
+// A bake runs on its own thread, one at a time (bake_job). bake_start snapshots everything the trace reads
+// into a Bake in the bake's arena; the trace reads nothing else but the assets, whose hot reload waits
+// for it (hot_reload_update). bake_update, once a frame, puts each finished pass on screen and finishes
+// the bake when the thread ends. Cancel drops the unfinished pass and keeps the finished ones.
 
 BAKE_RAYS_MIN    :: 16     // rays per probe per pass, on a Fibonacci sphere: the same set for every probe, so bakes repeat exactly
 BAKE_RAYS_MAX    :: 4096
@@ -38,7 +47,33 @@ Bake_Stats :: struct {
     rays:      int,   // probe rays, all passes (shadow rays not counted)
     backface:  f32,   // last pass: share of probe rays that hit a back face
     buried:    int,   // probes with more than BAKE_BURIED_FRACTION of their rays on back faces
+    bounces:   int,   // passes finished: fewer than asked when cancelled
+    cancelled: bool,
     seconds:   f64,
+}
+
+// The bake in flight. world == nil: none.
+@(private="file")
+bake_job: struct {
+    world:   ^World,
+    arena:   vmem.Arena,    // b's buffers; freed whole when the bake ends
+    b:       Bake,
+    stats:   Bake_Stats,
+    start:   time.Tick,
+    bounces: int,           // passes asked for
+    thread:  ^thread.Thread,
+    logger:  log.Logger,    // the bake thread logs each pass
+    lock:    sync.Mutex,    // held for a pass's swap of b.prev, and by bake_show_pass while it copies b.prev
+    passes:  int,           // finished passes (atomic; written under lock)
+    shown:   int,           // passes on screen (main thread)
+    done:    int,           // probes traced, all passes (atomic): the progress bar
+    cancel:  bool,          // (atomic) the probes left return at once and the unfinished pass is dropped
+}
+
+// The last bake finished this session, for the Bake window.
+bake_last: struct {
+    world: ^World,
+    stats: Bake_Stats,
 }
 
 @(private="file")
@@ -64,34 +99,100 @@ Bake :: struct {
 
 Bake_Layers :: [MAX_PROBE_LAYERS]vec3   // one radiance (or irradiance) per probe layer
 
-// Bakes w's probes and replaces its grid, its GPU copy and its .probes sidecar (when it has a save path).
-// Blocks until done. Not an edit: no undo step, the world doesn't become unsaved. Call outside the frame
-// (UI or remote command): it waits for the GPU.
+// Starts baking w's probes on the bake thread. Each finished pass replaces w's grid and its GPU copy
+// (bake_update); the end of the bake also writes the .probes sidecar (when w has a save path). Not an
+// edit: no undo step, the world doesn't become unsaved. False (logged) when there's nothing to bake, the
+// settings are invalid or a bake is already running.
 //
 // Light groups (world_light_groups.odin) bake into layers: layer 0 holds the sky and group-0 lights, and
 // each group with a light gets its own. Light adds up, so a layer is exactly what its group gives, bounces
 // included (a group's light bounces within its own layer), and the runtime scales each layer by its group.
-bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
-    start := time.tick_now()
-    set := &w.settings.bake
-    b: Bake
+bake_start :: proc(w: ^World) -> bool {
+    j := &bake_job
+    if j.world != nil {
+        log.errorf("Bake '%v': '%v' is still baking", w.title, j.world.title)
+        return false
+    }
+    if vmem.arena_init_growing(&j.arena) != nil {
+        log.errorf("Bake '%v': can't reserve the bake arena", w.title)
+        return false
+    }
+    if !bake_prepare(w) {
+        vmem.arena_destroy(&j.arena)
+        bake_job = {}
+        return false
+    }
+    j.world, j.logger = w, context.logger
+    j.thread = thread.create_and_start(bake_thread)   // a fresh context: its own temp allocator
+    return true
+}
 
-    b.scene = bake_scene_bvh(w)
+// The world a bake is running for, or nil.
+bake_running :: proc() -> ^World { return bake_job.world }
+
+// The running bake's progress: its share of probes traced, and the pass under way (1-based) of how many.
+bake_progress :: proc() -> (fraction: f32, pass, bounces: int) {
+    j := &bake_job
+    total := probe_count(&j.b.prev) * j.bounces
+    done := sync.atomic_load(&j.done)
+    return f32(done) / f32(max(total, 1)), min(sync.atomic_load(&j.passes) + 1, j.bounces), j.bounces
+}
+
+// Asks the running bake to stop; bake_update finishes it with the passes already done.
+bake_cancel :: proc() { sync.atomic_store(&bake_job.cancel, true) }
+
+// Once a frame, at the start of the frame, before the UI builds draw data: a pass shown or a bake
+// finished replaces the probe atlas texture, and waits for the GPU.
+bake_update :: proc() {
+    if bake_job.world == nil do return
+    if thread.is_done(bake_job.thread) {
+        bake_finish()
+        return
+    }
+    bake_show_pass()
+}
+
+// Bakes w's probes and waits for the bake to end (blimpctl).
+bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
+    if !bake_start(w) do return
+    return bake_finish()
+}
+
+// w is closing: its bake stops, unsaved and unshown.
+bake_forget :: proc(w: ^World) {
+    if bake_job.world == w {
+        bake_cancel()
+        bake_free()
+    }
+    if bake_last.world == w do bake_last = {}
+}
+
+// The snapshot the bake thread works from, in bake_job.arena.
+@(private="file")
+bake_prepare :: proc(w: ^World) -> bool {
+    j := &bake_job
+    b := &j.b
+    stats := &j.stats
+    alloc := vmem.arena_allocator(&j.arena)
+    j.start = time.tick_now()
+    set := &w.settings.bake
+
+    b.scene = bake_scene_bvh(w, alloc)
     stats.instances = len(b.scene.instances)
-    b.tint = make([]vec3, len(b.scene.instances), context.temp_allocator)
+    b.tint = make([]vec3, len(b.scene.instances), alloc)
     for inst, i in b.scene.instances {
         b.tint[i] = 1
         if e, found := entity_get(w, inst.entity); found do b.tint[i] = entity_tint(e)
     }
     if len(b.scene.nodes) == 0 {
         log.errorf("Bake '%v': no static geometry (entities need Static, Cast Indirect and a model)", w.title)
-        return
+        return false
     }
 
     // Lights, and a layer for every group that has one: layer 0 first, then the groups in order.
-    lights := make([dynamic]GPU_Light, 0, MAX_LIGHTS, context.temp_allocator)
+    lights := make([dynamic]GPU_Light, 0, MAX_LIGHTS, alloc)
     groups := make([dynamic]int, 0, MAX_LIGHTS, context.temp_allocator)
-    shadows := make([dynamic]bool, 0, MAX_LIGHTS, context.temp_allocator)
+    shadows := make([dynamic]bool, 0, MAX_LIGHTS, alloc)
     has_group: [MAX_LIGHT_GROUPS + 1]bool
     it := hm.iterator_make(&w.entities)
     for e, _ in hm.iterate(&it) {
@@ -113,7 +214,7 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     }
     b.lights = lights[:]
     b.light_shadow = shadows[:]
-    b.light_layer = make([]u8, len(lights), context.temp_allocator)
+    b.light_layer = make([]u8, len(lights), alloc)
     for g, i in groups do b.light_layer[i] = group_layer[g]
     stats.lights, stats.layers = len(lights), b.layers
     if set.sky {
@@ -121,7 +222,7 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
         b.sky = w.settings.background * set.sky_intensity
         if image, found := render_sky_image(w.settings.sky); found {
             sky := w.settings.sky
-            b.sky_table = bake_sky_table(asset_system.images[image], max(sky.intensity, 0) * set.sky_intensity)
+            b.sky_table = bake_sky_table(asset_system.images[image], max(sky.intensity, 0) * set.sky_intensity, alloc)
             b.sky_turn  = sky.rotation / 360
         }
     }
@@ -134,7 +235,7 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
         lo, hi = set.bounds_min, set.bounds_max
         if hi.x <= lo.x || hi.y <= lo.y || hi.z <= lo.z {
             log.errorf("Bake '%v': the manual grid box is empty (max must be above min on every axis)", w.title)
-            return
+            return false
         }
     }
     dims: [3]i32
@@ -143,15 +244,15 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     stats.dims = dims
     if count > MAX_PROBES {
         log.errorf("Bake '%v': %v × %v × %v = %v probes is over MAX_PROBES (%v); raise the probe spacing", w.title, dims.x, dims.y, dims.z, count, MAX_PROBES)
-        return
+        return false
     }
 
     // Fibonacci sphere: even coverage, no clumping, no randomness.
     GOLDEN_ANGLE :: math.PI * (3 - 2.2360679775)   // π(3 − √5)
     rays := int(clamp(set.rays, BAKE_RAYS_MIN, BAKE_RAYS_MAX))
-    bounces := int(clamp(set.bounces, 1, BAKE_BOUNCES_MAX))
-    b.dirs  = make([]vec3, rays, context.temp_allocator)
-    b.basis = make([][9]f32, rays, context.temp_allocator)
+    j.bounces = int(clamp(set.bounces, 1, BAKE_BOUNCES_MAX))
+    b.dirs  = make([]vec3, rays, alloc)
+    b.basis = make([][9]f32, rays, alloc)
     for k in 0..<rays {
         z := 1 - (2 * f32(k) + 1) / f32(rays)
         r := math.sqrt(1 - z * z)
@@ -161,25 +262,70 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     }
 
     b.prev = Probe_Grid{origin = lo, spacing = spacing, dims = dims, layers = i32(b.layers), layer_group = layer_group,
-        probes = make([]Probe_SH, count * b.layers, context.temp_allocator)}
-    b.out  = make([]Probe_SH, count * b.layers, context.temp_allocator)
-    b.back = make([]u32, count, context.temp_allocator)
-    b.depth = make([]Probe_Depth, count, context.temp_allocator)
+        probes = make([]Probe_SH, count * b.layers, alloc)}
+    b.out  = make([]Probe_SH, count * b.layers, alloc)
+    b.back = make([]u32, count, alloc)
+    b.depth = make([]Probe_Depth, count, alloc)
     TEXELS :: PROBE_DEPTH_RES * PROBE_DEPTH_RES
-    b.depth_weight = make([]f32, TEXELS * rays, context.temp_allocator)
+    b.depth_weight = make([]f32, TEXELS * rays, alloc)
     for t in 0..<TEXELS {
         td := probe_depth_texel_dir(t)
         for dir, k in b.dirs do b.depth_weight[t * rays + k] = math.pow(max(linalg.dot(td, dir), 0), BAKE_DEPTH_SHARPNESS)
     }
 
-    for pass in 0..<bounces {
+    return true
+}
+
+// The bake thread: the passes, each one over every probe on every core but one (the main thread's).
+@(private="file")
+bake_thread :: proc() {
+    j := &bake_job
+    b := &j.b
+    context.logger = j.logger
+    for pass in 0..<j.bounces {
         b.pass = pass
-        stats.threads = parallel_for(count, &b, bake_probe)
-        b.prev.probes, b.out = b.out, b.prev.probes   // this pass is the next one's light source
-        b.prev.depth = b.depth                        // and from pass 1 on, its lookups test visibility
-        log.infof("Bake '%v': pass %v/%v done (%.1f s)", w.title, pass + 1, bounces, time.duration_seconds(time.tick_since(start)))
+        j.stats.threads = parallel_for(probe_count(&b.prev), b, bake_probe, spare_cores = 1)
+        if sync.atomic_load(&j.cancel) do return   // the pass is incomplete: dropped
+        {
+            sync.guard(&j.lock)
+            b.prev.probes, b.out = b.out, b.prev.probes   // this pass is the next one's light source
+            b.prev.depth = b.depth                        // and from pass 1 on, its lookups test visibility
+            sync.atomic_add(&j.passes, 1)
+        }
+        log.infof("Bake: pass %v/%v done (%.1f s)", pass + 1, j.bounces, time.duration_seconds(time.tick_since(j.start)))
     }
-    stats.rays = count * rays * bounces
+}
+
+// A pass finished since the last one shown: it replaces the grid on screen.
+@(private="file")
+bake_show_pass :: proc() {
+    j := &bake_job
+    sync.guard(&j.lock)
+    if j.passes == j.shown do return
+    j.shown = j.passes
+    g := &j.b.prev
+    probe_grid_set(j.world, g.origin, g.spacing, g.dims, g.layer_group[:g.layers], g.probes, g.depth)
+    world_render_probes_recreate(j.world)
+}
+
+// Waits for the bake thread, shows its last pass, saves the grid and frees the bake. ok = false when no
+// pass finished (cancelled during the first): the grid is as it was.
+@(private="file")
+bake_finish :: proc() -> (stats: Bake_Stats, ok: bool) {
+    j := &bake_job
+    thread.join(j.thread)
+    w, b := j.world, &j.b
+    defer bake_free()
+    stats = j.stats
+    stats.bounces, stats.cancelled = j.passes, j.passes < j.bounces
+    if j.passes == 0 {
+        log.infof("Bake '%v': cancelled before the first pass finished; the probes are as they were", w.title)
+        return
+    }
+    bake_show_pass()
+
+    count, rays := probe_count(&b.prev), len(b.dirs)
+    stats.rays = count * rays * j.passes
 
     total_back := 0
     for n in b.back {
@@ -188,8 +334,6 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
     }
     stats.backface = f32(total_back) / f32(count * rays)
 
-    probe_grid_set(w, lo, spacing, dims, layer_group[:b.layers], b.prev.probes, b.depth)
-    world_render_probes_recreate(w)
     if w.save_path != "" {
         path := probes_path(w.save_path)
         if probe_grid_save(&w.probes, path) do log.infof("Saved probes '%v'", path)
@@ -197,17 +341,28 @@ bake_probes :: proc(w: ^World) -> (stats: Bake_Stats, ok: bool) {
         log.warnf("Bake '%v': no level file to save the probes beside (a kit); they last until it closes", w.title)
     }
 
-    stats.seconds = time.duration_seconds(time.tick_since(start))
-    log.infof("Bake '%v': %v × %v × %v probes × %v layers, %v instances, %v lights, %v threads, %.1f s (%.2f M rays/s); back faces %.1f%%, %v buried",
-        w.title, dims.x, dims.y, dims.z, b.layers, stats.instances, stats.lights, stats.threads, stats.seconds,
+    stats.seconds = time.duration_seconds(time.tick_since(j.start))
+    dims := stats.dims
+    log.infof("Bake '%v': %v × %v × %v probes × %v layers, %v/%v bounces, %v instances, %v lights, %v threads, %.1f s (%.2f M rays/s); back faces %.1f%%, %v buried",
+        w.title, dims.x, dims.y, dims.z, b.layers, j.passes, j.bounces, stats.instances, stats.lights, stats.threads, stats.seconds,
         f64(stats.rays) / stats.seconds / 1e6, 100 * stats.backface, stats.buried)
+    bake_last = {w, stats}
     return stats, true
+}
+
+// Ends the bake (cancelled if still running): joins its thread and frees its arena. Nothing is shown or saved.
+@(private="file")
+bake_free :: proc() {
+    bake_cancel()
+    thread.destroy(bake_job.thread)   // joins
+    vmem.arena_destroy(&bake_job.arena)
+    bake_job = {}
 }
 
 // The box an Auto bake would fill: the static geometry's bounds plus one spacing all round. Builds a
 // scene BVH in scratch, so it's for a button press, not every frame.
 bake_auto_bounds :: proc(w: ^World) -> (lo, hi: vec3, ok: bool) {
-    scene := bake_scene_bvh(w)
+    scene := bake_scene_bvh(w, context.temp_allocator)
     if len(scene.nodes) == 0 do return
     spacing := max(w.settings.bake.probe_spacing, 0.05)
     return scene.nodes[0].min - spacing, scene.nodes[0].max + spacing, true
@@ -217,6 +372,8 @@ bake_auto_bounds :: proc(w: ^World) -> (lo, hi: vec3, ok: bool) {
 // the probe's depth map and back-face count: geometry, the same every pass.
 @(private="file")
 bake_probe :: proc(data: rawptr, i: int) {
+    if sync.atomic_load_explicit(&bake_job.cancel, .Relaxed) do return
+    defer sync.atomic_add_explicit(&bake_job.done, 1, .Relaxed)
     b := (^Bake)(data)
     g := &b.prev
     x := i32(i) % g.dims.x
@@ -295,10 +452,10 @@ SKY_TABLE_W :: 32
 SKY_TABLE_H :: 16
 
 @(private="file")
-bake_sky_table :: proc(img: Image, scale: f32) -> []vec3 {
+bake_sky_table :: proc(img: Image, scale: f32, allocator: mem.Allocator) -> []vec3 {
     lut: [256]f32   // byte → linear
     for i in 0..<256 do lut[i] = img.format == .RGBA8_SRGB ? srgb_to_linear(f32(i) / 255) : f32(i) / 255
-    table := make([]vec3, SKY_TABLE_W * SKY_TABLE_H, context.temp_allocator)
+    table := make([]vec3, SKY_TABLE_W * SKY_TABLE_H, allocator)
     count := make([]f32, len(table), context.temp_allocator)
     w, h := int(img.width), int(img.height)
     for y in 0..<h do for x in 0..<w {
@@ -379,10 +536,10 @@ bake_falloff :: proc(light: ^GPU_Light, d2: f32) -> f32 {
     return 0
 }
 
-// What bake rays hit: every mesh of every entity that takes part in the bake (entity_bakes), as a temp
+// What bake rays hit: every mesh of every entity that takes part in the bake (entity_bakes), as a
 // Scene_BVH.
 @(private="file")
-bake_scene_bvh :: proc(w: ^World) -> Scene_BVH {
+bake_scene_bvh :: proc(w: ^World, allocator: mem.Allocator) -> Scene_BVH {
     instances := make([dynamic]BVH_Instance, 0, MAX_MESH_INSTANCES, context.temp_allocator)
     it := hm.iterator_make(&w.entities)
     for e, h in hm.iterate(&it) {
@@ -394,5 +551,5 @@ bake_scene_bvh :: proc(w: ^World) -> Scene_BVH {
             append(&instances, BVH_Instance{to_world = M, mesh = mesh, entity = h})
         }
     }
-    return scene_bvh_build(instances[:], context.temp_allocator)
+    return scene_bvh_build(instances[:], allocator)
 }

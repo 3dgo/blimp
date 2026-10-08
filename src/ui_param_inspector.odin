@@ -82,7 +82,8 @@ Asset_Kind :: enum { Model, Texture, Sound }
 
 // `widget:model` / `widget:texture` / `widget:sound`: a dropdown over the keys of every loaded model /
 // texture / sound clip, and none. The field ends up referencing the interned key (asset_intern), so it
-// survives an asset reload.
+// survives an asset reload. A key nothing loaded under (a file since moved or deleted) still shows,
+// in red.
 //
 // A paste button sits beside it: takes this field's value from the clipboard — the matching
 // `key = value` line of a copied entity (copy an entity in a kit, paste just its model onto another
@@ -92,7 +93,18 @@ ui_param_asset_picker :: proc(name: string, value: ^string, kind: Asset_Kind, op
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
 
-    if im.BeginCombo(fmt.ctprintf("##%s", name), fmt.ctprintf("%s", value^), {.HeightLarge}) {
+    missing := false
+    if value^ != "" {
+        switch kind {
+        case .Model:   missing = value^ not_in asset_system.models
+        case .Texture: missing = value^ not_in asset_system.image_ids
+        case .Sound:   missing = sound_system.ok && value^ not_in sound_system.clip_ids   // no audio device: nothing loaded, nothing broken
+        }
+    }
+    if missing do im.PushStyleColorImVec4(.Text, {1, 0.35, 0.3, 1})
+    open := im.BeginCombo(fmt.ctprintf("##%s", name), fmt.ctprintf("%s", value^), {.HeightLarge})
+    if missing do im.PopStyleColor()   // before the list, so only the preview is red
+    if open {
         keys := make([dynamic]string, context.temp_allocator)   // gathered only while the dropdown is open
         switch kind {
         case .Model:   for key in asset_system.models    do append(&keys, key)

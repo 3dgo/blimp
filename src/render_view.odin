@@ -143,6 +143,7 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         scene_size             = {f32(view.target.scene_width), f32(view.target.scene_height)},
         vertex_snap            = r.vertex_snap ? {f32(view.target.scene_width), f32(view.target.scene_height)} / (2 * max(r.snap, 0.1)) : {},
         affine                 = r.affine ? clamp(r.warp, 0, 1) : 0,
+        texel_lighting         = u32(r.texel_lighting),
 
         shadow_map_slot         = world.render.shadow_map_srv.heap_slot,
         shadow_view_buffer_slot = world.render.shadow_views_srv[frame_slot].heap_slot,

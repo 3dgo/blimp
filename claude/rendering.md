@@ -280,16 +280,23 @@ is worth more than a 100× speedup.
   π**, so the shader's indirect is `albedo × max(0, sh_eval(N))` — the same no-1/π convention as
   direct, so what's lit on screen is exactly what bounces.
 - Front faces: `cross(v1 − v0, v2 − v0)` points out (clockwise front, left-handed).
-- **Threads**: each pass is a `parallel_for` (`basics.odin`) over probes on every core: `core:thread`
-  workers claim chunks off one atomic counter; each probe writes only its own slot, and the body
-  never allocates or logs.
+- **Threads**: a bake runs on its own thread, one at a time (`bake_job`), so the editor keeps running.
+  `bake_start` snapshots everything the trace reads (scene BVH, lights, sky table, rays) into the bake's
+  own arena, freed when it ends; past that the trace reads only assets, so asset hot reload waits for it.
+  Each pass is a `parallel_for` (`basics.odin`) over probes on every core but one: `core:thread` workers
+  claim chunks off one atomic counter; each probe writes only its own slot, and the body never allocates
+  or logs. Progress is an atomic count of probes traced.
+- **Per pass on screen**: a finished pass is a whole grid (that many bounces), so `bake_update`, at frame
+  start, copies it into the world's grid and GPU buffer; mid-pass data is never shown. **Cancel** drops
+  the unfinished pass and finishes with the passes done (shown, saved); cancelled during the first, the
+  old grid stays. Closing the level cancels its bake without saving. blimpctl `bake` waits for the end.
 - **Albedo**: `asset_system.material_albedo`, computed at load, kept beside `Material` (whose
   layout is the GPU's).
 - **Storage**: the level's binary sidecar `foo.level` → `foo.probes` (version 3: header with the layer → light-group map, then each layer's `Probe_SH`, then one `Probe_Depth` per probe; an older version is refused, rebake),
   written by the bake and read by `scene_load`. A bake is **not an edit**: no undo step, nothing
   unsaved. The grid has its own arena (`Probe_Grid.arena`), freed whole on rebake. A play world
   lights with its level's grid. The GPU copy is one buffer per world, replaced after
-  `renderer_dx_wait_idle`, so bakes run outside the frame (UI or remote).
+  `renderer_dx_wait_idle`, so passes land at frame start (`bake_update`).
 - **Shader**: `Probe { float c[27]; float _pad; }` (112 B, a float array so structured-buffer
   layout can't differ from Odin), manual 8-tap trilinear (`probe_irradiance`) — manual so the
   Chebyshev weight can fold into each corner. No grid → flat `AMBIENT`.
@@ -445,8 +452,17 @@ whose edits go with it at Stop, like every other setting. An effect that's off g
 and is skipped; `warp` and `dither` are clamped to 0..1 and `color_bits` to 2..8 where they're read.
 
 - Low resolution (`lines`: the whole-number scale closest to it), vertex jitter (grid in scene
-  pixels), affine textures (warp), point sampling, colour depth (bits per channel + Bayer dither
-  strength).
+  pixels), affine textures (warp), texel lighting, point sampling, colour depth (bits per channel +
+  Bayer dither strength).
+- **Texel lighting** (`texel_snap`, scene.slang) is a modifier on every shading model, not a model of its
+  own: before `shade()`, the pixel's position and normal move to the centre of its colour-texture texel
+  (via the UV and position derivatives: exact inside a triangle), so direct light, shadow edges and falloff
+  step per texel. The texel is at the sampled mip (coarser far away, no shimmer); snapped with the
+  perspective-correct `uv0` even under affine warp; skipped for a solid-colour (1×1) texture and wherever a texel is wider than 32 scene pixels
+  (`TEXEL_SNAP_MAX_PIXELS`): a palette-atlas kit (each face in one swatch, like castle's `colormap.png`) gets
+  no snap, since its near-zero UV derivatives would light each quad from an arbitrary point. Flat's face
+  normal is taken before the snap, since it comes from the position's derivatives. A texel cut by a
+  triangle edge is lit from each side's plane (a seam on curved low-poly meshes, accepted).
 
 Passes (`render_post.odin`): signal (scene size: tonemap + quantize/dither) → upscale (display size,
 point-sampled). A clean view runs the signal pass alone, straight into the display target.

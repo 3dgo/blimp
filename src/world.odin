@@ -110,6 +110,7 @@ Retro_Settings :: struct {
     snap:           f32  `loc:Retro_Snap`,           // the vertex grid, in scene pixels: 1 = whole pixels, more = coarser jitter
     affine:         bool `loc:Retro_Affine`,
     warp:           f32  `loc:Retro_Warp`,           // 0..1: 1 = the full PS1 affine mapping, lower softens it on big polygons
+    texel_lighting: bool `loc:Retro_Texel_Lighting`, // light per texel: steps aligned to the colour texture (scene.slang)
     point_sampling: bool `loc:Retro_Point_Sampling`,
     quantize:       bool `loc:Retro_Quantize`,
     color_bits:     i32  `loc:Retro_Color_Bits`,     // per channel (RETRO_COLOR_BITS_MIN..8); the PS1 had 5

@@ -120,11 +120,12 @@ Frame_Constants :: struct {
     skin_buffer_slot: u32,   // Skin_Vertex per skinned vertex (asset)
     bone_buffer_slot: u32,   // the world's skin matrices this frame (World_Render.bones)
     scene_size:       vec2,  // the scene target in pixels: scene pixel → NDC without reading a texture (view.slang)
+    texel_lighting:   u32,   // 1 = light at the centre of each colour-texture texel (Retro_Settings.texel_lighting)
 
-    _padding: [512 - 476]byte,   // CBVs come in 256-byte steps
+    _padding: [512 - 480]byte,   // CBVs come in 256-byte steps
 }
 #assert(offset_of(Frame_Constants, signal_texture_slot) == 312)
-#assert(offset_of(Frame_Constants, _padding) == 476)
+#assert(offset_of(Frame_Constants, _padding) == 480)
 #assert(offset_of(Frame_Constants, probe_layer_scale) % 16 == 0)
 #assert(MAX_PROBE_LAYERS <= 8)
 #assert(size_of(Frame_Constants) == 512)

@@ -164,6 +164,7 @@ app_run :: proc() {
         }
 
         app_process_closes()   // closes requested last frame, before anything this frame can reference them
+        bake_update()          // a finished bake pass replaces its world's probes, before the UI draws their atlas
         input_update(ui.game != nil)   // before anything the game runs reads it; live only in game mode
         lua_update(timer_game_delta_sec())
         world_play_tick(timer_game_delta_sec())     // which play worlds advance this frame (pause / F10 step), and their clocks

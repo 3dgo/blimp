@@ -1,7 +1,7 @@
 [world]
 background = 0.35733813, 0.41481224, 0.587234
 exposure = 0
-fog.color = 0.14988607, 0.3403523, 0.4096044
+fog.color = 0.16767539, 0.33829802, 0.39819583
 fog.lit = 1
 fog.distance_fog = false
 fog.start = 2.33
@@ -30,9 +30,9 @@ light_groups.group_3.pattern =
 light_groups.group_4.name = 
 light_groups.group_4.scale = 1
 light_groups.group_4.pattern = 
-bake.quality = High
-bake.rays = 1024
-bake.bounces = 4
+bake.quality = Medium
+bake.rays = 256
+bake.bounces = 3
 bake.sky = true
 bake.sky_intensity = 2
 bake.probe_spacing = 0.75

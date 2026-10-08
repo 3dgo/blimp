@@ -291,7 +291,7 @@ public Lighting light_surface(float3 pos, float3 N, float3 V, float shininess) {
 
 // The face's own normal at pos, from screen-space derivatives, turned toward the eye (back faces are culled,
 // so the side we see is the front).
-float3 face_normal(float3 pos) {
+public float3 face_normal(float3 pos) {
     float3 n = normalize(cross(ddx(pos), ddy(pos)));
     return dot(n, view_dir(pos)) < 0 ? -n : n;
 }
@@ -361,9 +361,10 @@ float3 shade_lambert(float3 albedo, float3 pos, float3 N) {
     return albedo * light_surface(pos, N, view_dir(pos), 0).diffuse;
 }
 
-// Lit per pixel with the face's normal, ignoring the mesh's smooth ones: faceted. Diffuse only.
-float3 shade_flat(float3 albedo, float3 pos) {
-    return albedo * light_surface(pos, face_normal(pos), view_dir(pos), 0).diffuse;
+// Lit per pixel with the face's normal (N, the caller's face_normal), ignoring the mesh's smooth ones:
+// faceted. Diffuse only.
+float3 shade_flat(float3 albedo, float3 pos, float3 N) {
+    return albedo * light_surface(pos, N, view_dir(pos), 0).diffuse;
 }
 
 // Lit per pixel, with a highlight.
@@ -372,14 +373,14 @@ float3 shade_phong(float3 albedo, float3 pos, float3 N) {
     return albedo * l.diffuse + l.specular;
 }
 
-// The surface colour at pos, by shading model (SHADING_*). N is the interpolated normal, v what
-// vertex_lighting gave for this model. `shading` is per draw, so the branch is uniform (Flat's derivatives
-// are fine inside it).
+// The surface colour at pos, by shading model (SHADING_*). N is the interpolated normal, or for Flat the
+// face's (face_normal, taken by the caller before any texel snap moves pos); v what vertex_lighting gave for
+// this model. `shading` is per draw, so the branch is uniform.
 public float3 shade(uint shading, float3 albedo, float3 pos, float3 N, VertexLight v) {
     switch (shading) {
     case SHADING_UNLIT:   return shade_unlit(albedo);
     case SHADING_GOURAUD: return shade_gouraud(albedo, pos, N, v);
-    case SHADING_FLAT:    return shade_flat(albedo, pos);
+    case SHADING_FLAT:    return shade_flat(albedo, pos, N);
     case SHADING_PHONG:   return shade_phong(albedo, pos, N);
     default:              return shade_lambert(albedo, pos, N);
     }

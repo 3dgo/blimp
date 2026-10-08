@@ -71,7 +71,8 @@ hot_reload_update :: proc() {
     pending := h.assets || h.shaders || h.sounds || len(h.scripts) > 0 || len(h.luacn) > 0
     if !pending || timer_sec_since_init() - h.last_event < HOT_RELOAD_SETTLE_SEC do return
 
-    if h.assets {
+    // Held while a probe bake runs: its thread reads the meshes, their BVHs and the material albedo.
+    if h.assets && bake_running() == nil {
         h.assets = false
         log.info("Hot reload: assets")
         app_reload_assets()

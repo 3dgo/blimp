@@ -113,6 +113,7 @@ app_process_closes :: proc() {
 
     for w in pending_close_worlds {
         app_world_runtime_stop(w)
+        bake_forget(w)         // its bake stops before the world goes: its passes would land in it
         undo_forget_world(w)   // no undo entry may outlive its world
         ui_forget_world(w)
         editor_world_forget(w)

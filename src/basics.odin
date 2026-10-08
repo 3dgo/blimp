@@ -142,10 +142,11 @@ Parallel_Job :: struct {
 // per core, this one included, each claiming PARALLEL_CHUNK indices at a time off a shared counter, so
 // uneven work (a probe near many lights) doesn't leave cores idle. Threads start and stop per call.
 // Workers run with a fresh context — their own temp allocator, no logger — so body shouldn't log or
-// touch the caller's allocators. Returns the thread count.
-parallel_for :: proc(count: int, data: rawptr, body: proc(data: rawptr, i: int)) -> (threads: int) {
+// touch the caller's allocators. `spare_cores` leaves that many cores to other threads (a background
+// caller leaves the main thread one). Returns the thread count.
+parallel_for :: proc(count: int, data: rawptr, body: proc(data: rawptr, i: int), spare_cores := 0) -> (threads: int) {
     job := Parallel_Job{count = count, data = data, body = body}
-    threads = max(os.get_processor_core_count(), 1)
+    threads = max(os.get_processor_core_count() - spare_cores, 1)
     workers := make([]^thread.Thread, threads - 1, context.temp_allocator)
     for &t in workers do t = thread.create_and_start_with_poly_data(&job, parallel_worker)
     parallel_worker(&job)

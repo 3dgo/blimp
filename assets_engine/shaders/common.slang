@@ -65,6 +65,7 @@ public struct FrameConstants {
     public uint     skinBufferSlot;   // SkinVertex per skinned vertex (Mesh.skinOffset)
     public uint     boneBufferSlot;   // the world's skin matrices this frame (MeshInstance.boneOffset)
     public float2   sceneSize;        // the scene target in pixels (view.slang: scene_ndc)
+    public uint     texelLighting;    // 1 = light at the centre of each colour-texture texel (scene.slang: texel_snap)
 }
 
 public ConstantBuffer<FrameConstants> gFrame : register(b0, space0);

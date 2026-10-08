@@ -129,6 +129,42 @@ static const float CUTOUT_ALPHA = 0.5;   // a Cutout surface's pixels below this
 
 // The colour of one pixel of a surface: its albedo, lit by its shading model (shading.slang). `cutout` and
 // `blended` are the entity's blend (EntityBlend), fixed per entry point below.
+// Texel-snapped lighting (Retro_Settings.texel_lighting): moves the point that's lit, and its normal, to the
+// centre of the colour-texture texel `uv` falls in, so light changes in steps aligned to the texture. Exact
+// inside a triangle: position, normal and UV all vary linearly across it, so the screen-space derivatives
+// turn a step in UV into a step in position. A texel cut by an edge is lit on each side from the plane of
+// that side's triangle. The texel is the one at the mip the sampler picks, so far surfaces snap coarser
+// instead of shimmering. Snap with perspective-correct UVs (uv0): position only follows those.
+// A texel wider than TEXEL_SNAP_MAX_PIXELS on screen isn't a texel the eye reads as one but a palette swatch
+// (a kit whose faces each sit in one colour of an atlas) or squashed UVs: no snap, since the step there is
+// near-zero over near-zero and would light each quad from somewhere arbitrary.
+static const float TEXEL_SNAP_MAX_PIXELS = 32;
+
+void texel_snap(Texture2D<float4> tex, SamplerState samp, float2 uv, inout float3 pos, inout float3 N) {
+    // Every derivative first, while the whole quad is still here.
+    float2 uvX = ddx(uv), uvY = ddy(uv);
+    float3 posX = ddx(pos), posY = ddy(pos);
+    float3 nX = ddx(N), nY = ddy(N);
+
+    float2 size;
+    tex.GetDimensions(size.x, size.y);
+    if (all(size <= 1)) return;   // a solid colour (no texture): no texels to snap to
+    float lod = round(tex.CalculateLevelOfDetail(samp, uv));
+    size = max(floor(size / exp2(lod)), 1);
+    float2 t = uv * size;
+    float2 dUV = (floor(t) + 0.5 - t) / size;   // to the texel centre
+
+    // The screen step s with uvX * s.x + uvY * s.y = dUV, by the inverse of [uvX uvY]. Its columns over det,
+    // scaled to one texel, are a texel's extent in scene pixels along u and v; compared times |det| so no
+    // UVs at all (det 0) skips too.
+    float det = uvX.x * uvY.y - uvX.y * uvY.x;
+    float texelPixels = max(length(float2(uvY.y, -uvX.y)) / size.x, length(float2(-uvY.x, uvX.x)) / size.y);
+    if (texelPixels >= TEXEL_SNAP_MAX_PIXELS * abs(det)) return;
+    float2 s = float2(uvY.y * dUV.x - uvY.x * dUV.y, uvX.x * dUV.y - uvX.y * dUV.x) / det;
+    pos += posX * s.x + posY * s.y;
+    N = normalize(N + nX * s.x + nY * s.y);
+}
+
 float4 shade_pixel(VSOut input, bool cutout, bool blended) {
     StructuredBuffer<Material> materialBuffer = DescriptorHandle<StructuredBuffer<Material>>(gFrame.materialBufferSlot);
     Material material = materialBuffer[input.material];
@@ -138,6 +174,11 @@ float4 shade_pixel(VSOut input, bool cutout, bool blended) {
     SamplerState samp = getSampler(gFrame.samplerSlot);
     float2 uv = lerp(input.uv0, input.uvAffine, gFrame.affine);
     float4 albedo = tex.Sample(samp, uv) * material.color * input.color;
+
+    // Flat's face normal comes from the position's derivatives, so before any snap moves it.
+    float3 pos = input.worldPos;
+    float3 N = input.shading == SHADING_FLAT ? face_normal(pos) : normalize(input.normal);   // interpolation de-normalizes it
+    if (gFrame.texelLighting != 0) texel_snap(tex, samp, input.uv0, pos, N);
     if (cutout && albedo.a < CUTOUT_ALPHA) discard;
 
     // The lighting debug views that show light alone light a white surface (Lighting_View in render_view.odin).
@@ -151,8 +192,7 @@ float4 shade_pixel(VSOut input, bool cutout, bool blended) {
     vertexLight.shadowed[2] = input.vertexShadowed2;
     vertexLight.shadowed[3] = input.vertexShadowed3;
     vertexLight.shadowLight = input.vertexShadowLight;
-    float3 N = normalize(input.normal);   // interpolation de-normalizes it
-    float3 lit = shade(input.shading, albedo.rgb, input.worldPos, N, vertexLight);
+    float3 lit = shade(input.shading, albedo.rgb, pos, N, vertexLight);
     // Alpha 1 = scene coverage: the post pass leaves alpha-0 (background) pixels alone. A blended surface's
     // alpha is its blend weight instead (dx.Blend_Mode), which keeps the coverage of what it's over.
     return float4(lit, blended ? albedo.a : 1);
