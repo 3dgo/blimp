@@ -410,15 +410,17 @@ lags; this has no history and reacts the same frame. A learning walkthrough of h
 
 ### Retro look
 
-Art-directed per level: `World_Settings.retro` (`Retro_Settings`, saved as `retro.*` keys, undoable),
-edited in the Retro Look window (`ui_retro.odin`, the tune button beside the retro toggle, which
-flips the view between `.Retro` and `.Clean`). One group, PS1, with its own `on`; every effect has
-its switch and its amounts. A view reads the settings of the world it shows (`render_view_retro`): during
-play that's the play copy, whose edits go with it at Stop, like every other setting. An effect that's off goes to the shader as 0 and is skipped.
+Art-directed per level: `World_Settings.retro` (`Retro_Settings`), a plain world setting like fog:
+saved as `retro.*` keys, undoable, drawn by the reflection inspector as the Retro Look section of
+World Settings. Every effect has its switch and its amounts; there is no master switch in the
+settings, the viewport toolbar's retro toggle (`.Retro` / `.Clean`, per view) is the quick on/off. A
+view reads the settings of the world it shows (`render_view_retro`): during play that's the play copy,
+whose edits go with it at Stop, like every other setting. An effect that's off goes to the shader as 0
+and is skipped; `warp` and `dither` are clamped to 0..1 and `color_bits` to 2..8 where they're read.
 
-- **PS1**: low resolution (`lines`: the whole-number scale closest to it), vertex jitter (grid in
-  scene pixels), affine textures (warp), point sampling, colour depth (bits per channel + Bayer
-  dither strength).
+- Low resolution (`lines`: the whole-number scale closest to it), vertex jitter (grid in scene
+  pixels), affine textures (warp), point sampling, colour depth (bits per channel + Bayer dither
+  strength).
 
 Passes (`render_post.odin`): signal (scene size: tonemap + quantize/dither) → upscale (display size,
 point-sampled). A clean view runs the signal pass alone, straight into the display target.

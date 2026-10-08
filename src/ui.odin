@@ -134,7 +134,7 @@ ui_label_column :: proc(labels: []Loc_ID) -> (x: f32) {
     return x + UI_LABEL_GAP * app.display_scale
 }
 
-// A window showing one world's settings (World Settings, Retro Look, Bake): which world, and whether an
+// A window showing one world's settings (World Settings, Bake): which world, and whether an
 // edit's undo step is open. Each window keeps one; these procs are the whole protocol.
 Settings_Window :: struct {
     world:   ^World,   // whose settings are shown; nil = window closed
@@ -173,7 +173,6 @@ settings_window_track_edit :: proc(win: ^Settings_Window, before: World_Settings
 ui_retarget_world :: proc(from, to: ^World) {
     ui_entity_panels_retarget(from, to)
     ui_world_settings_retarget(from, to)
-    ui_retro_retarget(from, to)
     ui_context_menu_forget(from, nil)
     for v in views do if v.world == to {
         ev := editor_view(v)
@@ -187,7 +186,6 @@ ui_forget_world :: proc(w: ^World) {
     ui_entity_panels_forget(w)
     ui_world_settings_forget(w)
     ui_bake_forget(w)
-    ui_retro_forget(w)
     ui_context_menu_forget(w, nil)
     ui_unsaved_forget_world(w)
 }
@@ -251,7 +249,6 @@ ui_update :: proc() {
     ui_draw_entity_panels()
     ui_draw_world_settings()
     ui_draw_bake()
-    ui_draw_retro()
     ui_draw_game_settings()
     ui_draw_unsaved_prompt()   // the modal, if a close or quit is waiting on Save / Don't Save / Cancel
 

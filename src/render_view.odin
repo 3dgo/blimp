@@ -50,21 +50,18 @@ Render_Mode :: enum u8 { Retro, Clean }
 //   Lighting_Only — direct + indirect on white
 Lighting_View :: enum u32 { Lit, Probes_Only, Indirect_Only, Direct_Only, Lighting_Only }
 
-// The retro effects this view shows: its world's settings, like every other setting, zeroed when they're
-// off or in .Clean.
-render_view_retro :: proc(view: ^Render_View) -> (ps1: Retro_PS1) {
-    if view.mode == .Clean do return
-    r := view.world.settings.retro
-    if r.ps1.on do ps1 = r.ps1
-    return
+// The retro effects this view shows: its world's settings, like every other setting; all off in .Clean.
+render_view_retro :: proc(view: ^Render_View) -> Retro_Settings {
+    if view.mode == .Clean do return {}
+    return view.world.settings.retro
 }
 
 // Display pixels per scene pixel for a view of display size `size`: with low resolution on, the whole
 // number that brings its height closest to the retro `lines` (never below 1); else 1.
 render_view_scene_scale :: proc(view: ^Render_View, size: uvec2) -> u32 {
-    ps1 := render_view_retro(view)
-    if !ps1.low_res do return 1
-    return max(1, u32(math.round(f32(size.y) / f32(max(ps1.lines, 1)))))
+    r := render_view_retro(view)
+    if !r.low_res do return 1
+    return max(1, u32(math.round(f32(size.y) / f32(max(r.lines, 1)))))
 }
 
 render_view_create :: proc(view: ^Render_View, world: ^World, camera: Camera, width, height: u32) {
@@ -114,8 +111,8 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
     world  := view.world
     aspect := f32(view.target.width) / f32(view.target.height)
     scale  := max(view.target.scene_scale, 1)
-    ps1 := render_view_retro(view)
-    bits := clamp(ps1.color_bits, RETRO_COLOR_BITS_MIN, 8)
+    r := render_view_retro(view)
+    bits := clamp(r.color_bits, RETRO_COLOR_BITS_MIN, 8)
 
     frame_constants := Frame_Constants{
         view_mat              = camera_view(view.camera),
@@ -133,24 +130,24 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         skin_buffer_slot      = asset_buffers.skin_buffer.resource_view.heap_slot,
         bone_buffer_slot      = world.render.bones[frame_slot].resource_view.heap_slot,
         material_buffer_slot  = asset_buffers.material_buffer.resource_view.heap_slot,
-        sampler_slot          = ps1.point_sampling ? asset_buffers.sampler_point.heap_slot : asset_buffers.sampler.heap_slot,
+        sampler_slot          = r.point_sampling ? asset_buffers.sampler_point.heap_slot : asset_buffers.sampler.heap_slot,
 
         debug_line_buffer_slot = debug_draw.buffer_srv[frame_slot].heap_slot,
         hdr_texture_slot       = view.target.hdr_srv.heap_slot,
         exposure               = math.pow(2, world.settings.exposure),
         depth_texture_slot     = view.target.depth_srv.heap_slot,
         scene_scale            = scale,
-        color_levels           = ps1.quantize ? f32(u32(1) << u32(bits) - 1) : 0,
+        color_levels           = r.quantize ? f32(u32(1) << u32(bits) - 1) : 0,
         scene_cover            = {f32(view.target.width)  / f32(scale * view.target.scene_width),
                                   f32(view.target.height) / f32(scale * view.target.scene_height)},
-        vertex_snap            = ps1.vertex_snap ? {f32(view.target.scene_width), f32(view.target.scene_height)} / (2 * max(ps1.snap, 0.1)) : {},
-        affine                 = ps1.affine ? ps1.warp : 0,
+        vertex_snap            = r.vertex_snap ? {f32(view.target.scene_width), f32(view.target.scene_height)} / (2 * max(r.snap, 0.1)) : {},
+        affine                 = r.affine ? clamp(r.warp, 0, 1) : 0,
 
         shadow_map_slot         = world.render.shadow_map_srv.heap_slot,
         shadow_view_buffer_slot = world.render.shadow_views_srv[frame_slot].heap_slot,
 
         signal_texture_slot    = view.target.signal_srv.heap_slot,
-        dither                 = ps1.dither,
+        dither                 = clamp(r.dither, 0, 1),
     }
     // A play world lights with its level's probes (it has none of its own).
     frame_constants.lighting_view  = u32(view.lighting)

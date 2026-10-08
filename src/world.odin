@@ -56,7 +56,7 @@ World_Settings :: struct {
     light_groups: Light_Groups `loc:World_Light_Groups`,   // where the switchable light groups start (world_light_groups.odin)
     bake:       Bake_Settings `hidden`,   // saved as bake.* keys; edited in the Bake window (ui_bake.odin), not this one
     anim_fps:   i32 `loc:World_Anim_Fps`,   // poses update this many times a second, PS1-style stepped motion; 0 = every frame (world_anim.odin)
-    retro:      Retro_Settings `hidden`,  // saved as retro.* keys; edited in the Retro Look window (ui_retro.odin)
+    retro:      Retro_Settings `loc:World_Retro`,   // the PS1 look of views in render mode .Retro
 }
 
 // Fog (claude/rendering.md → Fog), in the post signal pass before the tonemap, so it gets exposure, the
@@ -85,32 +85,22 @@ Fog_Settings :: struct {
 }
 
 // The retro look (claude/rendering.md → Retro look): what a view in render mode .Retro does, effect by
-// effect. A view reads the settings of the world it shows (during play the play copy). Each effect has its switch
-// and its amounts; a group's `on` switches all of its effects. Drawn by hand in the Retro Look window.
+// effect, each with its switch and its amounts. A view reads the settings of the world it shows (during play the
+// play copy). The viewport toolbar's retro toggle turns all of it off for one view (.Clean).
 Retro_Settings :: struct {
-    ps1: Retro_PS1,
-}
-
-Retro_PS1 :: struct {
-    on:             bool,
-    low_res:        bool,
-    lines:          i32,    // the scene height to aim for: it upscales by the whole number that comes closest
-    vertex_snap:    bool,
-    snap:           f32,    // the vertex grid, in scene pixels: 1 = whole pixels, more = coarser jitter
-    affine:         bool,
-    warp:           f32,    // 1 = the full PS1 affine mapping, lower softens it on big polygons
-    point_sampling: bool,
-    quantize:       bool,
-    color_bits:     i32,    // per channel (RETRO_COLOR_BITS_MIN..8); the PS1 had 5
-    dither:         f32,    // 4x4 Bayer dither: 0 = plain banding, 1 = full
+    low_res:        bool `loc:Retro_Low_Res`,
+    lines:          i32  `loc:Retro_Lines`,          // the scene height to aim for: it upscales by the whole number that comes closest
+    vertex_snap:    bool `loc:Retro_Vertex_Snap`,
+    snap:           f32  `loc:Retro_Snap`,           // the vertex grid, in scene pixels: 1 = whole pixels, more = coarser jitter
+    affine:         bool `loc:Retro_Affine`,
+    warp:           f32  `loc:Retro_Warp`,           // 0..1: 1 = the full PS1 affine mapping, lower softens it on big polygons
+    point_sampling: bool `loc:Retro_Point_Sampling`,
+    quantize:       bool `loc:Retro_Quantize`,
+    color_bits:     i32  `loc:Retro_Color_Bits`,     // per channel (RETRO_COLOR_BITS_MIN..8); the PS1 had 5
+    dither:         f32  `loc:Retro_Dither`,         // 0..1, 4x4 Bayer: 0 = plain banding, 1 = full
 }
 
 RETRO_COLOR_BITS_MIN :: 2
-
-RETRO_SETTINGS_DEFAULT :: Retro_Settings{
-    ps1 = {on = true, low_res = true, lines = 216, vertex_snap = true, snap = 1, affine = true, warp = 1,
-           point_sampling = true, quantize = true, color_bits = 5, dither = 1},
-}
 
 // The probe bake's inputs (editor_bake.odin, claude/rendering.md → Baker). Read by the baker only: a change
 // shows after the next bake. Drawn by hand in the Bake window (ui_bake.odin), not by the reflection inspector.
@@ -143,7 +133,8 @@ WORLD_SETTINGS_DEFAULT :: World_Settings{
     fog          = {start = 20, end = 60, color = {0.2, 0.2, 0.2}, density = 0.1, falloff = 2, height_color = {0.2, 0.2, 0.2}, glow = 0.05},
     bake         = {quality = .Medium, rays = 256, bounces = 3, sky = true,sky_intensity = 1, probe_spacing = 1},
     light_groups = {group_1 = {scale = 1}, group_2 = {scale = 1}, group_3 = {scale = 1}, group_4 = {scale = 1}},
-    retro        = RETRO_SETTINGS_DEFAULT,
+    retro        = {low_res = true, lines = 216, vertex_snap = true, snap = 1, affine = true, warp = 1,
+                    point_sampling = true, quantize = true, color_bits = 5, dither = 1},
 }
 
 world_init :: proc(world: ^World) {

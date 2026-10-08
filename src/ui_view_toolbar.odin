@@ -68,10 +68,6 @@ ui_view_toolbar :: proc(view: ^Render_View) {
     if toggle_button(fmt.ctprintf("%s##retro", ICON_RETRO), view.mode == .Retro) do view.mode = view.mode == .Retro ? .Clean : .Retro
     im.SetItemTooltip("%s", tr(.Tool_Retro_Look))
     im.SameLine()
-    // What the retro look does, effect by effect (ui_retro.odin): the shown world's, like World Settings.
-    if toggle_button(fmt.ctprintf("%s##retro_settings", ICON_RETRO_SETTINGS), ui_retro_open_for(w)) do ui_retro_toggle(w)
-    im.SetItemTooltip("%s", tr(.Win_Retro))
-    im.SameLine()
     ui_view_lighting_menu(view)
     im.SameLine()
     // The probe bake of the level (ui_bake.odin), its own window like World Settings.

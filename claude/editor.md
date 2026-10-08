@@ -167,15 +167,14 @@
   - **During play, settings windows edit the world the view shows** — the play copy, whose edits go with
     it at Stop, like entity edits. The renderer reads every setting from the world it shows. The Probe
     Bake window is the exception: probes are level data, so it always targets the level.
-  - The three settings windows (World Settings, Retro Look, Probe Bake) share `Settings_Window` (`ui.odin`):
+  - The two settings windows (World Settings, Probe Bake) share `Settings_Window` (`ui.odin`):
     the target world, toggle/retarget/forget, and `settings_window_track_edit` for after-the-fact undo.
   - The code button beside the gear opens the script in VS Code (`CODE_EDITOR`, `cmd /c <cli> <project> -g <script>`):
     the project's window if one is open, else a new one on the project folder. A `.lua` built from a
     `.luacn` opens the `.luacn`.
 - **Retro toggle** (grain icon on the viewport toolbar) flips that view's `Render_Mode` between the
   retro look and a clean full-res render (`claude/rendering.md` → Retro look). Per view, not saved,
-  not undoable. Beside it, the tune icon opens the Retro Look window: the shown world's effect settings,
-  saved and undoable like World Settings.
+  not undoable. The effects themselves are the Retro Look section of World Settings.
   - Pasted text never touches them: only `scene_load` reads `[world]`.
 - **Lighting menu** (lightbulb on the viewport toolbar): that view's lighting debug view, probes on/off,
   indirect multiplier and the probe overlay, plus the world's light-group scales (runtime overrides like

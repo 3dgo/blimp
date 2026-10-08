@@ -52,7 +52,6 @@ ICON_LIGHT_SUN    :: "\uE430"   // wb_sunny
 ICON_CAMERA       :: "\uE04B"   // videocam
 ICON_GAME_VIEW    :: "\uE338"   // videogame_asset
 ICON_RETRO        :: "\uE3EA"   // grain
-ICON_RETRO_SETTINGS :: "\uE429"   // tune
 ICON_LIGHTING     :: "\uE0F0"   // lightbulb
 ICON_BAKE         :: "\uE80E"   // whatshot
 ICON_SCRIPT       :: "\uE86F"   // code

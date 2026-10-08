@@ -517,7 +517,7 @@ the shared helpers (`Settings_Window`, `ui_font_size`, `ui_label_column`, `ui_re
 - entity panels: `ui_entity_panels` (list and inspector), `ui_param_inspector` (the reflection
   inspector), `ui_context_menu` (copy, paste, duplicate, delete, hide);
 - browsers: `ui_worlds`, `ui_resources` (GPU memory treemap);
-- settings windows: `ui_world_settings`, `ui_retro`, `ui_bake`, `ui_game_settings`;
+- settings windows: `ui_world_settings`, `ui_bake`, `ui_game_settings`;
 - `ui_schema_editor`;
 - game mode: `ui_game`;
 - small pieces: `ui_shortcuts`, `ui_unsaved` (save prompt), `ui_saved_state` (layout, language, open
@@ -624,7 +624,6 @@ Fastest check: `odin check src -debug -vet -collection:lib=E:/Libraries/odin_lib
 | `ui_worlds.odin` | Worlds browser |
 | `ui_resources.odin` | GPU resources treemap |
 | `ui_world_settings.odin` | World Settings window |
-| `ui_retro.odin` | Retro Look window |
 | `ui_bake.odin` | Probe Bake window, atlas, bake box |
 | `ui_game_settings.odin` | Game Settings window |
 | `ui_schema_editor.odin` | Schema editor window |
