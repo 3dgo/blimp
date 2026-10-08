@@ -25,8 +25,8 @@ ui_draw_entity_panels :: proc(h: ^World_Host) {
 // a kit (can't be saved).
 ui_world_unsaved_note :: proc(w: ^World) {
     switch {
-    case w.play_source != nil: im.TextColored({0.45, 0.7, 1, 1}, "%s", tr(.Play_Warning))
-    case w.save_path == "":    im.TextColored({1, 0.75, 0.3, 1}, "%s", tr(.Inspector_Kit_Warning))
+    case w.play_source != nil: im.TextColored(UI_COLOR_ACCENT, "%s", tr(.Play_Warning))
+    case w.save_path == "":    im.TextColored(UI_COLOR_WARNING, "%s", tr(.Inspector_Kit_Warning))
     }
 }
 

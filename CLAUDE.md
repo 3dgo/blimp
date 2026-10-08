@@ -82,7 +82,8 @@ design notes there.
   script is running (`lua_world()`).
 - **UI text** goes through `tr(.Key)` with EN and ZH on one row in `loc.odin` (default zh). Logs,
   asserts, keys and paths stay ASCII English. Window titles end in a `###id` suffix. Every search box
-  matches through `search_matches` (`search.odin`), so Chinese is also found by pinyin.
+  matches through `search_matches` (`search.odin`), so Chinese is also found by pinyin. Panels share one
+  form look (`ui.odin`, `ui_param_*`, `UI_COLOR_*`); none rolls its own rows, headings, cards or colours.
 
 ## Build, check, verify
 

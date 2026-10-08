@@ -18,9 +18,11 @@ ENTITY_SCHEMA_PATH :: "entity_schema.ini"
 ENTITY_GEN_PATH    :: "src/gen_entity.odin"
 
 @(private = "file")
-Schema_Field :: struct { name, type, tags, section, en, zh, default, note: string }
+Schema_Field :: struct { name, type, tags, section, en, zh, tip_en, tip_zh, default, note: string, uses: [dynamic]Schema_Use }
 @(private = "file")
-Schema_Member :: struct { name, en, zh, note: string }   // enum / flags value
+Schema_Use :: struct { cond, en, zh: string }   // a `when` line and the when_en / when_zh lines under it
+@(private = "file")
+Schema_Member :: struct { name, en, zh, tip_en, tip_zh, note: string }   // enum / flags value
 @(private = "file")
 Schema_Type :: struct { name, note: string, is_flags: bool, members: [dynamic]Schema_Member }
 @(private = "file")
@@ -86,6 +88,14 @@ generate_entity :: proc() {
             case "section": f.section = strings.clone(val)
             case "en":      f.en      = strings.clone(val)
             case "zh":      f.zh      = strings.clone(val)
+            case "tip_en":  f.tip_en  = strings.clone(val)
+            case "tip_zh":  f.tip_zh  = strings.clone(val)
+            case "when":    append(&f.uses, Schema_Use{cond = strings.clone(val)})
+            case "when_en", "when_zh":
+                if len(f.uses) == 0 do _fail("field '%s': %s comes before any `when`", f.name, key)
+                u := &f.uses[len(f.uses) - 1]
+                if key == "when_en" do u.en = strings.clone(val)
+                else do u.zh = strings.clone(val)
             case "default": f.default = strings.clone(val)
             case "note":    f.note    = strings.clone(val)
             }
@@ -96,9 +106,11 @@ generate_entity :: proc() {
         case .Enum_Member:
             m := &types[len(types) - 1].members[len(types[len(types) - 1].members) - 1]
             switch key {
-            case "en":   m.en   = strings.clone(val)
-            case "zh":   m.zh   = strings.clone(val)
-            case "note": m.note = strings.clone(val)
+            case "en":     m.en     = strings.clone(val)
+            case "zh":     m.zh     = strings.clone(val)
+            case "tip_en": m.tip_en = strings.clone(val)
+            case "tip_zh": m.tip_zh = strings.clone(val)
+            case "note":   m.note   = strings.clone(val)
             }
         case .Struct_Member:
             m := &structs[len(structs) - 1].members[len(structs[len(structs) - 1].members) - 1]
@@ -173,6 +185,7 @@ generate_entity :: proc() {
 
     _emit_apply_defaults(&sb, fields[:], structs[:])
     _emit_field_labels(&sb, fields[:])
+    _emit_field_uses(&sb, fields[:])
     _emit_flag_labels(&sb, types[:])
     _emit_struct_labels(&sb, structs[:])
 
@@ -194,6 +207,107 @@ _emit_note :: proc(sb: ^strings.Builder, note, indent: string) {
         line += 1 + len(word)
     }
     fmt.sbprintln(sb)
+}
+
+// A schema error codegen can't write around: logged, and the build stops.
+@(private = "file")
+_fail :: proc(format: string, args: ..any) -> ! {
+    log.errorf("Entity codegen: %s", fmt.tprintf(format, ..args))
+    os.exit(1)
+}
+
+// Text for inside an Odin "string": backslashes and quotes escaped.
+@(private = "file")
+_odin_str :: proc(s: string) -> string {
+    t, _ := strings.replace_all(s, "\\", "\\\\", context.temp_allocator)
+    t, _ = strings.replace_all(t, "\"", "\\\"", context.temp_allocator)
+    return t
+}
+
+// ---- entity_field_uses: each field's `when` entries, the condition compiled to Odin ----
+
+@(private = "file")
+_emit_field_uses :: proc(sb: ^strings.Builder, fields: []Schema_Field) {
+    for f in fields do if len(f.uses) > 0 {
+        fmt.sbprintfln(sb, "@(private = \"file\")")
+        fmt.sbprintfln(sb, "_uses_%s := [?]Entity_Field_Use{{", f.name)
+        for u in f.uses {
+            if u.cond == "" do _fail("field '%s': an empty `when`", f.name)
+            if u.en == "" || u.zh == "" do _fail("field '%s': `when = %s` needs both when_en and when_zh", f.name, u.cond)
+            holds, names := _use_condition(fields, f.name, u.cond)
+            fmt.sbprintln(sb, "    {")
+            fmt.sbprintfln(sb, "        holds  = proc(e: ^Entity) -> bool {{ return %s }},", holds)
+            fmt.sbprintfln(sb, "        fields = {{%s}},", names)
+            fmt.sbprintfln(sb, "        cond   = \"%s\",", u.cond)
+            fmt.sbprintfln(sb, "        text   = {{.EN = \"%s\", .ZH = \"%s\"}},", _odin_str(u.en), _odin_str(u.zh))
+            fmt.sbprintln(sb, "    },")
+        }
+        fmt.sbprintln(sb, "}")
+        fmt.sbprintln(sb, "")
+    }
+    fmt.sbprintln(sb, "// A field's `when` entries (none: it always does something).")
+    fmt.sbprintln(sb, "entity_field_uses :: proc(name: string) -> []Entity_Field_Use {")
+    fmt.sbprintln(sb, "    switch name {")
+    for f in fields do if len(f.uses) > 0 do fmt.sbprintfln(sb, "    case \"%s\": return _uses_%s[:]", f.name, f.name)
+    fmt.sbprintln(sb, "    }")
+    fmt.sbprintln(sb, "    return nil")
+    fmt.sbprintln(sb, "}")
+    fmt.sbprintln(sb, "")
+}
+
+// A `when` condition as an Odin expression on `e`, plus the fields it names as a string-slice body. Terms
+// joined by `&`, each `<field>` (set: non-empty, non-zero, not the first enum member) or `<field>=<A>|<B>`
+// (an enum that is one of them, flags with one of them set). A member that doesn't exist is an Odin
+// compile error at the generated line.
+@(private = "file")
+_use_condition :: proc(fields: []Schema_Field, owner, cond: string) -> (expr: string, names: string) {
+    e, n: strings.Builder
+    strings.builder_init(&e, context.temp_allocator)
+    strings.builder_init(&n, context.temp_allocator)
+    c := cond
+    for term in strings.split_iterator(&c, "&") {
+        name, _, members := strings.partition(strings.trim_space(term), "=")
+        name, members = strings.trim_space(name), strings.trim_space(members)
+        type := ""
+        for f in fields do if f.name == name do type = f.type
+        if type == "" do _fail("field '%s': `when = %s` names no field '%s'", owner, cond, name)
+        if strings.builder_len(e) > 0 do strings.write_string(&e, " && ")
+        quoted := fmt.tprintf("\"%s\"", name)
+        if !strings.contains(strings.to_string(n), quoted) {
+            if strings.builder_len(n) > 0 do strings.write_string(&n, ", ")
+            strings.write_string(&n, quoted)
+        }
+
+        is_enum, is_flags := strings.has_prefix(type, "enum."), strings.has_prefix(type, "flags.")
+        if members != "" {
+            ms := strings.split(members, "|", context.temp_allocator)
+            for &m in ms do m = strings.trim_space(m)
+            switch {
+            case is_enum:
+                strings.write_string(&e, "(")
+                for m, i in ms do fmt.sbprintf(&e, "%se.%s == .%s", i > 0 ? " || " : "", name, m)
+                strings.write_string(&e, ")")
+            case is_flags:
+                fmt.sbprintf(&e, "card(e.%s & {{", name)
+                for m, i in ms do fmt.sbprintf(&e, "%s.%s", i > 0 ? ", " : "", m)
+                strings.write_string(&e, "}) > 0")
+            case:
+                _fail("field '%s': `when = %s`: '%s' is %s, so it takes no =members", owner, cond, name, type)
+            }
+            continue
+        }
+        switch {
+        case type == "string":                 fmt.sbprintf(&e, "e.%s != \"\"", name)
+        case strings.has_prefix(type, "sbuf"): fmt.sbprintf(&e, "sbuf_str(&e.%s) != \"\"", name)
+        case type == "bool":                   fmt.sbprintf(&e, "e.%s", name)
+        case type == "i32" || type == "u32" || type == "f32": fmt.sbprintf(&e, "e.%s != 0", name)
+        case is_enum:                          fmt.sbprintf(&e, "u64(e.%s) != 0", name)
+        case is_flags:                         fmt.sbprintf(&e, "e.%s != {{}}", name)
+        case:
+            _fail("field '%s': `when = %s`: '%s' is %s, which can't be tested bare (give it =members)", owner, cond, name, type)
+        }
+    }
+    return strings.to_string(e), strings.to_string(n)
 }
 
 // ---- entity_apply_defaults: literal assignments ----
@@ -289,6 +403,24 @@ _emit_field_labels :: proc(sb: ^strings.Builder, fields: []Schema_Field) {
     fmt.sbprintln(sb, "    return s, s != \"\"")
     fmt.sbprintln(sb, "}")
     fmt.sbprintln(sb, "")
+    // The inspector's tooltip: free text plus "@<condition>: <text>" parts, parsed by entity_tip_next.
+    fmt.sbprintln(sb, "// A field's tooltip in every language (empty where it has none); see entity_tip_next.")
+    fmt.sbprintln(sb, "entity_field_tips :: proc(name: string) -> (l: [Lang]string) {")
+    fmt.sbprintln(sb, "    switch name {")
+    for f in fields do if lit, ok := _lang_literal(_odin_str(f.tip_en), _odin_str(f.tip_zh)); ok {
+        fmt.sbprintfln(sb, "    case \"%s\": l = %s", f.name, lit)
+    }
+    fmt.sbprintln(sb, "    }")
+    fmt.sbprintln(sb, "    return")
+    fmt.sbprintln(sb, "}")
+    fmt.sbprintln(sb, "")
+    fmt.sbprintln(sb, "// A field's tooltip for the current language, else the other one's (\"\" if none).")
+    fmt.sbprintln(sb, "entity_field_tip :: proc(name: string) -> string {")
+    fmt.sbprintln(sb, "    l := entity_field_tips(name)")
+    fmt.sbprintln(sb, "    for s in ([]string{l[loc_lang], l[.EN], l[.ZH]}) do if s != \"\" do return s")
+    fmt.sbprintln(sb, "    return \"\"")
+    fmt.sbprintln(sb, "}")
+    fmt.sbprintln(sb, "")
 }
 
 @(private = "file")
@@ -310,6 +442,32 @@ _emit_flag_labels :: proc(sb: ^strings.Builder, types: []Schema_Type) {
     }
     fmt.sbprintln(sb, "    }")
     fmt.sbprintln(sb, "    return")
+    fmt.sbprintln(sb, "}")
+    fmt.sbprintln(sb, "")
+    // Member tooltips, the same way: the inspector shows them on dropdown items and flag checkboxes.
+    fmt.sbprintln(sb, "// An enum/flags member's tooltip in every language, keyed on the type name (empty where it has none).")
+    fmt.sbprintln(sb, "entity_member_tips :: proc(enum_type: string, member: string) -> (l: [Lang]string) {")
+    fmt.sbprintln(sb, "    switch enum_type {")
+    for t in types {
+        has := false
+        for m in t.members do if m.tip_en != "" || m.tip_zh != "" { has = true; break }
+        if !has do continue
+        fmt.sbprintfln(sb, "    case \"%s\":", t.name)
+        fmt.sbprintln(sb, "        switch member {")
+        for m in t.members do if lit, ok := _lang_literal(_odin_str(m.tip_en), _odin_str(m.tip_zh)); ok {
+            fmt.sbprintfln(sb, "        case \"%s\": l = %s", m.name, lit)
+        }
+        fmt.sbprintln(sb, "        }")
+    }
+    fmt.sbprintln(sb, "    }")
+    fmt.sbprintln(sb, "    return")
+    fmt.sbprintln(sb, "}")
+    fmt.sbprintln(sb, "")
+    fmt.sbprintln(sb, "// A member's tooltip for the current language, else the other one's (\"\" if none).")
+    fmt.sbprintln(sb, "entity_member_tip :: proc(enum_type: string, member: string) -> string {")
+    fmt.sbprintln(sb, "    l := entity_member_tips(enum_type, member)")
+    fmt.sbprintln(sb, "    for s in ([]string{l[loc_lang], l[.EN], l[.ZH]}) do if s != \"\" do return s")
+    fmt.sbprintln(sb, "    return \"\"")
     fmt.sbprintln(sb, "}")
     fmt.sbprintln(sb, "")
     fmt.sbprintln(sb, "// Localized enum/flags member label, keyed on the type name; ok=false if none.")

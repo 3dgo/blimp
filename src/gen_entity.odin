@@ -33,7 +33,8 @@ Entity :: struct {
     // No aspect: a camera takes it from the target it renders into, and shadow maps are square.
     camera_type: EntityCameraType `section:Camera_Light`,
     light_type: EntityLightType `section:Camera_Light`,
-    // Light colour, stored linear; the picker shows and edits it as sRGB (like Unity's).
+    // Model tint or light colour, stored linear; the picker shows and edits it as sRGB (like
+    // Unity's).
     color: vec3 `widget:linear_color, section:Render`,
     intensity: f32 `section:Render`,
     // Degrees. Perspective camera: vertical field of view. Spot light: cone angle (also its shadow
@@ -260,6 +261,328 @@ entity_field_label :: proc(name: string) -> (string, bool) {
     return s, s != ""
 }
 
+// A field's tooltip in every language (empty where it has none); see entity_tip_next.
+entity_field_tips :: proc(name: string) -> (l: [Lang]string) {
+    switch name {
+    case "icon": l = {.EN = "Editor icon in the entity lists: a Material Symbols codepoint in hex (e.g. E835). Empty: a light or camera shows its type's icon, anything else none.", .ZH = "实体列表中的编辑器图标：Material Symbols 字形的十六进制码位（如 E835）。留空：灯光或相机显示其类型的图标，其他实体不显示。"}
+    case "basic_static_flags": l = {.EN = "What the entity is in the static world: whether it moves, draws and bakes.", .ZH = "实体在静态世界中的角色：是否移动、绘制和参与烘焙。"}
+    case "basic_flags": l = {.EN = "Whether the game and the editor see the entity.", .ZH = "游戏和编辑器是否处理该实体。"}
+    case "model": l = {.EN = "The model the entity draws and collides as.", .ZH = "实体绘制和碰撞所用的模型。"}
+    case "camera_type": l = {.EN = "Makes the entity a camera. A camera and a light are two entities.", .ZH = "使实体成为相机。相机和灯光需分为两个实体。"}
+    case "light_type": l = {.EN = "Makes the entity a light. A camera and a light are two entities.", .ZH = "使实体成为灯光。相机和灯光需分为两个实体。"}
+    case "color": l = {.EN = "Stored linear; the picker shows and edits it as sRGB.", .ZH = "以线性值存储；取色器以 sRGB 显示和编辑。"}
+    case "fov": l = {.EN = "Degrees.", .ZH = "单位为度。"}
+    case "inner_fov": l = {.EN = "Degrees.", .ZH = "单位为度。"}
+    case "range": l = {.EN = "Near, far (x, y).", .ZH = "近、远（x、y）。"}
+    case "sound": l = {.EN = "A sound file (.wav .ogg .mp3 .flac under assets/). It plays in play mode, on start with Play On Start or when Lua calls Entity.play_sound, and follows the entity.", .ZH = "声音文件（assets/ 下的 .wav .ogg .mp3 .flac）。在游戏模式中播放：勾选开始时播放则在开始时播放，或由 Lua 调用 Entity.play_sound；播放时跟随实体。"}
+    case "velocity": l = {.EN = "Metres per second, for game code: Lua reads and writes it. Nothing in the engine moves an entity by it.", .ZH = "米/秒，供游戏代码使用：由 Lua 读写。引擎本身不会用它移动实体。"}
+    }
+    return
+}
+
+// A field's tooltip for the current language, else the other one's ("" if none).
+entity_field_tip :: proc(name: string) -> string {
+    l := entity_field_tips(name)
+    for s in ([]string{l[loc_lang], l[.EN], l[.ZH]}) do if s != "" do return s
+    return ""
+}
+
+@(private = "file")
+_uses_model := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.model != "" },
+        fields = {"model"},
+        cond   = "model",
+        text   = {.EN = "Drawn, and with Collision, collided as in play mode.", .ZH = "会被绘制；设置了碰撞时，在游戏模式中参与碰撞。"},
+    },
+}
+
+@(private = "file")
+_uses_anim := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.model != "" },
+        fields = {"model"},
+        cond   = "model",
+        text   = {.EN = "A clip of the model's skeleton (its short name, e.g. Walk), looped in play mode while the script outputs no pose. Empty: the rest pose.", .ZH = "模型骨骼的动画片段（短名，如 Walk），在游戏模式下脚本未输出姿势时循环播放。留空：静止姿势。"},
+    },
+}
+
+@(private = "file")
+_uses_shading := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.model != "" },
+        fields = {"model"},
+        cond   = "model",
+        text   = {.EN = "How the model's surfaces take light. Default: the level's (World Settings > Shading).", .ZH = "模型表面的受光方式。默认：使用关卡设置（世界设置 > 着色）。"},
+    },
+}
+
+@(private = "file")
+_uses_blend := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.model != "" },
+        fields = {"model"},
+        cond   = "model",
+        text   = {.EN = "How the model's pixels combine with what's behind them. Alpha and Additive don't write depth or cast shadows, and draw after everything opaque.", .ZH = "模型像素与其背后内容的混合方式。Alpha 与叠加不写入深度、不投射阴影，并在所有不透明物体之后绘制。"},
+    },
+}
+
+@(private = "file")
+_uses_camera_type := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.camera_type) != 0 },
+        fields = {"camera_type"},
+        cond   = "camera_type",
+        text   = {.EN = "A camera: renders the view from its position, looking down its +Z.", .ZH = "相机：从其位置沿 +Z 方向渲染视图。"},
+    },
+}
+
+@(private = "file")
+_uses_light_type := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.light_type) != 0 },
+        fields = {"light_type"},
+        cond   = "light_type",
+        text   = {.EN = "A light: lights the scene, live and in the probe bake.", .ZH = "灯光：照亮场景，包括实时光照与探针烘焙。"},
+    },
+}
+
+@(private = "file")
+_uses_color := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.model != "" },
+        fields = {"model"},
+        cond   = "model",
+        text   = {.EN = "Tint: multiplies the model's colour, scaled by Intensity.", .ZH = "色调：乘到模型颜色上，并按强度缩放。"},
+    },
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.light_type) != 0 },
+        fields = {"light_type"},
+        cond   = "light_type",
+        text   = {.EN = "The light's colour.", .ZH = "灯光的颜色。"},
+    },
+}
+
+@(private = "file")
+_uses_intensity := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.model != "" },
+        fields = {"model"},
+        cond   = "model",
+        text   = {.EN = "Scales the tint: Color x Intensity (white x 1 = as authored).", .ZH = "缩放色调：颜色 x 强度（白色 x 1 = 原样）。"},
+    },
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.light_type) != 0 },
+        fields = {"light_type"},
+        cond   = "light_type",
+        text   = {.EN = "Brightness. With Inverse Square falloff, the light at 1 unit away.", .ZH = "亮度。平方反比衰减时为 1 单位距离处的光照。"},
+    },
+}
+
+@(private = "file")
+_uses_fov := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.camera_type == .Perspective) },
+        fields = {"camera_type"},
+        cond   = "camera_type=Perspective",
+        text   = {.EN = "Vertical field of view.", .ZH = "垂直视野角。"},
+    },
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.light_type == .Spot) },
+        fields = {"light_type"},
+        cond   = "light_type=Spot",
+        text   = {.EN = "Cone angle, also its shadow frustum.", .ZH = "光锥角度，也是其阴影视锥。"},
+    },
+}
+
+@(private = "file")
+_uses_inner_fov := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.light_type == .Spot) },
+        fields = {"light_type"},
+        cond   = "light_type=Spot",
+        text   = {.EN = "Inner cone angle: full intensity inside it, fading to zero at FOV. Clamped to FOV.", .ZH = "内锥角：其内为全强度，向 FOV 渐变为零。不超过 FOV。"},
+    },
+}
+
+@(private = "file")
+_uses_radius := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.light_type == .Cylinder) },
+        fields = {"light_type"},
+        cond   = "light_type=Cylinder",
+        text   = {.EN = "Beam radius: parallel rays from a disc along the entity's +Z, fading to zero at the radius. Also the shadow's width.", .ZH = "光束半径：从圆盘沿实体 +Z 方向发出的平行光，在半径处衰减为零。也是阴影的宽度。"},
+    },
+}
+
+@(private = "file")
+_uses_inner_radius := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.light_type == .Cylinder) },
+        fields = {"light_type"},
+        cond   = "light_type=Cylinder",
+        text   = {.EN = "Full intensity inside it, fading to zero at Radius. Clamped to Radius.", .ZH = "其内为全强度，向半径处渐变为零。不超过半径。"},
+    },
+}
+
+@(private = "file")
+_uses_falloff := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.light_type == .Point || e.light_type == .Spot || e.light_type == .Cylinder) },
+        fields = {"light_type"},
+        cond   = "light_type=Point|Spot|Cylinder",
+        text   = {.EN = "How the light fades over Range.", .ZH = "灯光在范围内的衰减方式。"},
+    },
+}
+
+@(private = "file")
+_uses_size := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.camera_type == .Orthographic) },
+        fields = {"camera_type"},
+        cond   = "camera_type=Orthographic",
+        text   = {.EN = "y = view height; the width comes from the target's aspect.", .ZH = "y = 视图高度；宽度由渲染目标的宽高比决定。"},
+    },
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.light_type == .Directional) },
+        fields = {"light_type"},
+        cond   = "light_type=Directional",
+        text   = {.EN = "x, y = shadow area, z = its depth.", .ZH = "x、y = 阴影区域，z = 阴影深度。"},
+    },
+}
+
+@(private = "file")
+_uses_range := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.camera_type) != 0 },
+        fields = {"camera_type"},
+        cond   = "camera_type",
+        text   = {.EN = "Clip planes.", .ZH = "裁剪面。"},
+    },
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.light_type == .Point || e.light_type == .Spot || e.light_type == .Cylinder) },
+        fields = {"light_type"},
+        cond   = "light_type=Point|Spot|Cylinder",
+        text   = {.EN = "Falloff: zero at y. Linear and Smooth are full inside x; Inverse Square is held flat inside x (the source's radius). A cylinder measures along its beam. y is also the shadow's far plane.", .ZH = "衰减：在 y 处为零。线性与平滑在 x 内为全强度；平方反比在 x 内保持不变（光源半径）。圆柱光沿光束方向计算距离。y 也是阴影的远平面。"},
+    },
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.sound != "" && card(e.sound_flags & {.Positional}) > 0 },
+        fields = {"sound", "sound_flags"},
+        cond   = "sound&sound_flags=Positional",
+        text   = {.EN = "Full volume within x, fading linearly to silent at y.", .ZH = "x 内为全音量，到 y 线性衰减至静音。"},
+    },
+}
+
+@(private = "file")
+_uses_shadow := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.light_type) != 0 },
+        fields = {"light_type"},
+        cond   = "light_type",
+        text   = {.EN = "Casts shadows, in realtime and in the probe bake.", .ZH = "投射阴影，包括实时阴影与探针烘焙。"},
+    },
+}
+
+@(private = "file")
+_uses_light_group := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.light_type) != 0 },
+        fields = {"light_type"},
+        cond   = "light_type",
+        text   = {.EN = "Light group (World Settings > Light Groups): 0 = static, always on; 1-4 can be dimmed or switched off at runtime (Lua World.set_light_group).", .ZH = "所属光源组（世界设置 > 光源组）：0 = 静态，始终开启；1-4 可在运行时调暗或关闭（Lua World.set_light_group）。"},
+    },
+}
+
+@(private = "file")
+_uses_indirect := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.light_type) != 0 && card(e.basic_static_flags & {.Static}) > 0 && card(e.basic_static_flags & {.Cast_Indirect}) > 0 },
+        fields = {"light_type", "basic_static_flags"},
+        cond   = "light_type&basic_static_flags=Static&basic_static_flags=Cast_Indirect",
+        text   = {.EN = "Scales its baked bounce (the probes) without touching its direct light.", .ZH = "缩放其烘焙的反弹光（探针），不影响直接光。"},
+    },
+}
+
+@(private = "file")
+_uses_halo := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return (e.light_type == .Point || e.light_type == .Spot) },
+        fields = {"light_type"},
+        cond   = "light_type=Point|Spot",
+        text   = {.EN = "Scales its glow in the fog (World Settings > Fog > Lamp Halos) without touching its light on surfaces. 0 = no halo.", .ZH = "缩放其在雾中的光晕（世界设置 > 雾 > 灯光光晕），不影响表面光照。0 = 无光晕。"},
+    },
+}
+
+@(private = "file")
+_uses_sound := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.sound != "" },
+        fields = {"sound"},
+        cond   = "sound",
+        text   = {.EN = "Plays in play mode (Play On Start, or Lua Entity.play_sound) and follows the entity.", .ZH = "在游戏模式中播放（开始时播放，或由 Lua 调用 Entity.play_sound），并跟随实体。"},
+    },
+}
+
+@(private = "file")
+_uses_volume := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.sound != "" },
+        fields = {"sound"},
+        cond   = "sound",
+        text   = {.EN = "Playback volume (1 = as recorded).", .ZH = "播放音量（1 = 原始音量）。"},
+    },
+}
+
+@(private = "file")
+_uses_sound_flags := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.sound != "" },
+        fields = {"sound"},
+        cond   = "sound",
+        text   = {.EN = "How the sound plays.", .ZH = "声音的播放方式。"},
+    },
+}
+
+@(private = "file")
+_uses_collision := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.model != "" },
+        fields = {"model"},
+        cond   = "model",
+        text   = {.EN = "What it collides as in play mode. Static entities are static bodies; others follow the entity (kinematic).", .ZH = "游戏模式中的碰撞形状。静态实体为静态刚体；其他实体跟随实体移动（运动学）。"},
+    },
+}
+
+// A field's `when` entries (none: it always does something).
+entity_field_uses :: proc(name: string) -> []Entity_Field_Use {
+    switch name {
+    case "model": return _uses_model[:]
+    case "anim": return _uses_anim[:]
+    case "shading": return _uses_shading[:]
+    case "blend": return _uses_blend[:]
+    case "camera_type": return _uses_camera_type[:]
+    case "light_type": return _uses_light_type[:]
+    case "color": return _uses_color[:]
+    case "intensity": return _uses_intensity[:]
+    case "fov": return _uses_fov[:]
+    case "inner_fov": return _uses_inner_fov[:]
+    case "radius": return _uses_radius[:]
+    case "inner_radius": return _uses_inner_radius[:]
+    case "falloff": return _uses_falloff[:]
+    case "size": return _uses_size[:]
+    case "range": return _uses_range[:]
+    case "shadow": return _uses_shadow[:]
+    case "light_group": return _uses_light_group[:]
+    case "indirect": return _uses_indirect[:]
+    case "halo": return _uses_halo[:]
+    case "sound": return _uses_sound[:]
+    case "volume": return _uses_volume[:]
+    case "sound_flags": return _uses_sound_flags[:]
+    case "collision": return _uses_collision[:]
+    }
+    return nil
+}
+
 // An enum/flags member's label in every language, keyed on the type name (empty where it has none).
 entity_flag_item_labels :: proc(enum_type: string, member: string) -> (l: [Lang]string) {
     switch enum_type {
@@ -342,6 +665,88 @@ entity_flag_item_labels :: proc(enum_type: string, member: string) -> (l: [Lang]
         }
     }
     return
+}
+
+// An enum/flags member's tooltip in every language, keyed on the type name (empty where it has none).
+entity_member_tips :: proc(enum_type: string, member: string) -> (l: [Lang]string) {
+    switch enum_type {
+    case "EntityCollision":
+        switch member {
+        case "None": l = {.EN = "Doesn't collide.", .ZH = "不参与碰撞。"}
+        case "Box": l = {.EN = "The model's bounding box: the cheapest.", .ZH = "模型的包围盒：开销最低。"}
+        case "Collision_Mesh": l = {.EN = "The kit's <model>_col mesh, authored in the DCC. Play warns when the model has none.", .ZH = "套件中的 <model>_col 网格，在建模软件中制作。模型没有时，进入游戏会给出警告。"}
+        case "Render_Mesh": l = {.EN = "Every triangle of the model itself: exact, and the most expensive.", .ZH = "模型自身的全部三角形：最精确，开销最高。"}
+        }
+    case "EntityCameraType":
+        switch member {
+        case "None": l = {.EN = "Not a camera.", .ZH = "不是相机。"}
+        case "Perspective": l = {.EN = "Things shrink with distance. FOV is the vertical field of view; Range the clip planes.", .ZH = "近大远小。FOV 为垂直视野角；范围为裁剪面。"}
+        case "Orthographic": l = {.EN = "No perspective: things keep their size at any distance. Size.y is the view height; Range the clip planes.", .ZH = "无透视：物体大小不随距离变化。Size.y 为视图高度；范围为裁剪面。"}
+        }
+    case "EntityLightType":
+        switch member {
+        case "None": l = {.EN = "Not a light.", .ZH = "不是灯光。"}
+        case "Directional": l = {.EN = "Parallel light from far away, like the sun, along the entity's +Z. Lights everything; its shadow covers the box set by Size.", .ZH = "来自远处的平行光（如太阳），沿实体 +Z 方向。照亮所有物体；阴影覆盖 Size 设定的范围。"}
+        case "Point": l = {.EN = "Shines in every direction from the entity, fading over Range.", .ZH = "从实体向所有方向发光，在范围内衰减。"}
+        case "Spot": l = {.EN = "A cone along the entity's +Z: FOV wide, full inside Inner FOV, fading over Range.", .ZH = "沿实体 +Z 方向的光锥：宽度为 FOV，Inner FOV 内为全强度，在范围内衰减。"}
+        case "Cylinder": l = {.EN = "A beam of parallel rays from a disc along the entity's +Z: Radius wide, full inside Inner Radius, fading over Range.", .ZH = "从圆盘沿实体 +Z 方向发出的平行光束：宽度为半径，内半径内为全强度，在范围内衰减。"}
+        }
+    case "EntityLightFalloff":
+        switch member {
+        case "Inverse_Square": l = {.EN = "Physical: intensity / d², windowed to zero at range.y. Intensity is the light at 1 unit away.", .ZH = "物理衰减：强度 / d²，在 range.y 处收为零。强度为 1 单位距离处的光照。"}
+        case "Linear": l = {.EN = "Full inside range.x, falling in a straight line to zero at range.y.", .ZH = "range.x 内为全强度，到 range.y 线性降为零。"}
+        case "Smooth": l = {.EN = "Full inside range.x, easing to zero at range.y: no visible edge at either end.", .ZH = "range.x 内为全强度，到 range.y 平滑降为零：两端都没有明显边缘。"}
+        }
+    case "ShadingModel":
+        switch member {
+        case "Unlit": l = {.EN = "Texture x colour, no light.", .ZH = "贴图 x 颜色，不受光照。"}
+        case "Gouraud": l = {.EN = "Lit per vertex and blended across the face, diffuse only: the PS1 look. Shadows are per pixel.", .ZH = "逐顶点光照并在面上插值，仅漫反射：PS1 的效果。阴影为逐像素。"}
+        case "Lambert": l = {.EN = "Lit per pixel with the mesh's smooth normals, diffuse only: Gouraud without the vertex artifacts.", .ZH = "使用网格平滑法线逐像素光照，仅漫反射：没有顶点瑕疵的 Gouraud。"}
+        case "Flat": l = {.EN = "Lit per pixel with each face's own normal, diffuse only: faceted.", .ZH = "使用每个面自身的法线逐像素光照，仅漫反射：呈多面体感。"}
+        case "Phong": l = {.EN = "Lit per pixel, with a specular highlight.", .ZH = "逐像素光照，带高光。"}
+        }
+    case "EntityShading":
+        switch member {
+        case "Default": l = {.EN = "The level's shading (World Settings > Shading).", .ZH = "使用关卡的着色（世界设置 > 着色）。"}
+        case "Unlit": l = {.EN = "Texture x colour, no light.", .ZH = "贴图 x 颜色，不受光照。"}
+        case "Gouraud": l = {.EN = "Lit per vertex and blended across the face, diffuse only: the PS1 look. Shadows are per pixel.", .ZH = "逐顶点光照并在面上插值，仅漫反射：PS1 的效果。阴影为逐像素。"}
+        case "Lambert": l = {.EN = "Lit per pixel with the mesh's smooth normals, diffuse only: Gouraud without the vertex artifacts.", .ZH = "使用网格平滑法线逐像素光照，仅漫反射：没有顶点瑕疵的 Gouraud。"}
+        case "Flat": l = {.EN = "Lit per pixel with each face's own normal, diffuse only: faceted.", .ZH = "使用每个面自身的法线逐像素光照，仅漫反射：呈多面体感。"}
+        case "Phong": l = {.EN = "Lit per pixel, with a specular highlight.", .ZH = "逐像素光照，带高光。"}
+        }
+    case "EntityBlend":
+        switch member {
+        case "Opaque": l = {.EN = "Solid: hides what's behind it.", .ZH = "不透明：遮挡其后的物体。"}
+        case "Cutout": l = {.EN = "Solid, but pixels under half alpha are cut out (fences, foliage). Shadows still see the whole quad.", .ZH = "不透明，但 alpha 低于一半的像素会被裁掉（栅栏、植被）。阴影仍按整个面片投射。"}
+        case "Alpha": l = {.EN = "See-through by the texture's alpha. Doesn't write depth or cast shadows; drawn after everything opaque, unsorted.", .ZH = "按贴图 alpha 半透明。不写入深度、不投射阴影；在所有不透明物体之后绘制，不排序。"}
+        case "Additive": l = {.EN = "Adds its colour to what's behind it (glows, fire). Doesn't write depth or cast shadows; drawn after everything opaque.", .ZH = "将颜色叠加到其后的内容上（光晕、火焰）。不写入深度、不投射阴影；在所有不透明物体之后绘制。"}
+        }
+    case "EntityBasicStaticFlag":
+        switch member {
+        case "Static": l = {.EN = "Never moves: a static physics body, and it can take part in the probe bake. Off: its body follows the entity (kinematic).", .ZH = "不会移动：静态物理刚体，并可参与探针烘焙。关闭时：其刚体跟随实体移动（运动学）。"}
+        case "Renderable": l = {.EN = "Drawn, and pickable in the viewport. A light shines only while this is on.", .ZH = "会被绘制，并可在视口中点选。灯光只有开启此项时才会发光。"}
+        case "Cast_Indirect": l = {.EN = "With Static: blocks and bounces light in the probe bake. Off for clutter that would only add noise.", .ZH = "与静态一起：在探针烘焙中遮挡并反弹光线。对只会增加噪点的杂物请关闭。"}
+        }
+    case "EntityBasicFlag":
+        switch member {
+        case "Enabled": l = {.EN = "Off: nothing sees the entity. It isn't drawn, doesn't collide, play sound or animate, and can't be the game camera.", .ZH = "关闭时：所有系统都忽略该实体。不绘制、不碰撞、不播放声音、不播放动画，也不能作为游戏相机。"}
+        case "Hidden": l = {.EN = "Not drawn (in the editor and in game) and not pickable; physics and sound still run. Lua can toggle it.", .ZH = "不绘制（编辑器与游戏中均是）且无法点选；物理和声音仍然生效。Lua 可切换此项。"}
+        }
+    case "EntitySoundFlag":
+        switch member {
+        case "Play_On_Start": l = {.EN = "Plays when the game starts.", .ZH = "游戏开始时播放。"}
+        case "Loop": l = {.EN = "Repeats until stopped.", .ZH = "循环播放直到停止。"}
+        case "Positional": l = {.EN = "Fades with distance over Range: full within range.x, silent at range.y. Off: the same everywhere (music, UI).", .ZH = "在范围内随距离衰减：range.x 内全音量，range.y 处静音。关闭时：处处音量相同（音乐、界面）。"}
+        }
+    }
+    return
+}
+
+// A member's tooltip for the current language, else the other one's ("" if none).
+entity_member_tip :: proc(enum_type: string, member: string) -> string {
+    l := entity_member_tips(enum_type, member)
+    for s in ([]string{l[loc_lang], l[.EN], l[.ZH]}) do if s != "" do return s
+    return ""
 }
 
 // Localized enum/flags member label, keyed on the type name; ok=false if none.

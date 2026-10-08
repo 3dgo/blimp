@@ -19,6 +19,10 @@ import im "lib:odin-imgui"
 // The entity inspector also passes the defaults (a field that differs from its default has a bold label,
 // and right-clicking a label resets it), the other selected entities (a field where they differ is drawn
 // mixed), and the search text.
+//
+// An Entity's conditional fields (the schema's `when` entries, Entity_Field_Use) get a dot before the label
+// while one of their conditions holds; fields without any get none. Hovering the label or dot shows the field's tooltip; hovering the dot also
+// lights the dots of the fields that go with it: what turns it on (light_type) and what else that turns on.
 
 Param_UI_Options :: struct {
     readonly:     bool,
@@ -37,22 +41,59 @@ Param_UI_Options :: struct {
     resettable:   bool,
 }
 
-PARAM_MIXED_COLOR  :: im.Vec4{1, 0.75, 0.35, 1}
 PARAM_MIXED_FORMAT :: "—"   // a number that differs across the selection shows a dash
+
+// The dot under the mouse: which inspector (its ID stack), which field, and the frame it was last seen.
+// The next draw lights the dots from it, a frame late, which no one sees.
+@(private="file")
+param_dot_hover: struct { window: im.ID, field: string, frame: i32 }
+
+// The clicked dot: its group stays lit, through scrolling, until a lit dot is clicked again.
+@(private="file")
+param_dot_lock: struct { window: im.ID, field: string }
+
+// An entity inspector's dots for one draw.
+@(private="file")
+Param_Dots :: struct {
+    e:       ^Entity,
+    window:  im.ID,
+    source:  string,             // the locked dot's field, else the hovered one's; "" = none
+    locked:  bool,
+    drivers: [dynamic]string,    // the fields that turn the source on (named by its uses that hold)
+}
 
 DEFAULT_PARAM_UI_OPTIONS :: Param_UI_Options {
     speed  = 0.01,
     format = "%.3f",
 }
 
-// A form-row prefix: left-aligned label, then the next item starts at the shared column, full width.
-// A field that's been set (differs from its default) has a bold label, so it stands out; mixed (differs
-// across the selection) is amber. Right-click opens the field's menu (ui_param_struct draws it).
+// The last form row: where it began (after its gap), and its gutter's mouse state. The entity inspector
+// draws that field's dot there and takes clicks on it.
+@(private="file") param_row_pos: im.Vec2
+@(private="file") param_row_gutter_hovered, param_row_gutter_clicked: bool
+
+// Starts a form row: the gap above it, so every form's rows are spaced alike.
+@(private="file")
+param_row_begin :: proc() {
+    im.Dummy({0, UI_ROW_GAP * app.display_scale})
+    param_row_pos = im.GetCursorScreenPos()
+    param_row_gutter_hovered, param_row_gutter_clicked = false, false
+}
+
+// A form-row prefix: the gutter, a left-aligned label, then the next item starts at the shared column, full
+// width. Every panel's rows start with it. A field that's been set (differs from its default) has a bold
+// label, so it stands out; mixed (differs across the selection) is amber. Right-click opens the field's menu
+// (ui_param_struct draws it).
 ui_param_label :: proc(label: string, options: Param_UI_Options) {
+    param_row_begin()
+    // The gutter is a button, so a click there (on a dot) is the row's, not a drag of the window.
+    param_row_gutter_clicked = im.InvisibleButton(fmt.ctprintf("##gutter_%s", label), {ui_gutter(), im.GetFrameHeight()})
+    param_row_gutter_hovered = im.IsItemHovered()
+    im.SameLine(0, 0)
     im.AlignTextToFramePadding()
     text := fmt.ctprintf("%s", label)
     if options.overridden do im.PushFontFloat(ui.font_bold, 0)
-    if options.mixed do im.TextColored(PARAM_MIXED_COLOR, "%s", text)
+    if options.mixed do im.TextColored(UI_COLOR_WARNING, "%s", text)
     else do im.TextUnformatted(text)
     if options.overridden do im.PopFont()
     if options.mixed do im.SetItemTooltip("%s", tr(.Inspector_Mixed))
@@ -101,7 +142,7 @@ ui_param_asset_picker :: proc(name: string, value: ^string, kind: Asset_Kind, op
         case .Sound:   missing = sound_system.ok && value^ not_in sound_system.clip_ids   // no audio device: nothing loaded, nothing broken
         }
     }
-    if missing do im.PushStyleColorImVec4(.Text, {1, 0.35, 0.3, 1})
+    if missing do im.PushStyleColorImVec4(.Text, UI_COLOR_ERROR)
     open := im.BeginCombo(fmt.ctprintf("##%s", name), fmt.ctprintf("%s", value^), {.HeightLarge})
     if missing do im.PopStyleColor()   // before the list, so only the preview is red
     if open {
@@ -205,13 +246,17 @@ ui_param_enum :: proc(name: string, type: typeid, value: ^u64, options := DEFAUL
     ui_param_label(name, options)
     im.BeginDisabled(options.readonly)
     // Compare against raw member names; display the localized label.
-    if im.BeginCombo(fmt.ctprintf("##%s", name), fmt.ctprintf("%s", param_member_label(type_name, selected_enum_name))) {
+    // Each choice's tooltip (schema tip_en / tip_zh) on its item, and the current one's on the closed combo.
+    open := im.BeginCombo(fmt.ctprintf("##%s", name), fmt.ctprintf("%s", param_member_label(type_name, selected_enum_name)))
+    if !open do ui_item_tooltip(entity_member_tip(type_name, selected_enum_name))
+    if open {
         for enum_name in enum_type.names {
             is_selected := selected_enum_name == enum_name
             if im.Selectable(fmt.ctprintf("%s##%s", param_member_label(type_name, enum_name), enum_name), is_selected) {
                 enum_value, _ := reflect.enum_from_name_any(type, enum_name)
                 value^ = u64(enum_value)
             }
+            ui_item_tooltip(entity_member_tip(type_name, enum_name))
         }
         im.EndCombo()
     }
@@ -230,6 +275,7 @@ ui_param_bitset :: proc(name: string, type: typeid, value: ^u64, options := DEFA
         if im.Checkbox(fmt.ctprintf("%s##%s", param_member_label(type_name, enum_name), enum_name), &checked) {
             value^ ~= 1 << u32(j)
         }
+        ui_item_tooltip(entity_member_tip(type_name, enum_name))
         if j < len(enum_names) - 1 do im.SameLine()
     }
     im.EndDisabled()
@@ -294,16 +340,20 @@ param_member_label :: proc(enum_type: string, member: string) -> string {
 }
 
 ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAULT_PARAM_UI_OPTIONS, owner_type := "") {
-    // A named sub-struct renders as an indented collapsible section; the top-level call is headerless.
+    // A nested struct is a row like its siblings, not a section bar: its fold arrow in the gutter and its
+    // name in the label column, opening into an indented panel that shows where it ends. The top-level call
+    // is headerless.
     if !options.headerless {
-        if !im.CollapsingHeader(fmt.ctprintf("%s", name)) do return
+        param_row_begin()
+        if !im.TreeNodeEx(fmt.ctprintf("%s###struct", name), {.NoTreePushOnOpen, .FramePadding}) do return
         im.Indent()
+        ui_card_begin()
     }
 
     attr_count := reflect.struct_field_count(type)
     struct_tags := reflect.struct_field_tags(type)
 
-    // Shared input column for this struct: widest visible label + a gap, so rows line up
+    // Shared input column for this struct: gutter + widest visible label + a gap, so rows line up
     // regardless of language (labels differ in width between EN and the larger ZH font). Measured in bold,
     // the wider of the two, since any label may turn bold.
     col: f32 = 0
@@ -316,11 +366,30 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
         if w > col do col = w
     }
     im.PopFont()
-    col += UI_LABEL_GAP * app.display_scale
+    col = ui_label_column_at(col)
+
+    dots: ^Param_Dots
+    d: Param_Dots
+    if type == Entity {
+        d = {e = (^Entity)(value.data), window = im.GetID("param_dots")}
+        d.drivers = make([dynamic]string, context.temp_allocator)
+        if l := param_dot_lock; l.window == d.window && l.field != "" {
+            d.source, d.locked = l.field, true
+        } else if h := param_dot_hover; h.window == d.window && h.frame >= im.GetFrameCount() - 1 {
+            d.source = h.field
+        }
+        for u in entity_field_uses(d.source) do if u.holds(d.e) do append(&d.drivers, ..u.fields)
+        // A lock on a field this entity doesn't use (another one got selected) has no dot to click: drop it.
+        if d.locked && len(d.drivers) == 0 {
+            param_dot_lock = {}
+            d.source, d.locked = "", false
+        }
+        dots = &d
+    }
 
     // Fields without a section, then one header per section. While searching, sections are plain
     // separators (so nothing found stays folded away), and a section whose name matches shows all its fields.
-    param_struct_fields(type, value, options, owner_type, "", false, col)
+    param_struct_fields(type, value, options, owner_type, "", false, col, dots)
     for section in reflect.enum_field_names(EntitySection) {
         label := param_member_label("EntitySection", section)
         whole := options.filter != "" && search_matches(label, options.filter)
@@ -335,19 +404,22 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
         }
         if !any_shown do continue
         if options.filter != "" {
-            im.SeparatorText(fmt.ctprintf("%s", label))
+            ui_heading(fmt.ctprintf("%s", label))
         } else if !im.CollapsingHeader(fmt.ctprintf("%s###section_%s", label, section), {.DefaultOpen}) {
             continue
         }
-        param_struct_fields(type, value, options, owner_type, section, whole, col)
+        param_struct_fields(type, value, options, owner_type, section, whole, col, dots)
     }
 
-    if !options.headerless do im.Unindent()
+    if !options.headerless {
+        ui_card_end()
+        im.Unindent()
+    }
 }
 
 // One section's fields (`section` "" = those without one). `whole`: the search matched the section itself.
 @(private="file")
-param_struct_fields :: proc(type: typeid, value: any, options: Param_UI_Options, owner_type, section: string, whole: bool, col: f32) {
+param_struct_fields :: proc(type: typeid, value: any, options: Param_UI_Options, owner_type, section: string, whole: bool, col: f32, dots: ^Param_Dots) {
     attr_count := reflect.struct_field_count(type)
     struct_tags := reflect.struct_field_tags(type)
     for i in 0 ..< attr_count {
@@ -447,8 +519,111 @@ param_struct_fields :: proc(type: typeid, value: any, options: Param_UI_Options,
             im.EndPopup()
         }
         im.PopID()
-        im.Dummy({0, 3 * app.display_scale})
+        if dots != nil do param_dot(dots, field.name, param_row_pos, col)
     }
+}
+
+// A field's dot, drawn while one of its uses holds and lit while it goes with the hovered or locked dot. A
+// field without uses (name, transform, flags) is plainly always used, so it gets none. Hovering the dot or
+// the label shows the field's tooltip; hovering the dot also lights the others. Clicking a dot locks its
+// group lit (the locked one gets a ring); clicking a lit dot unlocks, any other moves the lock there.
+@(private="file")
+param_dot :: proc(d: ^Param_Dots, field: string, row: im.Vec2, col: f32) {
+    uses := entity_field_uses(field)
+    used := false
+    lit := field == d.source || slice.contains(d.drivers[:], field)
+    for u in uses do if u.holds(d.e) {
+        used = true
+        if param_use_lit(d, u) do lit = true
+    }
+    // In the gutter, centred where a fold arrow would be.
+    h := im.GetFrameHeight()
+    if used {
+        center := row + {im.GetStyle().FramePadding.x + im.GetFontSize() * 0.5, h * 0.5}
+        r := param_draw_dot(center, lit ? UI_COLOR_ACCENT : UI_COLOR_MARK, lit)
+        if d.locked && field == d.source {
+            im.DrawList_AddCircle(im.GetWindowDrawList(), center, r + 3 * app.display_scale, im.GetColorU32ImVec4(UI_COLOR_ACCENT), 0, 1.5 * app.display_scale)
+        }
+    }
+    if used && param_row_gutter_clicked {
+        param_dot_lock = {} if d.locked && lit else {d.window, field}
+    }
+    if !im.IsWindowHovered() do return
+    if used && param_row_gutter_hovered do param_dot_hover = {d.window, field, im.GetFrameCount()}
+    if im.IsMouseHoveringRect(row, row + {col, h}) do param_field_tooltip(d, field)
+}
+
+// Whether a use is part of the lit group: it holds and turns on with the hovered or locked dot's field.
+@(private="file")
+param_use_lit :: proc(d: ^Param_Dots, u: Entity_Field_Use) -> bool {
+    if !u.holds(d.e) do return false
+    for f in u.fields do if slice.contains(d.drivers[:], f) do return true
+    return false
+}
+
+// The inspector's dot at `center`, larger when lit. Returns its radius.
+@(private="file")
+param_draw_dot :: proc(center: im.Vec2, color: im.Vec4, lit: bool) -> f32 {
+    r := im.GetFontSize() * (lit ? 0.24 : 0.16)
+    im.DrawList_AddCircleFilled(im.GetWindowDrawList(), center, r, im.GetColorU32ImVec4(color))
+    return r
+}
+
+// A field's tip, then each of its uses as a list item: a dot, the condition, and under it what the field does
+// then. A use in the lit group (hovered or locked dot) is blue, one that holds is white, the rest grey.
+@(private="file")
+param_field_tooltip :: proc(d: ^Param_Dots, field: string) {
+    tip := entity_field_tip(field)
+    uses := entity_field_uses(field)
+    if tip == "" && len(uses) == 0 do return
+    if !im.BeginTooltip() do return
+    im.PushTextWrapPos(im.GetFontSize() * UI_TOOLTIP_WRAP)
+    if tip != "" do im.TextUnformatted(fmt.ctprintf("%s", tip))
+    dim  := im.GetStyleColorVec4(.TextDisabled)^
+    text_color := im.GetStyleColorVec4(.Text)^
+    for u in uses {
+        holds, lit := u.holds(d.e), param_use_lit(d, u)
+        color := lit ? UI_COLOR_ACCENT : holds ? text_color : dim
+        if tip != "" || len(uses) > 1 do im.Spacing()
+        bullet := im.GetFontSize()
+        param_draw_dot(im.GetCursorScreenPos() + {bullet * 0.5, im.GetTextLineHeight() * 0.5}, color, lit)
+        im.Indent(bullet)
+        im.TextColored(color, "%s", fmt.ctprintf("%s", param_cond_label(u.cond)))
+        if !holds do im.PushStyleColorImVec4(.Text, dim)
+        text := u.text[loc_lang]
+        if text == "" do text = u.text[.EN]
+        im.TextUnformatted(fmt.ctprintf("%s", text))
+        if !holds do im.PopStyleColor()
+        im.Unindent(bullet)
+    }
+    im.PopTextWrapPos()
+    im.EndTooltip()
+}
+
+// A `when` condition in the UI language, e.g. "Light = Spot / Cylinder"; terms joined by " + ".
+@(private="file")
+param_cond_label :: proc(cond: string) -> string {
+    b := strings.builder_make(context.temp_allocator)
+    c := cond
+    for term in strings.split_iterator(&c, "&") {
+        name, _, members := strings.partition(strings.trim_space(term), "=")
+        name, members = strings.trim_space(name), strings.trim_space(members)
+        if strings.builder_len(b) > 0 do strings.write_string(&b, " + ")
+        strings.write_string(&b, param_field_label("", name, nil))
+        if members == "" do continue
+        // Members are labelled by their enum: a flags field's is its bit_set's element.
+        ti := reflect.struct_field_by_name(Entity, name).type
+        if bs, ok := runtime.type_info_base(ti).variant.(runtime.Type_Info_Bit_Set); ok do ti = bs.elem
+        strings.write_string(&b, " = ")
+        ms := members
+        first := true
+        for m in strings.split_iterator(&ms, "|") {
+            if !first do strings.write_string(&b, " / ")
+            first = false
+            strings.write_string(&b, param_member_label(param_type_name(ti), strings.trim_space(m)))
+        }
+    }
+    return strings.to_string(b)
 }
 
 // Whether a field shows: not `hidden`, and matching the search (its id, its label in any language, or its value).

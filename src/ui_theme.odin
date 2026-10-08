@@ -2,6 +2,12 @@ package blimp
 
 import im "lib:odin-imgui"
 
+// Named colours for text and marks, so every panel says "accent", "warning" or "error" the same way.
+UI_COLOR_ACCENT  :: im.Vec4{0.30, 0.67, 0.99, 1}   // ACCENT_LIGHT below: headings, lit marks, notices
+UI_COLOR_WARNING :: im.Vec4{1, 0.75, 0.35, 1}      // amber: mixed values, won't-be-saved, status
+UI_COLOR_ERROR   :: im.Vec4{1, 0.35, 0.3, 1}       // red: missing assets, over a limit
+UI_COLOR_MARK    :: im.Vec4{0.55, 0.55, 0.55, 1}   // grey: quiet marks (the inspector's dots)
+
 // The editor's ImGui look: VS Code's "Dark Modern" palette (neutral greys, #0078D4 blue accent,
 // muted-blue selection) with Unity-like gentle rounding and flat, borderless frames. Replaces
 // StyleColorsDark; sizes are authored at 1x and scaled by the display scale.

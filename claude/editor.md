@@ -65,17 +65,34 @@
   - `Editor_World.active` (`editor_world(w).active`) is the selected entity the inspector shows and the
     gizmo pivots on; undo snapshots it alongside the entities. The editor's delete is
     `selection_remove_entity`, which moves `active` off first.
+- **One form look** for every panel (inspector, World / Game Settings, Bake, schema editor), from `ui.odin`
+  and `ui_param_label`; a panel never rolls its own. Each row: the gap (`UI_ROW_GAP`), a gutter
+  (`ui_gutter`: a nested struct's fold arrow, or the inspector's dot), the label, inputs at the column
+  `ui_label_column` measures. Blocks are `ui_heading`, open items and nested structs are `ui_card_begin/end`,
+  and coloured text uses the theme's `UI_COLOR_*`. Blue section bars (`CollapsingHeader`) mean a category
+  (the inspector's sections, the world list); a nested struct is a fold row, not a bar.
 - **Inspector** (`ui_param_struct` over `Entity`, `ui_entity_inspector_body`): a presentation of the flat
   entity, not a structure in it. Every field stays shared and always shown; nothing hides by kind.
   - Sections: a field's schema `section` (a member of `enum.EntitySection`, emitted as a `section:` tag)
     puts it under that collapsing header. Fields without one come first, then sections in the enum's order.
-    The schema editor picks it per field (labelled "Group"); its Groups list edits that enum's members: add,
+    The schema editor picks it per field (labelled "Group"); its Groups tab edits that enum's members: add,
     rename (fields follow), reorder, remove (its fields move to the top).
   - Search (per panel, `search_matches`) matches a field's id, its label in any language or its text value
     (strings, an enum's choice, set flags; not numbers), or a section's name (which shows all its fields). While searching, sections are separators, not folds. The entity list
     has the same box over entity names.
   - A field that differs from its schema default (`entity_apply_defaults`) has a bold label (`ui.font_bold`),
     colour unchanged; right-clicking a label offers Reset to Default.
+  - Used dots and tooltips: shared fields mean different things per kind, so the schema says which, instead
+    of the inspector hiding anything. `tip_en` / `tip_zh` are a field's tooltip; each `when` (a condition,
+    with `when_en` / `when_zh` saying what the field does then, both required) is one use. Codegen compiles
+    conditions to Odin (`entity_field_uses`, `Entity_Field_Use`), so a renamed field or member breaks the
+    build. A field with `when`s gets a dot while one holds on the active entity; one without (name,
+    transform, flags: plainly always used) gets none, so the dots mark only what isn't obvious. Hovering a
+    label or dot shows the tip and every use, lit where it holds; hovering a dot also lights the fields its
+    holding conditions name (light_type) and every field with a holding use on those. `note` stays the
+    programmer's comment in gen_entity.odin. Enum / flags members have `tip_en` / `tip_zh` too
+    (`entity_member_tip`), shown on dropdown items, the closed dropdown (its current choice) and flag
+    checkboxes; a field's tip says what the field is, its members' say what each choice does.
   - Multi-edit: with several selected, the inspector shows the active entity. A field where the others differ
     has an amber label (numbers show a dash). An edit applies to all of them, but only what changed
     (`param_apply_changes`): one vector component, the toggled flags, otherwise the whole field. `identity`

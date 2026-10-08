@@ -103,7 +103,7 @@ ui_bake_settings :: proc(w: ^World) {
     o := DEFAULT_PARAM_UI_OPTIONS
     o.label_w = ui_label_column(labels[:])
 
-    im.SeparatorText(tr(.Bake_Section_Quality))
+    ui_heading(tr(.Bake_Section_Quality))
     ui_param_label(string(tr(.Bake_Quality)), o)
     if im.BeginCombo("##quality", tr(BAKE_QUALITY_LABELS[b.quality])) {
         for q in Bake_Quality {
@@ -118,7 +118,7 @@ ui_bake_settings :: proc(w: ^World) {
     ui_param_label(string(tr(.Bake_Bounces)), o)
     if im.SliderInt("##bounces", &b.bounces, 1, BAKE_BOUNCES_MAX, "%d", {.ClampOnInput}) do b.quality = .Custom
 
-    im.SeparatorText(tr(.Bake_Section_Sky))
+    ui_heading(tr(.Bake_Section_Sky))
     ui_param_bool(string(tr(.Bake_Sky)), &b.sky, o)
     im.BeginDisabled(!b.sky)
     oi := o
@@ -126,7 +126,7 @@ ui_bake_settings :: proc(w: ^World) {
     ui_param_f32(string(tr(.World_Sky_Intensity)), &b.sky_intensity, oi)
     im.EndDisabled()
 
-    im.SeparatorText(tr(.Bake_Section_Grid))
+    ui_heading(tr(.Bake_Section_Grid))
     os := o
     os.min, os.max, os.format = 0.05, 100, "%.2f"
     ui_param_f32(string(tr(.World_Probe_Spacing)), &b.probe_spacing, os)
@@ -156,7 +156,7 @@ ui_bake_settings :: proc(w: ^World) {
     count := 1
     for a in 0..<3 do count *= int(math.ceil(max(b.bounds_max[a] - b.bounds_min[a], 0) / spacing)) + 1
     text := fmt.ctprintf(string(tr(.Bake_Estimate)), count, MAX_PROBES)
-    if count > MAX_PROBES do im.TextColored({1, 0.35, 0.3, 1}, "%s", text)
+    if count > MAX_PROBES do im.TextColored(UI_COLOR_ERROR, "%s", text)
     else do im.TextDisabled("%s", text)
 }
 

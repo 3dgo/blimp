@@ -32,7 +32,7 @@ ui_draw_shadow_maps :: proc() {
     im.Text("%s", fmt.ctprintf(trs(.Shadow_Slices_Used), len(r.shadow_slices), MAX_SHADOW_SLICES))
     if r.shadow_missed > 0 {
         im.SameLine()
-        im.TextColored({1, 0.35, 0.3, 1}, "%s", fmt.ctprintf(trs(.Shadow_Missed), r.shadow_missed))
+        im.TextColored(UI_COLOR_ERROR, "%s", fmt.ctprintf(trs(.Shadow_Missed), r.shadow_missed))
     }
     if len(r.shadow_slices) == 0 {
         im.TextDisabled("%s", tr(.Shadow_None))

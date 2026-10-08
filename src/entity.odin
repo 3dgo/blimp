@@ -15,6 +15,16 @@ Entity_Handle_Map :: hm.Static_Handle_Map(MAX_ENTITIES, Entity, Entity_Handle)
 // the schema, not the generated file. The procs below are hand-written and reference the
 // generated fields; deleting a field they use is a compile error, by design.
 
+// One of a field's `when` entries in entity_schema.ini (entity_field_uses, generated): what the field does
+// while `holds`. A field with entries does something only while one of them holds; without, always. The
+// inspector's dots and tooltips show them.
+Entity_Field_Use :: struct {
+    holds:  proc(e: ^Entity) -> bool,
+    fields: []string,       // the fields the condition names: what turns this use on
+    cond:   string,         // as written: terms joined by &, each <field> or <field>=<A>|<B>
+    text:   [Lang]string,
+}
+
 entity_get :: proc(world: ^World, handle: Entity_Handle) -> (^Entity, bool) #optional_ok {
     return hm.get(&world.entities, handle)
 }
@@ -104,3 +114,4 @@ entity_writable_field :: proc(e: ^Entity, path: string, saved: bool) -> (v: any,
 deserialize_field :: proc(e: ^Entity, key: string, val: string) {
     if v, ok := entity_writable_field(e, key, saved = true); ok do deserialize_value(v, val)
 }
+

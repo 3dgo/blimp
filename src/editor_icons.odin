@@ -33,6 +33,9 @@ ICON_SEARCH       :: "\uE8B6"   // search (the older codepoint: this font file p
 ICON_COPY         :: "\uE14D"   // content_copy
 ICON_DUPLICATE    :: "\uE3BB"   // control_point_duplicate
 ICON_DELETE       :: "\uE872"   // delete
+ICON_LOCK         :: "\uE897"   // lock
+ICON_ARROW_UP     :: "\uE5D8"   // arrow_upward
+ICON_ARROW_DOWN   :: "\uE5DB"   // arrow_downward
 ICON_SELECT_ALL   :: "\uE162"   // select_all
 ICON_DESELECT     :: "\uEBB6"   // deselect
 ICON_FRAME        :: "\uE3B5"   // center_focus_weak

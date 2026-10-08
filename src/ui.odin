@@ -1,5 +1,6 @@
 package blimp
 
+import "core:fmt"
 import "core:mem"
 import "core:os"
 import "vendor:sdl3"
@@ -122,15 +123,66 @@ ui_add_font :: proc(fonts: ^im.FontAtlas, latin, cjk: cstring, config: im.FontCo
 
 UI_FONT_SIZE :: 16   // points at display scale 1: the body text; titles and labels scale from it
 UI_LABEL_GAP :: 16   // pixels (× display scale) between a form's label column and its inputs
+UI_ROW_GAP   :: 3    // pixels (× display scale) above each form row, on top of the item spacing
 
 ui_font_size :: proc() -> f32 { return UI_FONT_SIZE * app.display_scale }
 
-// Where a form's inputs start: past its widest label, plus the gap. Measured per form, so rows line up in
-// either language (ZH labels are wider).
-ui_label_column :: proc(labels: []Loc_ID) -> (x: f32) {
-    for id in labels do x = max(x, im.CalcTextSize(tr(id)).x)
-    return x + UI_LABEL_GAP * app.display_scale
+// ---- The shared form look: every panel's rows, blocks and cards come from these and ui_param_label. ----
+
+// Where a form's inputs start: the gutter, its widest label, then the gap. Measured per form, so rows line
+// up in either language (ZH labels are wider).
+ui_label_column :: proc(labels: []Loc_ID) -> f32 {
+    w: f32
+    for id in labels do w = max(w, im.CalcTextSize(tr(id)).x)
+    return ui_label_column_at(w)
 }
+
+ui_label_column_at :: proc(widest_label: f32) -> f32 {
+    return ui_gutter() + widest_label + UI_LABEL_GAP * app.display_scale
+}
+
+// Room before every form label, where a nested struct's fold arrow and the entity inspector's dots go. It is
+// TreeNode's own text offset (arrow plus padding), so a fold row's name lines up with the labels around it.
+ui_gutter :: proc() -> f32 {
+    return im.GetFontSize() + 2 * im.GetStyle().FramePadding.x
+}
+
+UI_TOOLTIP_WRAP :: 28   // a tooltip's text wraps at this many font sizes
+
+// A tooltip for the last item, wrapped like every other tooltip. Nothing when `text` is empty.
+ui_item_tooltip :: proc(text: string) {
+    if text == "" || !im.BeginItemTooltip() do return
+    im.PushTextWrapPos(im.GetFontSize() * UI_TOOLTIP_WRAP)
+    im.TextUnformatted(fmt.ctprintf("%s", text))
+    im.PopTextWrapPos()
+    im.EndTooltip()
+}
+
+// A block's title inside a panel: accent text with a rule after it.
+ui_heading :: proc(title: cstring) {
+    im.Dummy({0, 2 * app.display_scale})
+    im.PushStyleColorImVec4(.Text, UI_COLOR_ACCENT)
+    im.SeparatorText(title)
+    im.PopStyleColor()
+}
+
+// An open item's body (a nested struct here, an item in the schema editor): a bordered panel a shade lighter
+// than the window, so where it ends is plain. `inner`: a panel inside another (a condition, a member).
+ui_card_begin :: proc(inner := false) {
+    bg := im.GetStyleColorVec4(.WindowBg)^
+    lift: f32 = inner ? 0.06 : 0.03
+    im.PushStyleColorImVec4(.ChildBg, {bg.x + lift, bg.y + lift, bg.z + lift, 1})
+    im.PushStyleVarImVec2(.WindowPadding, {10 * app.display_scale, (inner ? 6 : 8) * app.display_scale})
+    im.BeginChild(inner ? "inner" : "card", {0, 0}, {.Borders, .AutoResizeY})
+}
+
+ui_card_end :: proc(inner := false) {
+    im.EndChild()
+    im.PopStyleVar()
+    im.PopStyleColor()
+    im.Dummy({0, (inner ? 3 : 6) * app.display_scale})
+}
+
 
 // A window showing one world's settings (World Settings, Bake): which world, and whether an
 // edit's undo step is open. Each window keeps one; these procs are the whole protocol.

@@ -39,6 +39,9 @@ Doc_Field :: struct {
     type:    Edit_Buf,   // "f32", "flags.EntityBasicStaticFlag", "enum.Team", "struct.Foo", …
     en:      Edit_Buf,
     zh:      Edit_Buf,
+    tip_en:  Edit_Buf,   // the inspector's tooltip: what the field is, whatever it's used for
+    tip_zh:  Edit_Buf,
+    uses:    [dynamic]Doc_Use,
     default: Edit_Buf,
     flags:   [len(SCHEMA_FLAG_TAGS)]bool,   // which of SCHEMA_FLAG_TAGS it has
     widget:  Edit_Buf,   // a schema_widgets name, "" = the type's default widget
@@ -47,8 +50,17 @@ Doc_Field :: struct {
     builtin: bool,       // engine-required: locked in the editor
 }
 
+// A `when` entry: what a field does while the condition holds (Entity_Field_Use).
+Doc_Use :: struct {
+    cond: Edit_Buf,   // terms joined by &, each <field> or <field>=<A>|<B>
+    en:   Edit_Buf,
+    zh:   Edit_Buf,
+}
+
 Doc_Item :: struct {
     id:      Edit_Buf,   // enum member / struct field identifier
+    tip_en:  Edit_Buf,   // enum/flags members only: the inspector's tooltip on that choice
+    tip_zh:  Edit_Buf,
     type:    Edit_Buf,   // struct members only ("f32", "vec3", "struct.X", …); unused for enum/flags
     en:      Edit_Buf,
     zh:      Edit_Buf,
@@ -85,8 +97,9 @@ SCHEMA_HEADER ::
 # Grammar — INI with TOML-style dotted sections. Every declaration is a [qualified.name]
 # section followed by "key = value" attribute lines:
 #
-#   [field.<id>]                 type / en / zh / default / tags / section / builtin / note
-#   [enum.<T>] / [flags.<T>]     a type (note);  [enum.<T>.<member>]   -> en / zh / note
+#   [field.<id>]                 type / en / zh / tip_en / tip_zh / when + when_en + when_zh (repeated)
+#                                / default / tags / section / builtin / note
+#   [enum.<T>] / [flags.<T>]     a type (note);  [enum.<T>.<member>]   -> en / zh / tip_en / tip_zh / note
 #   [struct.<T>]                 a type (note);  [struct.<T>.<member>] -> type / en / zh / default / note
 #
 # Types: scalars (bool, i32, u32, f32, string, vec2, vec3, vec4, quat), owned inline text
@@ -98,7 +111,13 @@ SCHEMA_HEADER ::
 # (sections in the enum's member order; fields without one go first, above them).
 # tags = how the inspector treats the field: hidden / readonly / noserialize / identity, and widget:<kind>
 # (model, texture, sound for string; icon for sbuf*; color, linear_color for vec3). Set in the schema editor.
-# note = what it's for, one line; codegen writes it as a comment beside the generated declaration.
+# tip_en / tip_zh = the inspector's tooltip: on a field, what it is whatever it's used for; on an enum or flags
+# member, what that choice does (shown on its dropdown item or checkbox).
+# when = a condition under which the field does something, with when_en / when_zh (both required) on the
+# next lines saying what. Repeat the three for each use. Terms joined by &, each <field> (set: non-empty,
+# non-zero, not the first enum member) or <field>=<A>|<B> (an enum that is one of them, flags with one of
+# them set). A field with "when" lines does something only while one holds (the inspector's dot); without, always.
+# note = what it's for, one line, for programmers; codegen writes it as a comment beside the declaration.
 `
 
 // A category separator comment, e.g.  #================ Fields ================
@@ -149,6 +168,7 @@ schema_doc_load :: proc() {
             case kind == "field" && len(parts) == 2:
                 f: Doc_Field
                 edit_buf_set(&f.id, parts[1])
+                f.uses = make([dynamic]Doc_Use, a)
                 append(&schema_doc.fields, f)
                 target = .Field
             case (kind == "enum" || kind == "flags" || kind == "struct") && len(parts) == 2:
@@ -186,6 +206,14 @@ schema_doc_load :: proc() {
             case "type":    edit_buf_set(&f.type, val)
             case "en":      edit_buf_set(&f.en, val)
             case "zh":      edit_buf_set(&f.zh, val)
+            case "tip_en":  edit_buf_set(&f.tip_en, val)
+            case "tip_zh":  edit_buf_set(&f.tip_zh, val)
+            case "when":
+                u: Doc_Use
+                edit_buf_set(&u.cond, val)
+                append(&f.uses, u)
+            case "when_en": if len(f.uses) > 0 do edit_buf_set(&f.uses[len(f.uses) - 1].en, val)
+            case "when_zh": if len(f.uses) > 0 do edit_buf_set(&f.uses[len(f.uses) - 1].zh, val)
             case "default": edit_buf_set(&f.default, val)
             case "tags":    _doc_parse_tags(f, val)
             case "section": edit_buf_set(&f.section, val)
@@ -205,6 +233,8 @@ schema_doc_load :: proc() {
             case "type":    edit_buf_set(&m.type, val)
             case "en":      edit_buf_set(&m.en, val)
             case "zh":      edit_buf_set(&m.zh, val)
+            case "tip_en":  edit_buf_set(&m.tip_en, val)
+            case "tip_zh":  edit_buf_set(&m.tip_zh, val)
             case "default": edit_buf_set(&m.default, val)
             case "note":    edit_buf_set(&m.note, val)
             }
@@ -227,6 +257,13 @@ schema_doc_save :: proc(path: string) -> bool {
         _doc_write_kv_opt(&b, "section", edit_buf_str(&f.section))
         _doc_write_kv_opt(&b, "en", edit_buf_str(&f.en))
         _doc_write_kv_opt(&b, "zh", edit_buf_str(&f.zh))
+        _doc_write_kv_opt(&b, "tip_en", edit_buf_str(&f.tip_en))
+        _doc_write_kv_opt(&b, "tip_zh", edit_buf_str(&f.tip_zh))
+        for &u in f.uses {
+            _doc_write_kv(&b, "when", edit_buf_str(&u.cond))
+            _doc_write_kv(&b, "when_en", edit_buf_str(&u.en))
+            _doc_write_kv(&b, "when_zh", edit_buf_str(&u.zh))
+        }
         _doc_write_kv_opt(&b, "default", edit_buf_str(&f.default))
         _doc_write_kv_opt(&b, "note", edit_buf_str(&f.note))
     }
@@ -253,6 +290,10 @@ schema_doc_save :: proc(path: string) -> bool {
                 if t.kind == .Struct do _doc_write_kv(&b, "type", edit_buf_str(&m.type))
                 _doc_write_kv_opt(&b, "en", edit_buf_str(&m.en))
                 _doc_write_kv_opt(&b, "zh", edit_buf_str(&m.zh))
+                if t.kind != .Struct {
+                    _doc_write_kv_opt(&b, "tip_en", edit_buf_str(&m.tip_en))
+                    _doc_write_kv_opt(&b, "tip_zh", edit_buf_str(&m.tip_zh))
+                }
                 if t.kind == .Struct do _doc_write_kv_opt(&b, "default", edit_buf_str(&m.default))
                 _doc_write_kv_opt(&b, "note", edit_buf_str(&m.note))
             }
@@ -285,6 +326,14 @@ schema_doc_validate :: proc() -> (ok: bool, msg: string) {
         if w := edit_buf_str(&f.widget); w != "" && !schema_widget_fits(w, t) {
             return false, strings.concatenate({"field '", id, "' has widget '", w, "', which doesn't fit type ", t}, context.temp_allocator)
         }
+        for &u in f.uses {
+            cond := edit_buf_str(&u.cond)
+            if cond == "" do return false, fmt.tprintf("field '%s' has an empty `when`", id)
+            if edit_buf_str(&u.en) == "" || edit_buf_str(&u.zh) == "" {
+                return false, fmt.tprintf("field '%s': `when = %s` needs both an English and a Chinese text", id, cond)
+            }
+            if when_ok, why := _doc_validate_when(cond); !when_ok do return false, fmt.tprintf("field '%s': `when = %s`: %s", id, cond, why)
+        }
     }
     for &t, i in schema_doc.types {
         name := edit_buf_str(&t.name)
@@ -309,6 +358,41 @@ schema_doc_validate :: proc() -> (ok: bool, msg: string) {
                 }
             }
         }
+    }
+    return true, ""
+}
+
+/* ------------------------------ when ------------------------------ */
+
+// A `when` condition's terms against the document, as codegen will compile them (_use_condition).
+@(private = "file")
+_doc_validate_when :: proc(cond: string) -> (ok: bool, msg: string) {
+    c := cond
+    next_term: for term in strings.split_iterator(&c, "&") {
+        name, _, members := strings.partition(strings.trim_space(term), "=")
+        name, members = strings.trim_space(name), strings.trim_space(members)
+        for &f in schema_doc.fields do if edit_buf_str(&f.id) == name {
+            t := edit_buf_str(&f.type)
+            is_enum, is_flags := strings.has_prefix(t, "enum."), strings.has_prefix(t, "flags.")
+            if members == "" {
+                bare := is_enum || is_flags || t == "string" || strings.has_prefix(t, "sbuf") ||
+                        t == "bool" || t == "i32" || t == "u32" || t == "f32"
+                if !bare do return false, fmt.tprintf("'%s' is %s, which can't be tested bare", name, t)
+                continue next_term
+            }
+            if !is_enum && !is_flags do return false, fmt.tprintf("'%s' is %s, so it takes no =members", name, t)
+            type_name := t[len("enum.") if is_enum else len("flags."):]
+            for &ty in schema_doc.types do if edit_buf_str(&ty.name) == type_name {
+                ms := members
+                next_member: for m in strings.split_iterator(&ms, "|") {
+                    for &mm in ty.members do if edit_buf_str(&mm.id) == strings.trim_space(m) do continue next_member
+                    return false, fmt.tprintf("%s has no member '%s'", type_name, strings.trim_space(m))
+                }
+                continue next_term
+            }
+            return false, fmt.tprintf("unknown type %s", t)
+        }
+        return false, fmt.tprintf("no field '%s'", name)
     }
     return true, ""
 }
