@@ -91,23 +91,10 @@ Frame_Constants :: struct {
     shadow_map_slot:         u32,
     shadow_view_buffer_slot: u32,
 
-    // The retro post chain (render_post.odin, post.slang): its scene-size intermediates, and the effects'
-    // amounts from Retro_Settings, each 0 when its effect is off (render_view_update_constants).
-    signal_texture_slot:    u32,   // the signal: tonemapped, quantized, display-space
-    bloom_texture_slot:     u32,   // the bloom blurred across
-    bloom_out_texture_slot: u32,   // then down: what the upscale adds
-    crt:          u32,   // nonzero: the upscale is a CRT's (else point-sampled)
-    dither:       f32,   // Bayer threshold spread, 0..1
-    luma_blur:    f32,
-    chroma_blur:  f32,
-    scanlines:    f32,   // beam profile strength
-    beam_dark:    f32,
-    beam_bright:  f32,
-    mask:         f32,
-    bloom:        f32,
-    bloom_radius: f32,
-    gamma:        f32,
-    brightness:   f32,
+    // The retro post chain (render_post.odin, post.slang): its scene-size signal, and the dither amount
+    // from Retro_Settings, 0 when quantize is off (render_view_update_constants).
+    signal_texture_slot: u32,   // the signal: tonemapped, quantized, display-space
+    dither:              f32,   // Bayer threshold spread, 0..1
 
     // Fog (World_Settings.fog, post.slang), along each pixel's ray from the scene depth through inv_proj. Each
     // part is off at 0 (render_view_fog): distance when fog_end <= fog_start, height at fog_density 0, halos at
@@ -115,22 +102,22 @@ Frame_Constants :: struct {
     fog_start:          f32,
     fog_end:            f32,
     fog_height:         f32,   // height fog: world y where it has fog_density
-    fog_distance_color: vec3,
     fog_density:        f32,   // per metre
+    fog_distance_color: vec3,
+    fog_lit:            f32,   // 0..1: how far the colours follow the probes' light over fog_light_mean
     inv_proj:           mat4,  // the projection this view rendered with, inverted (the camera entity's in game mode)
     fog_height_color:   vec3,
     fog_falloff:        f32,   // metres up for the density to fall by e
     fog_light_mean:     vec3,  // the level's average light in the air (Probe_Grid.light_mean)
     fog_glow:           f32,   // halos: per metre of haze, plus the height fog's density
-    fog_lit:            f32,   // 0..1: how far the colours follow the probes' light over fog_light_mean
 
     skin_buffer_slot: u32,   // Skin_Vertex per skinned vertex (asset)
     bone_buffer_slot: u32,   // the world's skin matrices this frame (World_Render.bones)
 
-    _padding: [512 - 508]byte,   // CBVs come in 256-byte steps
+    _padding: [512 - 456]byte,   // CBVs come in 256-byte steps
 }
 #assert(offset_of(Frame_Constants, signal_texture_slot) == 312)
-#assert(offset_of(Frame_Constants, _padding) == 508)
+#assert(offset_of(Frame_Constants, _padding) == 456)
 #assert(offset_of(Frame_Constants, probe_layer_scale) % 16 == 0)
 #assert(MAX_PROBE_LAYERS <= 8)
 #assert(size_of(Frame_Constants) == 512)
@@ -400,7 +387,7 @@ shader_pipeline_destroy :: proc(p: Shader_Pipeline) {
 renderer_dx_pipelines :: proc() -> []^Shader_Pipeline {
     list := make([dynamic]^Shader_Pipeline, context.temp_allocator)
     for &p in renderer_dx.scene do append(&list, &p)
-    append(&list, &render_post.signal, &render_post.bloom_h, &render_post.bloom_v, &render_post.upscale)
+    append(&list, &render_post.signal, &render_post.upscale)
     append(&list, &render_shadows.pipeline, &debug_draw.pipeline)
     return list[:]
 }

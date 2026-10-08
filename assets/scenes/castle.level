@@ -40,21 +40,6 @@ retro.ps1.point_sampling = true
 retro.ps1.quantize = true
 retro.ps1.color_bits = 5
 retro.ps1.dither = 1
-retro.crt.on = true
-retro.crt.composite = true
-retro.crt.luma_blur = 0.25
-retro.crt.chroma_blur = 0.8
-retro.crt.scanlines = true
-retro.crt.scanline_strength = 0.5
-retro.crt.beam_dark = 0.32
-retro.crt.beam_bright = 0.6
-retro.crt.mask = true
-retro.crt.mask_strength = 0.1
-retro.crt.bloom = true
-retro.crt.bloom_strength = 0.06
-retro.crt.bloom_radius = 3
-retro.crt.gamma = 2.3
-retro.crt.brightness = 1
 
 [entity]
 name = 地面

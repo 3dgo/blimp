@@ -89,7 +89,6 @@ Fog_Settings :: struct {
 // and its amounts; a group's `on` switches all of its effects. Drawn by hand in the Retro Look window.
 Retro_Settings :: struct {
     ps1: Retro_PS1,
-    crt: Retro_CRT,
 }
 
 Retro_PS1 :: struct {
@@ -106,34 +105,11 @@ Retro_PS1 :: struct {
     dither:         f32,    // 4x4 Bayer dither: 0 = plain banding, 1 = full
 }
 
-// A composite TV showing the PS1's signal. Distances are in scene pixels (lines, vertically).
-Retro_CRT :: struct {
-    on:             bool,
-    composite:      bool,
-    luma_blur:      f32,    // horizontal blur of brightness (sigma); this is what melts the dither
-    chroma_blur:    f32,    // of colour: composite chroma is far narrower, so colour bleeds sideways
-    scanlines:      bool,
-    scanline_strength: f32, // 0 = flat lines, 1 = the full beam profile
-    beam_dark:      f32,    // beam width (sigma) of a black line: thin, so dark lines part into gaps
-    beam_bright:    f32,    // and of a white one: fat, so bright lines merge
-    mask:           bool,
-    mask_strength:  f32,    // aperture grille depth: the lit stripe is 1 + 2x, the other two 1 - x
-    bloom:          bool,
-    bloom_strength: f32,    // the glass's glow, added on top
-    bloom_radius:   f32,    // sigma
-    gamma:          f32,    // the tube's: 2.2 = neutral, higher = deeper shadows
-    brightness:     f32,    // × the light, to win back what the mask and scanlines cost
-}
-
 RETRO_COLOR_BITS_MIN :: 2
 
 RETRO_SETTINGS_DEFAULT :: Retro_Settings{
     ps1 = {on = true, low_res = true, lines = 216, vertex_snap = true, snap = 1, affine = true, warp = 1,
            point_sampling = true, quantize = true, color_bits = 5, dither = 1},
-    crt = {on = false, composite = true, luma_blur = 0.25, chroma_blur = 0.8,
-           scanlines = true, scanline_strength = 0.5, beam_dark = 0.32, beam_bright = 0.6,
-           mask = true, mask_strength = 0.1, bloom = true, bloom_strength = 0.06, bloom_radius = 3,
-           gamma = 2.3, brightness = 1},
 }
 
 // The probe bake's inputs (editor_bake.odin, claude/rendering.md → Baker). Read by the baker only: a change

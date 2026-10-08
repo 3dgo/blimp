@@ -56,19 +56,6 @@ public float3 linear_to_srgb(float3 c) {
     return select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0 / 2.4) - 0.055);
 }
 
-// Bilinear `t` at continuous texel position `p` (texel centres at whole + 0.5), clamped at the edges.
-public float3 load_bilinear(Texture2D<float4> t, float2 p, int2 size) {
-    float2 q = p - 0.5;
-    int2   i = int2(floor(q));
-    float2 f = q - float2(i);
-    int2  hi = size - 1;
-    float3 a = t.Load(int3(clamp(i,              int2(0, 0), hi), 0)).rgb;
-    float3 b = t.Load(int3(clamp(i + int2(1, 0), int2(0, 0), hi), 0)).rgb;
-    float3 c = t.Load(int3(clamp(i + int2(0, 1), int2(0, 0), hi), 0)).rgb;
-    float3 d = t.Load(int3(clamp(i + int2(1, 1), int2(0, 0), hi), 0)).rgb;
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
-}
-
 // Unit direction → [-1, 1]²: +Z in the middle, -Z at the corners. Same as octahedral_encode in world_probes.odin.
 public float2 octahedral_encode(float3 d) {
     float2 p = d.xy / (abs(d.x) + abs(d.y) + abs(d.z));

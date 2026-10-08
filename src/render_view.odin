@@ -36,9 +36,9 @@ Render_View :: struct {
 VIEW_HDR_FORMAT :: dxgi.FORMAT.R16G16B16A16_FLOAT
 
 // How a view renders (claude/rendering.md, Retro look). Both run the same scene shaders and passes; the
-// mode picks the frame constants (sampler, snap, affine, quantize, CRT), the target's scene scale, and
+// mode picks the frame constants (sampler, snap, affine, quantize), the target's scene scale, and
 // whether the post chain runs its retro passes (render_post.odin).
-//   Retro — the PS1 and CRT effects of its level's Retro_Settings (each switchable, with its amounts)
+//   Retro — the PS1 effects of its level's Retro_Settings (each switchable, with its amounts)
 //   Clean — scene at the display size; none of them
 Render_Mode :: enum u8 { Retro, Clean }
 
@@ -50,20 +50,19 @@ Render_Mode :: enum u8 { Retro, Clean }
 //   Lighting_Only — direct + indirect on white
 Lighting_View :: enum u32 { Lit, Probes_Only, Indirect_Only, Direct_Only, Lighting_Only }
 
-// The retro effects this view shows: its world's settings, like every other setting, with a group that's
-// off zeroed; all zero in .Clean.
-render_view_retro :: proc(view: ^Render_View) -> (ps1: Retro_PS1, crt: Retro_CRT) {
+// The retro effects this view shows: its world's settings, like every other setting, zeroed when they're
+// off or in .Clean.
+render_view_retro :: proc(view: ^Render_View) -> (ps1: Retro_PS1) {
     if view.mode == .Clean do return
     r := view.world.settings.retro
     if r.ps1.on do ps1 = r.ps1
-    if r.crt.on do crt = r.crt
     return
 }
 
 // Display pixels per scene pixel for a view of display size `size`: with low resolution on, the whole
 // number that brings its height closest to the retro `lines` (never below 1); else 1.
 render_view_scene_scale :: proc(view: ^Render_View, size: uvec2) -> u32 {
-    ps1, _ := render_view_retro(view)
+    ps1 := render_view_retro(view)
     if !ps1.low_res do return 1
     return max(1, u32(math.round(f32(size.y) / f32(max(ps1.lines, 1)))))
 }
@@ -115,7 +114,7 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
     world  := view.world
     aspect := f32(view.target.width) / f32(view.target.height)
     scale  := max(view.target.scene_scale, 1)
-    ps1, crt := render_view_retro(view)
+    ps1 := render_view_retro(view)
     bits := clamp(ps1.color_bits, RETRO_COLOR_BITS_MIN, 8)
 
     frame_constants := Frame_Constants{
@@ -151,20 +150,7 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         shadow_view_buffer_slot = world.render.shadow_views_srv[frame_slot].heap_slot,
 
         signal_texture_slot    = view.target.signal_srv.heap_slot,
-        bloom_texture_slot     = view.target.bloom_srv[0].heap_slot,
-        bloom_out_texture_slot = view.target.bloom_srv[1].heap_slot,
-        crt          = crt.on ? 1 : 0,
-        dither       = ps1.dither,
-        luma_blur    = crt.composite ? crt.luma_blur : 0,
-        chroma_blur  = crt.composite ? crt.chroma_blur : 0,
-        scanlines    = crt.scanlines ? crt.scanline_strength : 0,
-        beam_dark    = crt.beam_dark,
-        beam_bright  = crt.beam_bright,
-        mask         = crt.mask ? crt.mask_strength : 0,
-        bloom        = crt.bloom ? crt.bloom_strength : 0,
-        bloom_radius = crt.bloom_radius,
-        gamma        = crt.gamma,
-        brightness   = crt.brightness,
+        dither                 = ps1.dither,
     }
     // A play world lights with its level's probes (it has none of its own).
     frame_constants.lighting_view  = u32(view.lighting)

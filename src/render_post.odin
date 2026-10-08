@@ -6,11 +6,11 @@ import "dx"
 
 // The post chain (claude/rendering.md: tonemap → LUT → quantize + dither → upscale), fullscreen passes
 // (post.slang): each view's linear HDR scene target → its display target, which ImGui samples as-is.
-//   .Retro  signal (scene size) → [bloom across → bloom down, scene size, CRT bloom on] → upscale (display size)
+//   .Retro  signal (scene size) → upscale (display size, point-sampled)
 //   .Clean  signal, straight into the display target (the scene is display-sized, nothing is quantized)
 // No LUT yet.
 Render_Post :: struct {
-    signal, bloom_h, bloom_v, upscale: Shader_Pipeline,
+    signal, upscale: Shader_Pipeline,
 }
 render_post: Render_Post
 
@@ -25,13 +25,12 @@ render_post_init :: proc() {
         return shader_pipeline_create("post", "vert_main", entry, opts)
     }
     render_post.signal  = pass("frag_signal",  .R8G8B8A8_UNORM)   // the display format: it's also the clean view's output
-    render_post.bloom_h = pass("frag_bloom_h", VIEW_HDR_FORMAT)
-    render_post.bloom_v = pass("frag_bloom_v", VIEW_HDR_FORMAT)
     render_post.upscale = pass("frag_upscale", .R8G8B8A8_UNORM)
 }
 
 render_post_shutdown :: proc() {
-    for p in ([?]Shader_Pipeline{render_post.signal, render_post.bloom_h, render_post.bloom_v, render_post.upscale}) do shader_pipeline_destroy(p)
+    shader_pipeline_destroy(render_post.signal)
+    shader_pipeline_destroy(render_post.upscale)
 }
 
 // Resolves the view's scene target into its display target. Runs right after render_view_draw, so the
@@ -45,15 +44,8 @@ render_post_draw :: proc(view: ^Render_View) {
     cmd.handle->IASetPrimitiveTopology(.TRIANGLELIST)
 
     if t.post_targets {
-        _, crt := render_view_retro(view)
         render_post_pass(cmd, render_post.signal, &t.signal_tex, t.signal_rtv, t.scene_width, t.scene_height)
         dx.texture_transition(cmd, &t.signal_tex, {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)
-        if crt.on && crt.bloom {
-            render_post_pass(cmd, render_post.bloom_h, &t.bloom_tex[0], t.bloom_rtv[0], t.scene_width, t.scene_height)
-            dx.texture_transition(cmd, &t.bloom_tex[0], {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)
-            render_post_pass(cmd, render_post.bloom_v, &t.bloom_tex[1], t.bloom_rtv[1], t.scene_width, t.scene_height)
-            dx.texture_transition(cmd, &t.bloom_tex[1], {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)
-        }
         render_post_pass(cmd, render_post.upscale, &t.tex, t.rtv, t.width, t.height)
     } else {
         render_post_pass(cmd, render_post.signal, &t.tex, t.rtv, t.width, t.height)

@@ -279,8 +279,8 @@ Each walkthrough follows one action through every file it touches.
    bindlessly, applies PS1 vertex snap, and `shading.slang` lights the pixel (direct lights, hard
    shadows, probe irradiance with visibility).
 6. **Post**: `render_post_draw` (`post.slang`) adds fog along each pixel's ray (distance and height fog,
-   lamp halos; docs/fog.md), tonemaps every pixel, background included, quantizes with dither into the signal, optionally blurs bloom, and upscales
-   (point, or a CRT model) into the display target.
+   lamp halos; docs/fog.md), tonemaps every pixel, background included, quantizes with dither into the signal, and point-upscales
+   it into the display target.
 7. **Debug lines** draw on the display target after post, so their colours stay exact: the game's own
    (`World.debug_line`) in every view, the editor's in editor views.
 8. **UI**: the view's display target is an ImGui image in its window; `ui_draw` puts it on screen.
@@ -471,7 +471,7 @@ Shaders (`assets_engine/shaders/`, Slang compiled at runtime):
 | `scene.slang` | the scene vertex and pixel shaders: bindless fetch, vertex snap, Gouraud per-vertex light, affine UVs, cutout |
 | `shading.slang` | all lighting: falloffs, spot/cylinder cones, hard shadow lookup, probe irradiance with visibility, the shading models |
 | `shadow.slang` | depth-only shadow vertex shader |
-| `post.slang` | fog (distance, height, probe-lit, lamp halos), tonemap, quantize/dither, bloom, point or CRT upscale |
+| `post.slang` | fog (distance, height, probe-lit, lamp halos), tonemap, quantize/dither, point upscale |
 | `debug_line.slang` | debug lines, depth-tested by hand against the scene depth |
 | `common.slang` | the frame constants and shared GPU structs and constants |
 | `utils.slang` | helpers that don't read the frame constants (so `shadow.slang` can use them): bindless access, skinning, fullscreen triangle, Bayer threshold, sRGB, bilinear load, octahedral encode |

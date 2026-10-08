@@ -40,37 +40,23 @@ public struct FrameConstants {
     public uint     shadowMapSlot;        // the world's shadow map slices (Texture2DArray, render_shadows.odin)
     public uint     shadowViewBufferSlot; // ShadowView per slice
 
-    // The retro post chain (render_post.odin, post.slang): its scene-size intermediates, and the effects'
-    // amounts from Retro_Settings, each 0 when its effect is off.
+    // The retro post chain (render_post.odin, post.slang): its scene-size signal, and the dither amount.
     public uint     signalTextureSlot;    // the signal: tonemapped, quantized, display-space
-    public uint     bloomTextureSlot;     // the bloom blurred across
-    public uint     bloomOutTextureSlot;  // then down: what the upscale adds
-    public uint     crt;                  // nonzero: the upscale is a CRT's (else point-sampled)
     public float    dither;               // Bayer threshold spread, 0..1
-    public float    lumaBlur;
-    public float    chromaBlur;
-    public float    scanlines;            // beam profile strength
-    public float    beamDark;
-    public float    beamBright;
-    public float    mask;
-    public float    bloom;
-    public float    bloomRadius;
-    public float    gamma;
-    public float    brightness;
 
     // Fog (World_Settings.fog, post.slang), each part off at 0: distance when fogEnd <= fogStart, height at
     // fogDensity 0, halos at fogGlow 0, lit at fogLit 0. Colours are linear scene light.
     public float    fogStart;         // metres along the ray: clear nearer
     public float    fogEnd;           // all fog from here
     public float    fogHeight;        // height fog: world y where it has fogDensity
-    public float3   fogDistanceColor;
     public float    fogDensity;       // per metre
+    public float3   fogDistanceColor;
+    public float    fogLit;           // 0..1: how far the colours follow the probes' light over fogLightMean
     public float4x4 invProj;          // this view's projection, inverted: scene depth -> view space
     public float3   fogHeightColor;
     public float    fogFalloff;       // metres up for the density to fall by e
     public float3   fogLightMean;     // the level's average light in the air (Probe_Grid.light_mean)
     public float    fogGlow;          // halos: per metre of haze, plus the height fog's density
-    public float    fogLit;           // 0..1: how far the colours follow the probes' light over fogLightMean
     public uint     skinBufferSlot;   // SkinVertex per skinned vertex (Mesh.skinOffset)
     public uint     boneBufferSlot;   // the world's skin matrices this frame (MeshInstance.boneOffset)
 }

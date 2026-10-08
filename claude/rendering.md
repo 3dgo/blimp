@@ -17,8 +17,8 @@ PBR version later is additive.
   an `R16G16B16A16_FLOAT` scene target (`hdr_tex`) and an `RGBA8_UNORM` display target
   (`tex`) that ImGui samples and screenshots read. `render_post.odin` (`post.slang`,
   fullscreen passes) resolves one into the other; debug lines draw after it, onto the display
-  target, so their colours stay exact. A `.Retro` view also has scene-size intermediates
-  (`post_targets`): the signal (`RGBA8`) and two bloom targets (`RGBA16F`).
+  target, so their colours stay exact. A `.Retro` view also has a scene-size intermediate
+  (`post_targets`): the signal (`RGBA8`).
 - **The scene target and depth are the display size ÷ `scene_scale`, rounded up**
   (`dx.Viewport_Options.scene_scale`). The scene VS squeezes NDC by `sceneCover` so the image
   lines up with the display pixel for pixel while the projection stays the display's (CPU
@@ -412,31 +412,19 @@ lags; this has no history and reacts the same frame. A learning walkthrough of h
 
 Art-directed per level: `World_Settings.retro` (`Retro_Settings`, saved as `retro.*` keys, undoable),
 edited in the Retro Look window (`ui_retro.odin`, the tune button beside the retro toggle, which
-flips the view between `.Retro` and `.Clean`). Two groups, each with its own `on`; every effect has
+flips the view between `.Retro` and `.Clean`). One group, PS1, with its own `on`; every effect has
 its switch and its amounts. A view reads the settings of the world it shows (`render_view_retro`): during
 play that's the play copy, whose edits go with it at Stop, like every other setting. An effect that's off goes to the shader as 0 and is skipped.
 
 - **PS1**: low resolution (`lines`: the whole-number scale closest to it), vertex jitter (grid in
   scene pixels), affine textures (warp), point sampling, colour depth (bits per channel + Bayer
   dither strength).
-- **CRT** (off by default): replaces the point upscale with a composite TV's reconstruction of the
-  dithered signal, which is how the dither was meant to be seen: on a TV it blended away. Per
-  display pixel, from the raw signal pixels:
-  1. composite blur: horizontal-only low-pass in YIQ, luma narrower than chroma: melts the dither, bleeds colour;
-  2. scanlines: a Gaussian beam per line, width growing with brightness, area-normalized (dark
-     lines part into gaps, average brightness kept), strength blending from flat lines;
-  3. aperture grille at display pixels (averages 1);
-  4. bloom: the glass's glow, a wide Gaussian of the light at scene size, added on top. Not a
-     thresholded modern bloom.
 
-  Tube gamma decodes the signal to light and 2.2 re-encodes it, so 2.2 is neutral.
+Passes (`render_post.odin`): signal (scene size: tonemap + quantize/dither) → upscale (display size,
+point-sampled). A clean view runs the signal pass alone, straight into the display target.
 
-Passes (`render_post.odin`): signal (scene size: tonemap + quantize/dither) → bloom across → bloom
-down (scene size, bloom on only) → upscale (display size). A clean view runs the signal pass alone,
-straight into the display target.
-
-Left out on purpose: curvature and vignette (break pixel alignment with picking and debug lines),
-phosphor persistence (needs the previous frame).
+No CRT emulation (composite blur, scanlines, aperture grille, tube bloom): built once (2026-10) and
+removed, the look wasn't wanted. Don't re-add it.
 
 UI renders at native resolution after the upscale; the world renders low-res.
 

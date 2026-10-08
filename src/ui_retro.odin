@@ -33,14 +33,12 @@ ui_draw_retro :: proc() {
     settings_window_track_edit(&retro_ui, before)
 }
 
-// Two groups, PS1 and CRT, each with its switch; under it each effect's switch, and under that its amounts,
-// disabled while the effect or its group is off.
+// The PS1 group with its switch; under it each effect's switch, and under that its amounts, disabled while
+// the effect or the group is off.
 @(private="file")
 ui_retro_settings :: proc(r: ^Retro_Settings) {
     labels := [?]Loc_ID{.Retro_On, .Retro_Low_Res, .Retro_Lines, .Retro_Vertex_Snap, .Retro_Snap, .Retro_Affine,
-        .Retro_Warp, .Retro_Point_Sampling, .Retro_Quantize, .Retro_Color_Bits, .Retro_Dither, .Retro_Composite,
-        .Retro_Luma_Blur, .Retro_Chroma_Blur, .Retro_Scanlines, .Retro_Strength, .Retro_Beam_Dark,
-        .Retro_Beam_Bright, .Retro_Mask, .Retro_Bloom, .Retro_Radius, .Retro_Gamma, .Retro_Brightness}
+        .Retro_Warp, .Retro_Point_Sampling, .Retro_Quantize, .Retro_Color_Bits, .Retro_Dither}
     o := DEFAULT_PARAM_UI_OPTIONS
     o.label_w = ui_label_column(labels[:]) + im.GetStyle().IndentSpacing   // amounts are indented under their effect
 
@@ -66,34 +64,6 @@ ui_retro_settings :: proc(r: ^Retro_Settings) {
     im.SliderInt("##color_bits", &p.color_bits, RETRO_COLOR_BITS_MIN, 8, "%d", {.ClampOnInput})
     retro_slider(.Retro_Dither, &p.dither, 0, 1, o)
     retro_effect_end()
-    im.EndDisabled()
-    im.PopID()
-
-    c := &r.crt
-    im.SeparatorText(tr(.Retro_CRT))
-    im.PushID("crt")
-    ui_param_bool(string(tr(.Retro_On)), &c.on, o)
-    im.BeginDisabled(!c.on)
-    retro_effect(.Retro_Composite, &c.composite, o)
-    retro_slider(.Retro_Luma_Blur, &c.luma_blur, 0, 3, o)
-    retro_slider(.Retro_Chroma_Blur, &c.chroma_blur, 0, 5, o)
-    retro_effect_end()
-    retro_effect(.Retro_Scanlines, &c.scanlines, o)
-    retro_slider(.Retro_Strength, &c.scanline_strength, 0, 1, o)
-    retro_slider(.Retro_Beam_Dark, &c.beam_dark, 0.1, 1, o)
-    retro_slider(.Retro_Beam_Bright, &c.beam_bright, 0.1, 1, o)
-    retro_effect_end()
-    retro_effect(.Retro_Mask, &c.mask, o)
-    retro_slider(.Retro_Strength, &c.mask_strength, 0, 1, o)
-    retro_effect_end()
-    retro_effect(.Retro_Bloom, &c.bloom, o)
-    retro_slider(.Retro_Strength, &c.bloom_strength, 0, 1, o)
-    retro_slider(.Retro_Radius, &c.bloom_radius, 0.5, 16, o)
-    retro_effect_end()
-    im.SeparatorText(tr(.Retro_Tube))
-    retro_slider(.Retro_Gamma, &c.gamma, 1.8, 3, o)
-    im.SetItemTooltip("%s", tr(.Retro_Gamma_Tip))
-    retro_slider(.Retro_Brightness, &c.brightness, 0.5, 2, o)
     im.EndDisabled()
     im.PopID()
 

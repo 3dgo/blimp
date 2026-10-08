@@ -233,7 +233,7 @@ Views  (<view> = view id, see 'views')
   stats [on|off]                          the FPS / GPU-per-pass overlay (F3)
   gameview <view>                         hide / show icons, outlines and the gizmo in the view (G)
   retro <view> [on|off]                   get or set the view's render mode: the retro look, or clean (off);
-                                          the effects are the level's settings: settings <world> retro.crt.on true
+                                          the effects are the level's settings: settings <world> retro.ps1.on true
   screenshot <view> [path.png]            save the view's last frame (the 3D scene only); replies with the file path
   screenshot ui [path.png]                save the whole main window as shown: views, icons, gizmo, every docked or
                                           floating panel (not panels dragged out into their own OS window)
