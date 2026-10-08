@@ -58,11 +58,19 @@ public struct FrameConstants {
     public float    gamma;
     public float    brightness;
 
-    public float3   fogColor;         // distance fog (World_Settings.fog): the background colour, display space
-    public float    fogStart;         // metres from the eye: full colour nearer
-    public float    fogEnd;           // all fog colour from here; <= fogStart: fog off
-    public float2   _padFog;
+    // Fog (World_Settings.fog, post.slang), each part off at 0: distance when fogEnd <= fogStart, height at
+    // fogDensity 0, halos at fogGlow 0, lit at fogLit 0. Colours are linear scene light.
+    public float    fogStart;         // metres along the ray: clear nearer
+    public float    fogEnd;           // all fog from here
+    public float    fogHeight;        // height fog: world y where it has fogDensity
+    public float3   fogDistanceColor;
+    public float    fogDensity;       // per metre
     public float4x4 invProj;          // this view's projection, inverted: scene depth -> view space
+    public float3   fogHeightColor;
+    public float    fogFalloff;       // metres up for the density to fall by e
+    public float3   fogLightMean;     // the level's average light in the air (Probe_Grid.light_mean)
+    public float    fogGlow;          // halos: per metre of haze, plus the height fog's density
+    public float    fogLit;           // 0..1: how far the colours follow the probes' light over fogLightMean
     public uint     skinBufferSlot;   // SkinVertex per skinned vertex (Mesh.skinOffset)
     public uint     boneBufferSlot;   // the world's skin matrices this frame (MeshInstance.boneOffset)
 }
@@ -75,6 +83,7 @@ public struct Light {
     public float3 color; public float cosOuter;
     public float intensity; public float cosInner; public float innerRadius; public uint falloff;
     public float beamRadius; public float beamInner; public uint shadowSlice; public float shadowTexel;
+    public float halo; public float _pad0; public float _pad1; public float _pad2;   // × its glow in the fog
 }
 
 // Light.shadowSlice of a light without a shadow map (SHADOW_NONE), and the slices' size (SHADOW_MAP_SIZE).

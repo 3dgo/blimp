@@ -2,6 +2,7 @@ module post;
 
 import "utils";
 import "common";
+import "shading";
 
 // The post chain (claude/rendering.md: tonemap → LUT → quantize + dither → upscale), fullscreen triangles
 // (render_post.odin). A retro view:
@@ -64,34 +65,183 @@ float3 quantize_dither(float3 c, uint2 px) {
     return floor(c * gFrame.colorLevels + t) / gFrame.colorLevels;
 }
 
-// Display-space colour of scene pixel `px` after exposure, the tonemap and the quantize + dither. Alpha 0
-// is the background, which was cleared to the world's display-space (sRGB) colour: shown as picked,
-// untouched by exposure, the tonemap and the dither. The scene writes alpha 1.
-// How far into the fog scene pixel `px` is (0 = clear, 1 = all fog colour): its view distance, from the scene
-// depth through the inverse projection. The scene VS squeezed NDC into the target's sceneCover part, so undo
-// that first. Blended surfaces don't write depth: they take the fog of what's behind them.
-float fog_amount(uint2 px) {
+// ------------------------------------------------------------------------------------------------------
+// Fog (World_Settings.fog, claude/rendering.md → Fog), along each scene pixel's ray from the near plane to the
+// scene depth, in scene light before the tonemap:
+//     scene × T + the fogs' colours × (1 − T) + halos
+// T, the transmittance, is the distance fog's ramp times the height fog's exp(-optical depth), both closed form.
+// The background is a pixel like any other (depth 0: the ray never hit anything). Blended surfaces don't write
+// depth: they take the fog of what's behind them.
+
+static const float FOG_INFINITY  = 1e6;   // the length of a ray that hit nothing, metres
+static const float FOG_OPAQUE    = 100;   // optical depth: nothing gets through (e^-100)
+static const float FOG_LIT_REACH = 64;    // lit height fog samples the probes this far along a ray at most
+static const uint  FOG_LIT_STEPS = 6;
+static const uint  HALO_STEPS    = 12;
+
+bool fog_on() {
+    return gFrame.fogEnd > gFrame.fogStart || gFrame.fogDensity > 0 || gFrame.fogGlow > 0;
+}
+
+struct FogRay {
+    float3 origin;   // world space, on the near plane
+    float3 dir;
+    float  len;      // metres to the scene surface; FOG_INFINITY where nothing was drawn
+}
+
+float3 view_pos(float2 ndc, float depth) {
+    float4 v = mul(float4(ndc, depth, 1), gFrame.invProj);
+    return v.xyz / v.w;
+}
+
+// View space → world space directions: the view matrix is rigid, so its inverse rotation is its transpose.
+float3 world_dir(float3 v) {
+    float3x3 R = float3x3(gFrame.viewMat[0].xyz, gFrame.viewMat[1].xyz, gFrame.viewMat[2].xyz);
+    return mul(R, v);
+}
+
+// Scene pixel px's ray, through the inverse projection, so perspective and ortho cameras alike. The scene VS
+// squeezed NDC into the target's sceneCover part, so that's undone first. Depth 0 (the reversed-Z clear): the
+// ray hit nothing, and with an infinite projection unprojecting it would divide by zero.
+FogRay fog_ray(uint2 px) {
     Texture2D<float> depthTex = getTexture2dF1(gFrame.depthTextureSlot);
     uint w, h;
     depthTex.GetDimensions(w, h);
-    float depth = depthTex.Load(int3(px, 0));
     float2 uv = (float2(px) + 0.5) / float2(w, h);
     float2 ndc = float2(uv.x * 2 - 1, 1 - uv.y * 2);
     float2 cover = gFrame.sceneCover;
     ndc = float2((ndc.x - (cover.x - 1)) / cover.x, (ndc.y - (1 - cover.y)) / cover.y);
-    float4 v = mul(float4(ndc, depth, 1), gFrame.invProj);
-    float dist = length(v.xyz / v.w);
-    return saturate((dist - gFrame.fogStart) / (gFrame.fogEnd - gFrame.fogStart));
+    float3 nearV = view_pos(ndc, 1);   // reversed-Z: 1 is the near plane
+    FogRay r;
+    r.origin = gFrame.cameraPos + world_dir(nearV);
+    r.dir    = normalize(world_dir(view_pos(ndc, 0.5) - nearV));
+    float depth = depthTex.Load(int3(px, 0));
+    r.len    = depth == 0 ? FOG_INFINITY : length(view_pos(ndc, depth) - nearV);
+    return r;
 }
 
+// Height fog's density (per metre) at world height y.
+float fog_height_density(float y) {
+    if (gFrame.fogDensity <= 0) return 0;
+    return gFrame.fogDensity * exp(clamp((gFrame.fogHeight - y) / gFrame.fogFalloff, -80, 80));
+}
+
+// Height fog's optical depth over the first t metres of r: the density's integral, closed form for an
+// exponential. x is how many falloffs the ray climbs; clamped below, and the result capped at FOG_OPAQUE, so a
+// long ray down stays finite (an infinite depth turns the colour mix in fog_inscatter into NaN).
+float fog_height_depth(FogRay r, float t) {
+    if (gFrame.fogDensity <= 0) return 0;
+    float x = max(r.dir.y * t / gFrame.fogFalloff, -80);
+    float s = abs(x) > 1e-4 ? (1 - exp(-x)) / x : 1 - 0.5 * x;
+    return min(fog_height_density(r.origin.y) * min(t * s, 1e30), FOG_OPAQUE);
+}
+
+// Distance fog's transmittance t metres along the ray: the PS1 ramp, 1 nearer than fogStart, 0 from fogEnd.
+float fog_distance_transmittance(float t) {
+    if (gFrame.fogEnd <= gFrame.fogStart) return 1;
+    return 1 - saturate((t - gFrame.fogStart) / (gFrame.fogEnd - gFrame.fogStart));
+}
+
+// How much of what's t metres along r reaches the eye: 1 = clear.
+float fog_transmittance(FogRay r, float t) {
+    return fog_distance_transmittance(t) * exp(-fog_height_depth(r, t));
+}
+
+// Lit fog's light at world point p: the probes' light in the air over the level's average, per channel, so
+// the picked colour shows where the light is average. Where no probe sees p (under the ground, past the grid)
+// it fades to 1, the picked colour, rather than the dark of buried probes.
+float3 fog_lit_scale(float3 p) {
+    float seen;
+    float3 light = air_light(p, seen);
+    return lerp(1, light / max(gFrame.fogLightMean, 1e-4), seen);
+}
+
+// The colour the fog adds along r, and in T its transmittance over the whole ray: (1 - T) of the two fogs'
+// colours, mixed by each one's share of the ray's optical depth (the distance ramp's is -ln of its
+// transmittance), so whichever fog is thicker along this ray shows its colour.
+// Lit fog (fogLit) scales that by the light along the ray, summed over FOG_LIT_STEPS stretches from where the
+// fog begins to fogEnd (or FOG_LIT_REACH), each weighted by the fog it holds (the drop in transmittance across
+// it); the fog beyond takes the last stretch's light. The samples are offset by the pixel's Bayer threshold, so
+// the steps between them break up like the dither.
+float3 fog_inscatter(FogRay r, uint2 px, out float T) {
+    float distanceT = fog_distance_transmittance(r.len);
+    float heightDepth = fog_height_depth(r, r.len);
+    T = distanceT * exp(-heightDepth);
+    if (T == 1) return 0;
+    float distanceDepth = -log(max(distanceT, 1e-6));
+    float3 color = (distanceDepth * gFrame.fogDistanceColor + heightDepth * gFrame.fogHeightColor) / (distanceDepth + heightDepth);
+    if (gFrame.fogLit <= 0) return color * (1 - T);
+
+    bool  distance = gFrame.fogEnd > gFrame.fogStart;
+    float a = gFrame.fogDensity > 0 || !distance ? 0 : gFrame.fogStart;
+    float b = min(r.len, distance ? gFrame.fogEnd : FOG_LIT_REACH);
+    float offset = BAYER_4X4[(px.y & 3) * 4 + (px.x & 3)];
+    float prev = fog_transmittance(r, a);
+    float3 lit = 0, scale = 1;
+    for (uint k = 0; k < FOG_LIT_STEPS; k++) {
+        float Tk = fog_transmittance(r, lerp(a, b, float(k + 1) / FOG_LIT_STEPS));
+        scale = fog_lit_scale(r.origin + r.dir * lerp(a, b, (k + offset) / FOG_LIT_STEPS));
+        lit += (prev - Tk) * scale;
+        prev = Tk;
+    }
+    lit += (prev - T) * scale;
+    return color * lerp(1 - T, lit, gFrame.fogLit);
+}
+
+// Lamp light the fog scatters toward the eye along r. For each point and spot light, over the part of the ray
+// inside its range: the light reaching each point (light_reach: the falloff and cone surfaces get) × the haze
+// there (fogGlow + the height fog's density) × the transmittance back to the eye × the light's halo, spread
+// evenly over directions (÷ 4: the engine's lights carry no 1/π, so neither does this).
+// HALO_STEPS equiangular steps (Kulla & Fajardo 2012): even in the angle seen from the light, which cancels the
+// 1/d², so a ray past the bulb needs no more steps than one far off. Each pixel's steps are offset by its Bayer
+// threshold, so what's left of the stepping is an ordered pattern, like the dither. The ray stops at the scene
+// surface, so a wall in front cuts a halo off; but there are no shadows yet, so within its range a lamp behind
+// a wall lights the air on this side.
+float3 fog_halos(FogRay r, uint2 px) {
+    if (gFrame.fogGlow <= 0 || !view_direct()) return 0;
+    StructuredBuffer<Light> lights = DescriptorHandle<StructuredBuffer<Light>>(gFrame.lightBufferSlot);
+    float offset = BAYER_4X4[(px.y & 3) * 4 + (px.x & 3)];
+    float3 sum = 0;
+    for (uint i = 0; i < gFrame.lightCount; i++) {
+        Light light = lights[i];
+        if ((light.type != LIGHT_POINT && light.type != LIGHT_SPOT) || light.halo <= 0) continue;
+        float3 toLight = light.position - r.origin;
+        float  t0 = dot(toLight, r.dir);            // the ray's closest approach to the light
+        float  h  = length(toLight - r.dir * t0);   // and how close
+        if (h >= light.radius) continue;
+        float  c = sqrt(light.radius * light.radius - h * h);
+        float  a = max(t0 - c, 0), b = min(t0 + c, r.len);
+        if (a >= b) continue;
+        // The steps' scale: at least the source's size, so they don't bunch up when the ray goes through the bulb.
+        float  hs  = max(h, max(light.innerRadius, 0.01));
+        float  thA = atan((a - t0) / hs), thB = atan((b - t0) / hs);
+        float  acc = 0;
+        for (uint k = 0; k < HALO_STEPS; k++) {
+            float  s = hs * tan(lerp(thA, thB, (k + offset) / HALO_STEPS));
+            float3 p = r.origin + r.dir * (t0 + s);
+            float3 L;
+            float  haze = gFrame.fogGlow + fog_height_density(p.y);
+            acc += light_reach(light, p, L) * (hs * hs + s * s) * haze * fog_transmittance(r, t0 + s);
+        }
+        sum += light.color * light.intensity * light.halo * acc * (thB - thA) / (HALO_STEPS * hs);
+    }
+    return sum * 0.25;
+}
+
+// Display-space colour of scene pixel `px`: fog, exposure, the tonemap and the quantize + dither. Every pixel
+// takes the same path, the background (the clear colour, linear scene light) included.
 [shader("fragment")]
 float4 frag_signal(VSOut input) : SV_Target {
     Texture2D<float4> hdr = getTexture2dRGBA(gFrame.hdrTextureSlot);
     uint2 px = uint2(input.position.xy);
-    float4 s = hdr.Load(int3(px, 0));
-    if (s.a == 0) return float4(s.rgb, 1);
-    float3 c = linear_to_srgb(aces_fitted(max(s.rgb, 0) * gFrame.exposure));
-    if (gFrame.fogEnd > gFrame.fogStart) c = lerp(c, gFrame.fogColor, fog_amount(px));
+    float3 light = max(hdr.Load(int3(px, 0)).rgb, 0);
+    if (fog_on()) {
+        FogRay r = fog_ray(px);
+        float T;
+        float3 add = fog_inscatter(r, px, T) + fog_halos(r, px);
+        light = light * T + add;
+    }
+    float3 c = linear_to_srgb(aces_fitted(light * gFrame.exposure));
     if (gFrame.colorLevels > 0) c = quantize_dither(c, px);
     return float4(c, 1);
 }

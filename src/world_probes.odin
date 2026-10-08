@@ -59,6 +59,7 @@ Probe_Grid :: struct {
     layer_group: [MAX_PROBE_LAYERS]u8,   // each layer's light group (layer 0: group 0, static)
     probes:  []Probe_SH,   // layers × the grid: layer-major, then x fastest, then y, then z; empty = not baked
     depth:   []Probe_Depth,   // one per probe, laid out like a layer of probes
+    light_mean: vec3,      // the average light in the air (probe_light_mean): what lit fog is relative to
     atlas:   Image,        // the grid as a picture for the Bake and Resources windows (probe_grid_atlas); not used for lighting
     arena:   vmem.Arena,   // owns probes; freed whole when a new grid replaces them
 }
@@ -100,11 +101,29 @@ probe_grid_set :: proc(w: ^World, origin: vec3, spacing: f32, dims: [3]i32, laye
     copy(g.probes, probes)
     g.depth = make([]Probe_Depth, len(depth), vmem.arena_allocator(&g.arena))
     copy(g.depth, depth)
+    g.light_mean = probe_light_mean(g)
     // The atlas shows the groups at their saved scales, without flicker: how the level starts.
     saved: [MAX_LIGHT_GROUPS + 1]f32
     saved[0] = 1
     for k in 1..=MAX_LIGHT_GROUPS do saved[k] = light_group_settings(w, k).scale
     g.atlas = probe_grid_atlas(g, probe_layer_scales(g, saved), math.pow(2, w.settings.exposure), vmem.arena_allocator(&g.arena))
+}
+
+// The grid's average light in the air: each probe's SH constant band (its light averaged over directions,
+// sh_mean in shading.slang), every layer at full scale, over the probes that aren't buried (an all-zero depth
+// map), which only see the inside of walls. Fixed per bake, so a light group dimming at runtime dims lit fog.
+probe_light_mean :: proc(g: ^Probe_Grid) -> vec3 {
+    count := probe_count(g)
+    sum: vec3
+    n := 0
+    probes: for i in 0 ..< count {
+        buried := true
+        for t in g.depth[i].t do if t[0] > 0 { buried = false; break }
+        if buried do continue probes
+        for k in 0 ..< int(g.layers) do sum += 0.282095 * g.probes[k * count + i].c[0]
+        n += 1
+    }
+    return n > 0 ? sum / f32(n) : {}
 }
 
 // Each layer's scale from every group's (light_group_scales).

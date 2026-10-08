@@ -66,6 +66,9 @@ Entity :: struct {
     // Light: scales its baked bounce (the probes) without touching its direct light. Whether it bakes
     // at all is Static + Cast Indirect in its static flags, as for geometry.
     indirect: f32 `section:Camera_Light`,
+    // Point / spot light: scales the glow it makes in the fog (World Settings → Fog → Lamp
+    // Halos), without touching its light on surfaces. 0 = no halo.
+    halo: f32 `section:Camera_Light`,
     // Sound (world_sound.odin): a sound file's project path (.wav .ogg .mp3 .flac under assets/,
     // loaded at startup). The entity plays it in play mode: when the game starts if Play On Start, or
     // when Lua calls Entity.play_sound. While it plays it follows the entity. Positional: full volume
@@ -206,6 +209,7 @@ entity_apply_defaults :: proc(e: ^Entity) {
     e.shadow = false
     e.light_group = 0
     e.indirect = 1
+    e.halo = 1
     e.volume = 1
     e.sound_flags = {.Positional}
     e.collision = .Collision_Mesh
@@ -240,6 +244,7 @@ entity_field_labels :: proc(name: string) -> (l: [Lang]string) {
     case "shadow": l = {.EN = "Cast Shadow", .ZH = "投射阴影"}
     case "light_group": l = {.EN = "Light Group", .ZH = "光源组"}
     case "indirect": l = {.EN = "Indirect Intensity", .ZH = "间接光强度"}
+    case "halo": l = {.EN = "Halo Intensity", .ZH = "光晕强度"}
     case "sound": l = {.EN = "Sound", .ZH = "声音"}
     case "volume": l = {.EN = "Volume", .ZH = "音量"}
     case "sound_flags": l = {.EN = "Sound Flags", .ZH = "声音标志"}

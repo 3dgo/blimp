@@ -110,15 +110,24 @@ float probe_visibility(ProbeDepth pd, float3 probePos, float3 q, float3 N) {
     return max(w, 1e-6);
 }
 
+// The SH's constant band: the probe's light averaged over every direction. Irradiance / π convolves only the
+// higher bands, so this is also the average radiance arriving there. probe_light_mean in world_probes.odin.
+float3 sh_mean(Probe p) {
+    return 0.282095 * float3(p.c[0], p.c[1], p.c[2]);
+}
+
 // Baked indirect light (irradiance / π) reaching a surface at pos facing N: trilinear between the 8 probes
 // around it, clamped to the grid outside it, each probe's layers times their light group's scale (layer k of
 // the buffer starts k × the probe count in), each corner weighted by its visibility and the weights
 // renormalized, so light doesn't leak through walls. Same as probe_grid_sample in render_probes.odin.
-float3 probe_irradiance(float3 pos, float3 N) {
+// N = 0 is a point in the air (fog): no normal bias, no backface term, and each probe's average light.
+// `weight` is the corners' total weight before renormalizing: near zero where no probe sees the point.
+float3 probe_grid(float3 pos, float3 N, out float weight) {
     StructuredBuffer<Probe> probes = DescriptorHandle<StructuredBuffer<Probe>>(gFrame.probeBufferSlot);
     StructuredBuffer<ProbeDepth> depth = DescriptorHandle<StructuredBuffer<ProbeDepth>>(gFrame.probeDepthSlot);
     uint3  dims = gFrame.probeDims;
     uint   count = dims.x * dims.y * dims.z;
+    bool   air = all(N == 0);
     float3 q  = pos + N * (PROBE_NORMAL_BIAS * gFrame.probeSpacing);
     float3 u  = clamp((q - gFrame.probeOrigin) / gFrame.probeSpacing, 0, float3(dims - 1));
     uint3  i0 = min(uint3(u), dims - 1);
@@ -135,11 +144,19 @@ float3 probe_irradiance(float3 pos, float3 N) {
         w *= probe_visibility(depth[index], gFrame.probeOrigin + gFrame.probeSpacing * float3(i), q, N);
         for (uint k = 0; k < gFrame.probeLayers; k++) {
             float scale = gFrame.probeLayerScale[k / 4][k % 4];
-            if (scale != 0) e += w * scale * sh_eval(probes[k * count + index], N);
+            if (scale == 0) continue;
+            Probe p = probes[k * count + index];
+            e += w * scale * (air ? sh_mean(p) : sh_eval(p, N));
         }
         total += w;
     }
+    weight = total;
     return max(e / max(total, 1e-6), 0);
+}
+
+float3 probe_irradiance(float3 pos, float3 N) {
+    float weight;
+    return probe_grid(pos, N, weight);
 }
 
 // One shadow map slice's camera: Shadow_View in render_shadows.odin (256 bytes; the shadow pass reads the
@@ -192,7 +209,7 @@ public struct Lighting {
 
 // Whether the view shows direct light, and what it scales indirect light by (Lighting_View in
 // render_view.odin). The view that lights a white surface is the pixel shader's.
-bool view_direct() {
+public bool view_direct() {
     return gFrame.lightingView != LIGHTING_PROBES_ONLY && gFrame.lightingView != LIGHTING_INDIRECT_ONLY;
 }
 float indirect_scale() {
@@ -205,9 +222,18 @@ float3 indirect_light(float3 pos, float3 N) {
     return e * indirect_scale();
 }
 
+// Baked light in the air at pos (the probes'), averaged over every direction: what lit fog follows. Only
+// called with probes baked. `seen` is how well the probes see pos: 1 in open air, toward 0 inside walls,
+// under the ground or out past the grid, where the light it gives means nothing.
+public float3 air_light(float3 pos, out float seen) {
+    float3 e = probe_grid(pos, 0, seen);
+    seen = saturate(seen / 0.45);   // probe_visibility's backface term with no normal: an unoccluded point's weight
+    return e;
+}
+
 // How much of `light` arrives at pos (distance falloff, cone and beam edges; not shadow), and the unit
 // direction toward it in L.
-float light_reach(Light light, float3 pos, out float3 L) {
+public float light_reach(Light light, float3 pos, out float3 L) {
     if (light.type == LIGHT_DIRECTIONAL) {
         L = -light.direction;   // the light shines along its +Z
         return 1;

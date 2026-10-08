@@ -109,21 +109,28 @@ Frame_Constants :: struct {
     gamma:        f32,
     brightness:   f32,
 
-    // Distance fog (World_Settings.fog), in the signal pass: view distance from the scene depth through
-    // inv_proj, faded into fog_color (the background, display space) between fog_start and fog_end.
-    fog_color:    vec3,
-    fog_start:    f32,
-    fog_end:      f32,   // <= fog_start: fog off
-    _pad_fog:     [2]f32,
-    inv_proj:     mat4,  // the projection this view rendered with, inverted (the camera entity's in game mode)
+    // Fog (World_Settings.fog, post.slang), along each pixel's ray from the scene depth through inv_proj. Each
+    // part is off at 0 (render_view_fog): distance when fog_end <= fog_start, height at fog_density 0, halos at
+    // fog_glow 0, lit at fog_lit 0. Colours are linear scene light. Ordered so no vector straddles a row.
+    fog_start:          f32,
+    fog_end:            f32,
+    fog_height:         f32,   // height fog: world y where it has fog_density
+    fog_distance_color: vec3,
+    fog_density:        f32,   // per metre
+    inv_proj:           mat4,  // the projection this view rendered with, inverted (the camera entity's in game mode)
+    fog_height_color:   vec3,
+    fog_falloff:        f32,   // metres up for the density to fall by e
+    fog_light_mean:     vec3,  // the level's average light in the air (Probe_Grid.light_mean)
+    fog_glow:           f32,   // halos: per metre of haze, plus the height fog's density
+    fog_lit:            f32,   // 0..1: how far the colours follow the probes' light over fog_light_mean
 
     skin_buffer_slot: u32,   // Skin_Vertex per skinned vertex (asset)
     bone_buffer_slot: u32,   // the world's skin matrices this frame (World_Render.bones)
 
-    _padding: [512 - 472]byte,   // CBVs come in 256-byte steps
+    _padding: [512 - 508]byte,   // CBVs come in 256-byte steps
 }
 #assert(offset_of(Frame_Constants, signal_texture_slot) == 312)
-#assert(offset_of(Frame_Constants, _padding) == 472)
+#assert(offset_of(Frame_Constants, _padding) == 508)
 #assert(offset_of(Frame_Constants, probe_layer_scale) % 16 == 0)
 #assert(MAX_PROBE_LAYERS <= 8)
 #assert(size_of(Frame_Constants) == 512)
@@ -136,8 +143,10 @@ Frame_Constants :: struct {
 #assert(offset_of(Frame_Constants, vertex_snap) % 16 + size_of(vec2)  <= 16)
 #assert(offset_of(Frame_Constants, probe_origin) % 16 + size_of(vec3)  <= 16)
 #assert(offset_of(Frame_Constants, probe_dims) % 16 + size_of(uvec3) <= 16)
-#assert(offset_of(Frame_Constants, fog_color) % 16 + size_of(vec3)  <= 16)
+#assert(offset_of(Frame_Constants, fog_distance_color) % 16 + size_of(vec3)  <= 16)
 #assert(offset_of(Frame_Constants, inv_proj) % 16 == 0)
+#assert(offset_of(Frame_Constants, fog_height_color) % 16 + size_of(vec3)  <= 16)
+#assert(offset_of(Frame_Constants, fog_light_mean) % 16 + size_of(vec3)  <= 16)
 
 renderer_dx_init :: proc() {
     // --gpu-validation (debug builds): D3D12 GPU-based validation, for a bad descriptor index or resource state.

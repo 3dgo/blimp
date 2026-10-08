@@ -32,9 +32,13 @@ PBR version later is additive.
   Debug lines don't snap, so an outline can sit up to a scene pixel off its jittering mesh.
 - **Shading is linear.** Colour textures are `_SRGB` views (decoded on sample); glTF material
   and vertex colours and light `color` are linear (the picker shows light colour as sRGB,
-  `widget:linear_color`). The world `background` is display-space (sRGB): the scene target
-  clears to it with alpha 0, the scene writes alpha 1, and the tonemap passes alpha-0 pixels
-  through untouched, so the background shows exactly as picked.
+  `widget:linear_color`). **No exceptions to the tonemap:** the world `background` and the fog
+  colours are linear scene light too (`widget:linear_color`); the scene target clears to the
+  background and every pixel takes exposure, the tonemap and the dither. So a picked colour shifts
+  through ACES and follows exposure: sky and fog colours are judged in the engine. Chosen over
+  pinning picked colours with an inverse tonemap, for one pipe with no special cases. A future sky
+  is a fullscreen pass writing linear light before the opaques (no mesh: one would fight the
+  baker's bounds and misses, the shadow pass and the far plane); nothing reads the clear alpha.
 - Light data lives in a GPU buffer indexed from the shader, not root constants.
 - **The frame is three calls the app makes** (`app_run`): `renderer_dx_draw_frame` (each world's draw
   mirror staged, shadows, every view's scene + post + debug lines, the backbuffer cleared and bound),
@@ -370,13 +374,39 @@ gives almost no levels.
 
 ### Fog
 
-Distance fog, PS1-style (`World_Settings.fog`: on, start, end in metres): geometry fades into the world's
-**background colour**, so far things melt into the clear colour and there's no second colour to keep in
-step. Applied in the post signal pass (`fog_amount` in `post.slang`), after the tonemap and before the
-quantize, so fog bands get the same dither as everything else. The view distance comes from the scene depth
-through `Frame_Constants.inv_proj` (undoing the `sceneCover` squeeze first), so it works for the free camera,
-perspective and ortho camera entities alike. Blended surfaces don't write depth and take the fog of what's
-behind them.
+`World_Settings.fog`, all in the post signal pass (`post.slang`) along each scene pixel's ray (near plane to
+scene depth, through `Frame_Constants.inv_proj`, undoing the `sceneCover` squeeze first: free camera,
+perspective and ortho camera entities alike). Scene light **before** the tonemap: `scene × T + fog colour ×
+(1 − T) + halos`, then exposure, tonemap and the quantize, so fog bands get the same dither as everything
+else. Depth 0 (the clear) is a ray that hit nothing: length "infinity" (1e6), so the background is fogged
+like any pixel. Blended surfaces don't write depth and take the fog of what's behind them. **Analytic, not
+ray-marched or froxels:** froxel fog hides its noise with temporal reprojection, which smears like TAA and
+lags; this has no history and reacts the same frame. A learning walkthrough of how it's built is in
+`docs/fog.md`.
+
+- **Distance** (`on`, `start`, `end`, `color`): the PS1 ramp, transmittance linear from 1 to 0.
+- **Height** (`height_fog`, `height`, `density` per metre there, `falloff` metres per e, `height_color`):
+  exponential ground mist; its optical depth is closed form, capped at 100 (a ray down into the void would
+  otherwise reach infinity and NaN the colour mix). T is the two multiplied.
+- **Colours** are linear (see "Shading is linear"). The two mix by each fog's share of the ray's optical
+  depth (distance's is −ln of its T), so the thicker one along a ray shows.
+- **Lit** (`lit`, 0..1): both colours × the probes' light in the air over the level's average
+  (`Probe_Grid.light_mean`: every unburied probe's SH constant band, every layer at full scale, fixed per bake,
+  so a light group dimming dims the fog). The colour as picked where the light is average; warmer and brighter
+  by a lamp's bounce; darker in a dark corner. Air samples use the visibility test with no normal; where the
+  probes can't see the point (under ground, past the grid) it fades to the picked colour, not the dark of
+  buried probes. Summed over 6 stretches of the ray weighted by the drop in T across each, offset by the Bayer
+  threshold. Subtle outdoors, where the probes hold mostly even sky light.
+- **Halos** (`halos`, `glow` per metre; per light `halo`, default 1, on `GPU_Light`): point and spot lights
+  scattered toward the eye, haze = `glow` + the height fog's density, × T back to the eye, × the light's
+  `halo`, ÷ 4 (isotropic, no 1/π like the surfaces). 12 equiangular steps per light over the ray's chord
+  through its range (the angle seen from the light cancels the 1/d²), offset per pixel by the Bayer threshold
+  so any stepping is an ordered pattern. `light_reach` gives the same falloff and cone as surfaces.
+  Unshadowed: a wall in front cuts a halo (the ray stops there), but a lamp behind a wall lights the air on
+  this side within its range. Directional and cylinder lights get none.
+- Not built: shadowed halos (shafts: sample the shadow slice at each halo step), fog on blended surfaces at
+  their own depth, forward scattering (a Henyey–Greenstein factor per halo step; the SH's directional bands
+  for lit fog), analytic fog volumes (boxes, spheres).
 
 ### Retro look
 

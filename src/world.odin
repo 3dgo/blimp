@@ -48,9 +48,9 @@ world_debug_line :: proc(w: ^World, a, b: vec3, color: vec4) {
 // entities). Only fields something reads today; sky / atmosphere settings join as those
 // systems land — one line each, edited and saved for free (reflection inspector + serializer).
 World_Settings :: struct {
-    background: [3]f32 `loc:World_Background, widget:color`,   // the viewport clear colour: display-space (sRGB), shown as picked, not tonemapped
+    background: [3]f32 `loc:World_Background, widget:linear_color`,   // the viewport clear colour: linear scene light, through exposure and the tonemap like every pixel
     exposure:   f32 `loc:World_Exposure`,   // stops (EV): the HDR scene is scaled by 2^exposure before the tonemap
-    fog:        Fog_Settings `loc:World_Fog`,   // distance fog into the background colour
+    fog:        Fog_Settings `loc:World_Fog`,   // distance and height fog, lamp halos
     shading:    ShadingModel `loc:World_Shading`,   // what an entity's shading Default means (entity_shading)
     script:     sbuf256 `loc:World_Script`,   // the world's Lua script (start + update hooks, run while playing), e.g. assets/scripts/castle.lua
     light_groups: Light_Groups `loc:World_Light_Groups`,   // where the switchable light groups start (world_light_groups.odin)
@@ -59,13 +59,29 @@ World_Settings :: struct {
     retro:      Retro_Settings `hidden`,  // saved as retro.* keys; edited in the Retro Look window (ui_retro.odin)
 }
 
-// Distance fog, PS1-style: geometry fades into the world's background colour between `start` and `end`
-// (metres from the eye), so far things melt into the clear colour. Applied in the post signal pass, before
-// the quantize, so fog bands get the same dither as everything else.
+// Fog (claude/rendering.md → Fog), in the post signal pass before the tonemap, so it gets exposure, the
+// tonemap and the dither like everything else. Three parts, each with its own switch:
+//   distance (`on`): PS1-style, geometry fades into `color` between `start` and `end` (metres along the ray);
+//   height: exponential ground mist of `height_color`, `density` per metre at `height`, thinning by e every
+//           `falloff` metres up;
+//   halos: lamp light (point and spot) the air scatters toward the eye, `glow` per metre plus the mist's
+//          density, × each light's `halo`.
+// Colours are linear scene light, like light colours. `lit` scales them by the probes' light in the air over
+// the level's average (probe_light_mean): the colour as picked where the light is average, warmer and brighter
+// by a lamp, darker in a dark corner, dimming with its light group. No probes: flat.
 Fog_Settings :: struct {
-    on:    bool `loc:World_Fog_On`,
-    start: f32  `loc:World_Fog_Start`,   // full colour nearer than this
-    end:   f32  `loc:World_Fog_End`,     // all background colour from here on
+    on:           bool   `loc:World_Fog_On`,
+    start:        f32    `loc:World_Fog_Start`,     // clear nearer than this
+    end:          f32    `loc:World_Fog_End`,       // all fog from here on
+    color:        [3]f32 `loc:World_Fog_Color, widget:linear_color`,
+    height_fog:   bool   `loc:World_Fog_Height_On`,
+    height:       f32    `loc:World_Fog_Height`,    // world y where the mist has `density`; denser below, thinner above
+    density:      f32    `loc:World_Fog_Density`,   // per metre at `height`
+    falloff:      f32    `loc:World_Fog_Falloff`,   // metres up for the density to fall by e
+    height_color: [3]f32 `loc:World_Fog_Height_Color, widget:linear_color`,
+    lit:          f32    `loc:World_Fog_Lit`,       // 0..1: how far both colours follow the baked light around them
+    halos:        bool   `loc:World_Fog_Halos`,
+    glow:         f32    `loc:World_Fog_Glow`,      // per metre: haze that scatters lamp light even with no mist
 }
 
 // The retro look (claude/rendering.md → Retro look): what a view in render mode .Retro does, effect by
@@ -146,9 +162,9 @@ BAKE_QUALITY_PRESETS := [Bake_Quality][2]i32{   // rays, bounces; Custom keeps w
 }
 
 WORLD_SETTINGS_DEFAULT :: World_Settings{
-    background   = {19.0 / 255, 19.0 / 255, 19.0 / 255},   // #131313
+    background   = {19.0 / 255, 19.0 / 255, 19.0 / 255},   // linear: a dark grey after the tonemap
     shading      = .Lambert,
-    fog          = {start = 20, end = 60},
+    fog          = {start = 20, end = 60, color = {0.2, 0.2, 0.2}, density = 0.1, falloff = 2, height_color = {0.2, 0.2, 0.2}, glow = 0.05},
     bake         = {quality = .Medium, rays = 256, bounces = 3, sky = true,sky_intensity = 1, probe_spacing = 1},
     light_groups = {group_1 = {scale = 1}, group_2 = {scale = 1}, group_3 = {scale = 1}, group_4 = {scale = 1}},
     retro        = RETRO_SETTINGS_DEFAULT,

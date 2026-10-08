@@ -124,8 +124,10 @@ GPU_Light :: struct {
     beam_radius: f32, beam_inner: f32, // radius, inner_radius (cylinder)
     shadow_slice: u32,                 // first shadow map slice (render_shadows.odin), SHADOW_NONE = unshadowed
     shadow_texel: f32,                 // world size of a shadow texel (at 1 unit for spot / point): the receiver's normal offset
+    halo: f32,                         // × its glow in the fog (post.slang fog_halos)
+    _pad: [3]f32,
 }
-#assert(size_of(GPU_Light) == 80)
+#assert(size_of(GPU_Light) == 96)
 
 // A GPU resource paired with the CPU-writable upload buffer that stages data into it.
 Resource_With_Upload :: struct {
@@ -400,6 +402,7 @@ entity_gpu_light :: proc(entity: ^Entity) -> GPU_Light {
         direction = entity_forward(entity),
         color = entity.color,
         intensity = entity.intensity,
+        halo = max(entity.halo, 0),
         shadow_slice = SHADOW_NONE,   // buffers_build_scene hands out slices
     }
     if entity.light_type != .Directional {

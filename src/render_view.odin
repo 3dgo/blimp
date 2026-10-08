@@ -186,11 +186,24 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         frame_constants.camera_pos = e.position
     }
     frame_constants.inv_proj = linalg.inverse(frame_constants.proj_mat)
-    if fog := world.settings.fog; fog.on && fog.end > fog.start {
-        frame_constants.fog_color = world.settings.background   // display space, like the clear: far things melt into it
-        frame_constants.fog_start, frame_constants.fog_end = fog.start, fog.end
-    }
+    render_view_fog(&frame_constants, world.settings.fog, world_level(world).probes.light_mean)
     mem.copy(view.frame_constants_ptr[frame_slot], &frame_constants, size_of(Frame_Constants))
+}
+
+// World_Settings.fog → the frame constants, each part left at 0 when it's off (post.slang skips it). Lit fog
+// needs probes in the frame constants (fc.probe_dims) and their average light.
+render_view_fog :: proc(fc: ^Frame_Constants, fog: Fog_Settings, light_mean: vec3) {
+    if fog.on && fog.end > fog.start {
+        fc.fog_start, fc.fog_end, fc.fog_distance_color = fog.start, fog.end, fog.color
+    }
+    if fog.height_fog && fog.density > 0 {
+        fc.fog_height, fc.fog_density, fc.fog_falloff = fog.height, fog.density, max(fog.falloff, 0.01)
+        fc.fog_height_color = fog.height_color
+    }
+    if fog.halos do fc.fog_glow = max(fog.glow, 0)
+    if fc.probe_dims.x > 0 && light_mean != {} {
+        fc.fog_lit, fc.fog_light_mean = clamp(fog.lit, 0, 1), light_mean
+    }
 }
 
 // Records the scene pass: clears the view's HDR scene target and draws its world's mesh instances into it.
@@ -232,13 +245,13 @@ render_view_end :: proc(view: ^Render_View) {
     dx.texture_transition(renderer_dx.cmd_gfx, &view.target.tex, {.PIXEL_SHADING}, {.SHADER_RESOURCE}, .SHADER_RESOURCE)
 }
 
-// The view's background: its world's settings.background, a display-space (sRGB) colour, cleared with
-// alpha 0 so the post pass passes it through as picked (the scene writes alpha 1). It's also the target's
-// optimized clear value, so when it changes the target is recreated (render_view_needs_rebuild) rather
-// than cleared to a mismatched colour.
+// The view's background: its world's settings.background, linear scene light like everything the scene
+// draws, so the post pass gives it exposure, the tonemap and the dither too. Nothing reads the alpha. It's
+// also the target's optimized clear value, so when it changes the target is recreated
+// (render_view_needs_rebuild) rather than cleared to a mismatched colour.
 render_view_clear_color :: proc(w: ^World) -> [4]f32 {
     bg := w.settings.background
-    return {bg.r, bg.g, bg.b, 0}
+    return {bg.r, bg.g, bg.b, 1}
 }
 
 // True when the target must be recreated before drawing: a new size, a new scene scale (from the size,
