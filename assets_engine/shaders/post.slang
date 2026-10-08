@@ -3,6 +3,7 @@ module post;
 import "utils";
 import "common";
 import "shading";
+import "view";
 
 // The post chain (claude/rendering.md: tonemap → LUT → quantize + dither → upscale), fullscreen triangles
 // (render_post.odin). A retro view:
@@ -21,9 +22,8 @@ public struct VSOut {
 
 [shader("vertex")]
 public VSOut vert_main(uint vertexID : SV_VertexID) {
-    float2 uv = float2((vertexID << 1) & 2, vertexID & 2);   // (0,0) (2,0) (0,2): covers the screen
     VSOut o;
-    o.position = float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+    o.position = fullscreen_triangle(vertexID);
     return o;
 }
 
@@ -44,24 +44,11 @@ float3 aces_fitted(float3 c) {
     return saturate(mul(ACES_OUTPUT, c));
 }
 
-float3 linear_to_srgb(float3 c) {
-    return select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0 / 2.4) - 0.055);
-}
-
-// 4x4 Bayer thresholds, (n + 0.5) / 16: added before the floor, they spread each value over its two
-// nearest levels in the right proportion.
-static const float BAYER_4X4[16] = {
-     0.5 / 16,  8.5 / 16,  2.5 / 16, 10.5 / 16,
-    12.5 / 16,  4.5 / 16, 14.5 / 16,  6.5 / 16,
-     3.5 / 16, 11.5 / 16,  1.5 / 16,  9.5 / 16,
-    15.5 / 16,  7.5 / 16, 13.5 / 16,  5.5 / 16,
-};
-
 // Display-space colour → colorLevels + 1 levels per channel, ordered-dithered at scene pixel `px`, the
 // threshold spread scaled by `dither` (0 = plain rounding: banding). Display space, not linear: these
 // scenes sit low in the value range, where linear quantizing has almost no levels.
 float3 quantize_dither(float3 c, uint2 px) {
-    float t = 0.5 + (BAYER_4X4[(px.y & 3) * 4 + (px.x & 3)] - 0.5) * gFrame.dither;
+    float t = 0.5 + (bayer4(px) - 0.5) * gFrame.dither;
     return floor(c * gFrame.colorLevels + t) / gFrame.colorLevels;
 }
 
@@ -73,7 +60,6 @@ float3 quantize_dither(float3 c, uint2 px) {
 // The background is a pixel like any other (depth 0: the ray never hit anything). Blended surfaces don't write
 // depth: they take the fog of what's behind them.
 
-static const float FOG_INFINITY  = 1e6;   // the length of a ray that hit nothing, metres
 static const float FOG_OPAQUE    = 100;   // optical depth: nothing gets through (e^-100)
 static const float FOG_LIT_REACH = 64;    // lit height fog samples the probes this far along a ray at most
 static const uint  FOG_LIT_STEPS = 6;
@@ -81,43 +67,6 @@ static const uint  HALO_STEPS    = 12;
 
 bool fog_on() {
     return gFrame.fogEnd > gFrame.fogStart || gFrame.fogDensity > 0 || gFrame.fogGlow > 0;
-}
-
-struct FogRay {
-    float3 origin;   // world space, on the near plane
-    float3 dir;
-    float  len;      // metres to the scene surface; FOG_INFINITY where nothing was drawn
-}
-
-float3 view_pos(float2 ndc, float depth) {
-    float4 v = mul(float4(ndc, depth, 1), gFrame.invProj);
-    return v.xyz / v.w;
-}
-
-// View space → world space directions: the view matrix is rigid, so its inverse rotation is its transpose.
-float3 world_dir(float3 v) {
-    float3x3 R = float3x3(gFrame.viewMat[0].xyz, gFrame.viewMat[1].xyz, gFrame.viewMat[2].xyz);
-    return mul(R, v);
-}
-
-// Scene pixel px's ray, through the inverse projection, so perspective and ortho cameras alike. The scene VS
-// squeezed NDC into the target's sceneCover part, so that's undone first. Depth 0 (the reversed-Z clear): the
-// ray hit nothing, and with an infinite projection unprojecting it would divide by zero.
-FogRay fog_ray(uint2 px) {
-    Texture2D<float> depthTex = getTexture2dF1(gFrame.depthTextureSlot);
-    uint w, h;
-    depthTex.GetDimensions(w, h);
-    float2 uv = (float2(px) + 0.5) / float2(w, h);
-    float2 ndc = float2(uv.x * 2 - 1, 1 - uv.y * 2);
-    float2 cover = gFrame.sceneCover;
-    ndc = float2((ndc.x - (cover.x - 1)) / cover.x, (ndc.y - (1 - cover.y)) / cover.y);
-    float3 nearV = view_pos(ndc, 1);   // reversed-Z: 1 is the near plane
-    FogRay r;
-    r.origin = gFrame.cameraPos + world_dir(nearV);
-    r.dir    = normalize(world_dir(view_pos(ndc, 0.5) - nearV));
-    float depth = depthTex.Load(int3(px, 0));
-    r.len    = depth == 0 ? FOG_INFINITY : length(view_pos(ndc, depth) - nearV);
-    return r;
 }
 
 // Height fog's density (per metre) at world height y.
@@ -129,7 +78,7 @@ float fog_height_density(float y) {
 // Height fog's optical depth over the first t metres of r: the density's integral, closed form for an
 // exponential. x is how many falloffs the ray climbs; clamped below, and the result capped at FOG_OPAQUE, so a
 // long ray down stays finite (an infinite depth turns the colour mix in fog_inscatter into NaN).
-float fog_height_depth(FogRay r, float t) {
+float fog_height_depth(ViewRay r, float t) {
     if (gFrame.fogDensity <= 0) return 0;
     float x = max(r.dir.y * t / gFrame.fogFalloff, -80);
     float s = abs(x) > 1e-4 ? (1 - exp(-x)) / x : 1 - 0.5 * x;
@@ -143,7 +92,7 @@ float fog_distance_transmittance(float t) {
 }
 
 // How much of what's t metres along r reaches the eye: 1 = clear.
-float fog_transmittance(FogRay r, float t) {
+float fog_transmittance(ViewRay r, float t) {
     return fog_distance_transmittance(t) * exp(-fog_height_depth(r, t));
 }
 
@@ -163,7 +112,7 @@ float3 fog_lit_scale(float3 p) {
 // fog begins to fogEnd (or FOG_LIT_REACH), each weighted by the fog it holds (the drop in transmittance across
 // it); the fog beyond takes the last stretch's light. The samples are offset by the pixel's Bayer threshold, so
 // the steps between them break up like the dither.
-float3 fog_inscatter(FogRay r, uint2 px, out float T) {
+float3 fog_inscatter(ViewRay r, uint2 px, out float T) {
     float distanceT = fog_distance_transmittance(r.len);
     float heightDepth = fog_height_depth(r, r.len);
     T = distanceT * exp(-heightDepth);
@@ -175,7 +124,7 @@ float3 fog_inscatter(FogRay r, uint2 px, out float T) {
     bool  distance = gFrame.fogEnd > gFrame.fogStart;
     float a = gFrame.fogDensity > 0 || !distance ? 0 : gFrame.fogStart;
     float b = min(r.len, distance ? gFrame.fogEnd : FOG_LIT_REACH);
-    float offset = BAYER_4X4[(px.y & 3) * 4 + (px.x & 3)];
+    float offset = bayer4(px);
     float prev = fog_transmittance(r, a);
     float3 lit = 0, scale = 1;
     for (uint k = 0; k < FOG_LIT_STEPS; k++) {
@@ -197,10 +146,10 @@ float3 fog_inscatter(FogRay r, uint2 px, out float T) {
 // threshold, so what's left of the stepping is an ordered pattern, like the dither. The ray stops at the scene
 // surface, so a wall in front cuts a halo off; but there are no shadows yet, so within its range a lamp behind
 // a wall lights the air on this side.
-float3 fog_halos(FogRay r, uint2 px) {
+float3 fog_halos(ViewRay r, uint2 px) {
     if (gFrame.fogGlow <= 0 || !view_direct()) return 0;
     StructuredBuffer<Light> lights = DescriptorHandle<StructuredBuffer<Light>>(gFrame.lightBufferSlot);
-    float offset = BAYER_4X4[(px.y & 3) * 4 + (px.x & 3)];
+    float offset = bayer4(px);
     float3 sum = 0;
     for (uint i = 0; i < gFrame.lightCount; i++) {
         Light light = lights[i];
@@ -236,7 +185,7 @@ float4 frag_signal(VSOut input) : SV_Target {
     uint2 px = uint2(input.position.xy);
     float3 light = max(hdr.Load(int3(px, 0)).rgb, 0);
     if (fog_on()) {
-        FogRay r = fog_ray(px);
+        ViewRay r = view_ray(px);
         float T;
         float3 add = fog_inscatter(r, px, T) + fog_halos(r, px);
         light = light * T + add;
@@ -317,19 +266,6 @@ float3 crt_line(Texture2D<float4> signal, int line, float x, int width) {
         wsum += w;
     }
     return saturate(mul(YIQ_TO_RGB, sum / wsum));
-}
-
-// Bilinear `t` at continuous texel position `p` (texel centres at whole + 0.5), clamped at the edges.
-float3 load_bilinear(Texture2D<float4> t, float2 p, int2 size) {
-    float2 q = p - 0.5;
-    int2   i = int2(floor(q));
-    float2 f = q - float2(i);
-    int2  hi = size - 1;
-    float3 a = t.Load(int3(clamp(i,              int2(0, 0), hi), 0)).rgb;
-    float3 b = t.Load(int3(clamp(i + int2(1, 0), int2(0, 0), hi), 0)).rgb;
-    float3 c = t.Load(int3(clamp(i + int2(0, 1), int2(0, 0), hi), 0)).rgb;
-    float3 d = t.Load(int3(clamp(i + int2(1, 1), int2(0, 0), hi), 0)).rgb;
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
 }
 
 // The display colour at display position `pos` (a pixel centre).

@@ -3,6 +3,7 @@ module scene;
 import "utils";
 import "common";
 import "shading";
+import "view";
 
 public struct MeshInstance {
     public uint transformIndex;
@@ -98,12 +99,7 @@ public VSOut vert_main(VSIn input) {
 
     VSOut output;
     float4 clip = mul(mul(worldPos, gFrame.viewMat), gFrame.projMat);
-    // The scene target is the display size / sceneScale rounded up, so the display covers only its top-left
-    // sceneCover part. Squeeze NDC into that part (left and top edges fixed): the image lines up with the
-    // display pixel for pixel, and the projection stays the display's (picking, debug lines).
-    float2 cover = gFrame.sceneCover;
-    clip.x = clip.x * cover.x + (cover.x - 1) * clip.w;
-    clip.y = clip.y * cover.y + (1 - cover.y) * clip.w;
+    clip = scene_cover_clip(clip);   // into the part of the scene target the display covers
     // PS1 vertex jitter: round the screen position to whole scene pixels, then multiply back by w so the
     // depth and perspective division are untouched. Skip vertices behind the eye (w <= 0), which the
     // divide would fling across the screen; the clipper handles them.

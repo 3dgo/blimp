@@ -74,8 +74,7 @@ static const float SHADOW_DEBUG_TILE = 256;   // SHADOW_DEBUG_TILE in render_sha
 
 [shader("vertex")]
 float4 vert_debug(uint vertexID : SV_VertexID) : SV_Position {
-    float2 uv = float2((vertexID << 1) & 2, vertexID & 2);   // (0,0) (2,0) (0,2): covers the tile's viewport
-    return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+    return fullscreen_triangle(vertexID);   // covers the tile's viewport
 }
 
 [shader("fragment")]

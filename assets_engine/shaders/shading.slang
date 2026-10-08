@@ -7,7 +7,9 @@ module shading;
 // entity_shading (render_buffers.odin); a SHADING_* constant here, at its member index; a shade_* function and
 // its case in shade(). Per-vertex work goes in vertex_lighting.
 
+import "utils";
 import "common";
+import "view";
 
 // ShadingModel (entity_schema.ini), what an entity's shading resolves to (entity_shading in render_buffers.odin).
 // Cheapest first.
@@ -67,13 +69,6 @@ static const float PROBE_NORMAL_BIAS  = 0.2;    // spacings the lit point moves 
 static const float PROBE_MIN_VARIANCE = 1e-3;   // × spacing²
 struct ProbeDepth {
     float t[2 * PROBE_DEPTH_RES * PROBE_DEPTH_RES];
-}
-
-// octahedral_encode in render_probes.odin: +Z in the middle of [-1, 1]², -Z at the corners.
-float2 octahedral_encode(float3 d) {
-    float2 p = d.xy / (abs(d.x) + abs(d.y) + abs(d.z));
-    if (d.z < 0) p = (1 - abs(p.yx)) * float2(p.x >= 0 ? 1 : -1, p.y >= 0 ? 1 : -1);
-    return p;
 }
 
 float2 probe_depth_texel(ProbeDepth pd, uint x, uint y) {
@@ -292,11 +287,6 @@ public Lighting light_surface(float3 pos, float3 N, float3 V, float shininess) {
         if (shininess > 0 && ndv > 0) result.specular += pow(ndv, shininess) * SPEC_STRENGTH;   // L = V, so H = V
     }
     return result;
-}
-
-// Unit direction from pos to the view's eye.
-float3 view_dir(float3 pos) {
-    return normalize(gFrame.cameraPos - pos);
 }
 
 // The face's own normal at pos, from screen-space derivatives, turned toward the eye (back faces are culled,

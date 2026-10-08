@@ -473,7 +473,9 @@ Shaders (`assets_engine/shaders/`, Slang compiled at runtime):
 | `shadow.slang` | depth-only shadow vertex shader |
 | `post.slang` | fog (distance, height, probe-lit, lamp halos), tonemap, quantize/dither, bloom, point or CRT upscale |
 | `debug_line.slang` | debug lines, depth-tested by hand against the scene depth |
-| `common.slang`, `utils.slang` | shared constants and bindless helpers |
+| `common.slang` | the frame constants and shared GPU structs and constants |
+| `utils.slang` | helpers that don't read the frame constants (so `shadow.slang` can use them): bindless access, skinning, fullscreen triangle, Bayer threshold, sRGB, bilinear load, octahedral encode |
+| `view.slang` | the camera and screen: scene pixel → NDC → view → world, a pixel's world position and view ray, the sceneCover squeeze |
 
 ### Scripting (`lua_`)
 
