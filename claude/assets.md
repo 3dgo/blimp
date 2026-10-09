@@ -58,12 +58,20 @@ several nodes bakes the last node's rotation/scale, since geometry is stored onc
 **Artist workflow (3ds Max).** One `.max` per kit, saved under `assets/` next to its export with
 the same base name (`assets/models/castle.max` → `castle.gltf` + `castle.bin`). Shared textures live
 under `assets/` too and the Max scene references them there. The scan imports only `.gltf`/`.glb` and
-`.png`, so `.max`, `.psd` and autobackups in `assets/` cost nothing. Export `.gltf`, not `.glb`, so textures stay external and are shared by path. Setting
+`.png`/`.jpg` (baseline jpeg only), so `.max`, `.psd` and autobackups in `assets/` cost nothing. Export `.gltf`, not `.glb`, so textures stay external and are shared by path. Setting
 the Max project folder to the repo root keeps bitmap paths relative, but it isn't required (absolute
 URIs are re-rooted, see below). The game build (`odin run build.odin -file -- game`) copies `assets/` and
 `assets_engine/` without the DCC sources (`.max .psd .blend .bak .luacn …`, `GAME_SKIP_EXTS`); there is no cook step.
 
-- Scan `assets/` and `assets_engine/`: **every `.png` loads first**, keyed by its project path, whether or not a
+**PS1 texture prep (TexLab, `tools/texlab/`).** A standalone Python/PySide6 + ImageMagick tool, not engine code.
+Full-res originals live in `assets_src/` (same relative paths as `assets/`). It sits outside the scanned roots,
+so it is never loaded or shipped. TexLab resizes, adjusts and palettizes them (own or group-shared 16/256-colour
+palettes, RGB555, 1-bit alpha) into indexed PNGs at the matching `assets/` path. Hot reload picks them up.
+`core:image` expands 1/2/4/8-bit indexed PNGs with tRNS to RGBA8 (checked). `assets_src/texlab.json` holds
+TexLab's settings. It is a tool file the engine never reads, not an asset meta file. `.glb`-embedded textures
+are out of its reach.
+
+- Scan `assets/` and `assets_engine/`: **every `.png`/`.jpg` loads first**, keyed by its project path, whether or not a
   glTF uses it (a sky panorama, `World_Settings.sky`, is referenced by key from a world, never from a glTF). Then
   each glTF is parsed and its meshes and textures loaded into RAM and VRAM; an external image it references
   is found by key, so it's decoded once. The cost: an unused PNG still takes RAM and VRAM, so don't leave

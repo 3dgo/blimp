@@ -16,6 +16,13 @@
                 "kind": "build",
                 "isDefault": true
             }
+        },
+        {
+            "label": "TexLab",
+            "type": "shell",
+            "command": "python tools/texlab/texlab.py",
+            "presentation": { "reveal": "silent" },
+            "problemMatcher": []
         }
     ]
 }

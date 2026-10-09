@@ -9,3 +9,6 @@ out/
 
 # Build script debug info (odin run build.odin)
 /build.pdb
+
+# Python bytecode (tools/texlab)
+__pycache__/

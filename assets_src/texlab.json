@@ -1,0 +1,351 @@
+{
+ "groups": {
+  "Victorian": {
+   "colors": 16,
+   "rgb555": true,
+   "locked": []
+  }
+ },
+ "textures": {
+  "characters/Texture.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "own",
+   "own": {
+    "colors": 16,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "fb7468dfcbf9973c"
+  },
+  "models/Victorian/Big Globe Map_TEX.png": {
+   "width": 256,
+   "height": 128,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "own",
+   "own": {
+    "colors": 16,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "360302528970f2f6"
+  },
+  "models/Victorian/Big Globe Wood_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "f47ea1143969078a"
+  },
+  "models/Victorian/Big Office Chair Fabric_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "a8a24732d8864851"
+  },
+  "models/Victorian/Big Office Chair_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "334685eae1b7a1c4"
+  },
+  "models/Victorian/Book 1_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "a66670d1bf2aa03f"
+  },
+  "models/Victorian/Book 2_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "7cb8060da83d6dd5"
+  },
+  "models/Victorian/Desk Blotter_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "ffbc636affdc2033"
+  },
+  "models/Victorian/Office Chair 1_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "c56e9b03bcaaeef2"
+  },
+  "models/Victorian/Office Desk_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "6f26c091fcd248a9"
+  },
+  "models/Victorian/Office Lamp_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "547e95eb7c49e721"
+  },
+  "models/Victorian/Pedestal Desk_TEX.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "ebb516d283a40a2d"
+  },
+  "models/Victorian/hotel_walls_test_512.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "dc1fd53b3df3d006"
+  },
+  "models/Victorian/seamless_wall_plaster_256.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "4810caf4835ff783"
+  },
+  "models/Victorian/wood_old_thin_panels_256.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "Victorian",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "e4d228e827a3d673"
+  },
+  "models/colormap.png": {
+   "width": 256,
+   "height": 256,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "own",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "30b462a9fbdb7ade"
+  },
+  "skies/golden_gate_hills_sky.png": {
+   "width": 256,
+   "height": 128,
+   "filter": "Box",
+   "brightness": 0,
+   "contrast": 0,
+   "saturation": 100,
+   "gamma": 1.0,
+   "sharpen": 0.0,
+   "alpha_cutoff": 128,
+   "palette": "own",
+   "own": {
+    "colors": 256,
+    "rgb555": true,
+    "locked": []
+   },
+   "rgb555": true,
+   "dither": "None",
+   "built": "08b38887474139f7"
+  }
+ }
+}
