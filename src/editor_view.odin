@@ -21,9 +21,6 @@ Editor_View :: struct {
     placed:  bool,          // its window got its first-frame floating placement (ui_next_view_window_placement)
     game_view: bool,                   // G: hide everything editor-only here (icons, outlines, selection boxes, gizmo), like Unreal
     show_probes: bool,                 // draw the world's baked probes as debug spokes (probe_grid_debug_lines)
-    collapsed: bool,        // its window was collapsed last frame
-    full_size: vec2,        // its window's size while expanded, restored after a collapse (ui_view_window_keep_size)
-    restore_frames: int,    // frames left to keep reapplying full_size after an expand
 }
 
 @(private="file")

@@ -170,7 +170,8 @@
   the game, not one world. `start_level` opens at startup (and plays in release). Not undoable; written after each edit.
 - **Editor function keys** (`ui_handle_shortcuts`): F2 renames the active entity in place in the entity list,
   F3 toggles the stats overlay (FPS, GPU time per pass, on the foreground draw list), F11 maximizes the
-  hovered viewport over the main window (its host keeps running underneath, so docking survives), and F9
+  hovered viewport over the main window (its host keeps running underneath, so docking survives; view windows
+  don't collapse, so a title double-click does nothing), and F9
   relaunches the engine through the unsaved prompt, with the same launch options. F12 is left to
   RenderDoc's capture key.
     While playing, the viewport has a border (amber when paused) and the title shows ▶.

@@ -79,13 +79,13 @@ ui_draw_views :: proc() {
             if ui_draw_host(h, title) do ui_draw_view(v, fmt.ctprintf("###view%d", v.id), nil)
         } else {
             ui_next_view_window_placement(v)
-            ui_draw_view(v, fmt.ctprintf("%s###view%d", title, v.id), &editor_view(v).window_open)
+            ui_draw_view(v, fmt.ctprintf("%s###view%d", title, v.id), &editor_view(v).window_open, {.NoCollapse})
         }
         if !editor_view(v).window_open do ui_request_close_view(v)   // asks first if it's the last view of an unsaved world
     }
 }
 
-VIEW_WINDOW_SIZE     :: [2]f32{960, 540}   // first-open size of a floating view/world window (× display scale)
+VIEW_WINDOW_SHARE    :: 0.8                 // first-open size of a floating view/world window, as a share of the main window
 VIEW_WINDOW_MIN_SIZE :: [2]f32{320, 180}   // floating view/world windows can't be shrunk below this
 HOST_PANEL_WIDTH     :: 380                 // a world window's list/inspector column, at its first layout (then the user's)
 
@@ -109,44 +109,21 @@ ui_next_view_window_placement :: proc(v: ^Render_View) {
         im.SetNextWindowDockID(0, .Always)   // undocked
         im.SetNextWindowViewport(mv.ID_)     // in the main window, even if imgui.ini remembers this id as its own OS window
         im.SetNextWindowPos({mv.Pos.x + mv.Size.x * 0.5 + offset, mv.Pos.y + mv.Size.y * 0.5 + offset}, .Always, {0.5, 0.5})
-        im.SetNextWindowSize({VIEW_WINDOW_SIZE.x * s, VIEW_WINDOW_SIZE.y * s}, .Always)
+        im.SetNextWindowSize(mv.WorkSize * VIEW_WINDOW_SHARE, .Always)
     }
     im.SetNextWindowSizeConstraints({VIEW_WINDOW_MIN_SIZE.x * s, VIEW_WINDOW_MIN_SIZE.y * s}, {max(f32), max(f32)})
 }
 
-// Call right after the view window's Begin. Puts its size back when it's expanded after a collapse
-// (double-clicking the title). ImGui loses that size when the window floats outside the main window
-// as its own OS window: collapsing shrinks the OS window to the title bar, the OS reports the resize,
-// and ImGui takes it as the window's full size, so it would come back at the minimum height. The OS
-// reports the expand-time resize a frame late too, overriding a one-off restore, so it's reapplied for
-// a few frames.
-VIEW_RESTORE_FRAMES :: 4
-
-ui_view_window_keep_size :: proc(ev: ^Editor_View) {
-    collapsed := im.IsWindowCollapsed()
-    if ev.collapsed && !collapsed do ev.restore_frames = VIEW_RESTORE_FRAMES   // just expanded
-    if !collapsed {
-        if ev.restore_frames > 0 {
-            im.SetWindowSize(ev.full_size)
-            ev.restore_frames -= 1
-        } else {
-            ev.full_size = im.GetWindowSize()
-        }
-    }
-    ev.collapsed = collapsed
-}
-
 // Draws a world window: a host holding a dockspace with [ viewport | list / inspector ]. Builds that
 // layout the first frame it's visible. Returns true once built, i.e. its docked windows may be drawn.
-// While hidden (collapsed, or a background tab) the dockspace is kept alive so nothing undocks.
+// View windows don't collapse (.NoCollapse); while hidden as a background tab the dockspace is kept alive so nothing undocks.
 ui_draw_host :: proc(h: ^World_Host, title: cstring) -> bool {
     v := h.view
     ui_next_view_window_placement(v)
 
     im.PushStyleVarImVec2(im.StyleVar.WindowPadding, {0, 0})
-    visible := im.Begin(fmt.ctprintf("%s###host%d", title, v.id), &editor_view(v).window_open)
+    visible := im.Begin(fmt.ctprintf("%s###host%d", title, v.id), &editor_view(v).window_open, {.NoCollapse})
     im.PopStyleVar()
-    ui_view_window_keep_size(editor_view(v))
 
     dockspace_id := im.GetID("dock")
     if !visible {
@@ -182,7 +159,6 @@ ui_draw_host :: proc(h: ^World_Host, title: cstring) -> bool {
 ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_flags: im.WindowFlags = {}) {
     im.PushStyleVarImVec2(im.StyleVar.WindowPadding, {0, 0})
     visible := im.Begin(label, p_open, {.NoScrollbar, .NoScrollWithMouse} + extra_flags)   // the wheel zooms the camera
-    if ui_host_find(view) == nil && view != ui.maximized do ui_view_window_keep_size(editor_view(view))   // a world window's host does it instead
     if visible {
 
         ui_view_toolbar(view)

@@ -11,7 +11,10 @@ import "core:mem"
 import "core:slice"
 import vmem "core:mem/virtual"
 import la "core:math/linalg"
-import "core:image/png"
+import "core:image"
+// Imported only to register their decoders with core:image, which picks one by the file signature.
+import _ "core:image/png"
+import _ "core:image/jpeg"
 import "core:encoding/json"
 import "core:hash/xxhash"
 import "core:net"
@@ -209,11 +212,11 @@ asset_system_load :: proc() {
     append(&asset_system.materials, Material{color = {1, 1, 1, 1}, color_tex = asset_system.image_ids["white"]})
     asset_system.material_ids["default"] = u32(len(asset_system.materials)) - 1
 
-    // Every PNG loads, keyed by its project path, whether or not a glTF uses it (a sky, say). First, so a glTF
-    // that references one finds it by key (asset_system_import_gltf_models) instead of decoding it again.
+    // Every PNG and JPEG loads, keyed by its project path, whether or not a glTF uses it (a sky, say). First, so
+    // a glTF that references one finds it by key (asset_system_import_gltf_models) instead of decoding it again.
     for fi in asset_files {
-        if strings.to_lower(filepath.ext(fi.fullpath), context.temp_allocator) == ".png" {
-            asset_system_import_png_image(fi.fullpath)
+        switch strings.to_lower(filepath.ext(fi.fullpath), context.temp_allocator) {
+            case ".png", ".jpg", ".jpeg": asset_system_import_image(fi.fullpath)
         }
     }
     // Then the kits, with their embedded images (.glb, data URIs) and any external one outside the scan.
@@ -330,7 +333,7 @@ asset_system_import_gltf_models :: proc(path: string) {
                     // The loader already read the file (it can't when the URI has escapes).
                     idx, found = add_encoded_image(strings.clone(image_key), bytes)
                 } else {
-                    idx, found = asset_system_import_png_image(resolved)
+                    idx, found = asset_system_import_image(resolved)
                 }
             }
             if found {
@@ -688,14 +691,18 @@ gltf_visit_node :: proc(data: ^gltf2.Data, idx: gltf2.Integer, parent: matrix[4,
     for c in data.nodes[idx].children do gltf_visit_node(data, c, m, world, reached)
 }
 
-asset_system_import_png_image :: proc(path: string) -> (index: u32, ok: bool) {
-    // Decode into scratch; keep only a tightly-owned copy in the asset arena.
-    img, err := png.load(path, {.alpha_add_if_missing}, context.temp_allocator)
+// PNG or JPEG (baseline only: core:image/jpeg rejects progressive files).
+asset_system_import_image :: proc(path: string) -> (index: u32, ok: bool) {
+    // Decode into scratch, reclaimed on return, and keep only a tightly-owned copy in the asset arena. A large
+    // image's decode scratch is several times its size, so the scan can't let it pile up across images.
+    temp_mark := vmem.arena_temp_begin(&app.allocators.temp_arena)
+    defer vmem.arena_temp_end(temp_mark)
+    img, err := image.load(path, {.alpha_add_if_missing}, context.temp_allocator)
     if err != nil {
-        log.errorf("Failed to import png, path: %v, err: %v", path, err)
+        log.errorf("Failed to import image, path: %v, err: %v", path, err)
         return 0, false
     }
-    defer png.destroy(img)
+    defer image.destroy(img)
 
     // Key by project-relative path so a shared texture is imported only once.
     return add_decoded_image(asset_key(path), img), true
@@ -758,7 +765,7 @@ gltf_node_matrix :: proc(n: gltf2.Node) -> matrix[4, 4]f32 {
 
 // Copies a decoded image into the asset arena and registers it under key.
 @(private="file")
-add_decoded_image :: proc(key: string, img: ^png.Image) -> u32 {
+add_decoded_image :: proc(key: string, img: ^image.Image) -> u32 {
     image: Image
     image.width = u32(img.width)
     image.height = u32(img.height)
@@ -772,16 +779,18 @@ add_decoded_image :: proc(key: string, img: ^png.Image) -> u32 {
     return index
 }
 
-// Decodes an encoded image (PNG) held in memory — a glTF data-URI, an
+// Decodes an encoded image (PNG or JPEG) held in memory — a glTF data-URI, an
 // external file the loader already read, or a .glb buffer-view blob.
 @(private="file")
 add_encoded_image :: proc(key: string, encoded: []byte) -> (index: u32, ok: bool) {
-    img, err := png.load_from_bytes(encoded, {.alpha_add_if_missing}, context.temp_allocator)
+    temp_mark := vmem.arena_temp_begin(&app.allocators.temp_arena)   // decode scratch, as in asset_system_import_image
+    defer vmem.arena_temp_end(temp_mark)
+    img, err := image.load_from_bytes(encoded, {.alpha_add_if_missing}, context.temp_allocator)
     if err != nil {
         log.errorf("Failed to decode embedded image '%v': %v", key, err)
         return 0, false
     }
-    defer png.destroy(img)
+    defer image.destroy(img)
     return add_decoded_image(key, img), true
 }
 

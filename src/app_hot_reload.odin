@@ -9,7 +9,7 @@ import "common"
 
 // Hot reload: a directory watcher on assets/ and assets_engine/ (ReadDirectoryChangesW, polled once a
 // frame, no thread). What changed decides what reloads:
-//   .gltf .glb .bin .png  every asset (asset_system_reload): kits share textures, so one rebuild is simplest
+//   .gltf .glb .bin .png .jpg  every asset (asset_system_reload): kits share textures, so one rebuild is simplest
 //   .slang                every pipeline (render_shaders_reload), all or nothing
 //   .wav .ogg .mp3 .flac  every sound clip (sound_reload); playing voices stop
 //   .luacn                transpiled to its .lua, which then reloads like any .lua
@@ -57,7 +57,7 @@ hot_reload_update :: proc() {
         for rel in changed {
             path := strings.concatenate({roots[i], "/", rel}, context.temp_allocator)
             switch strings.to_lower(filepath.ext(path), context.temp_allocator) {
-            case ".gltf", ".glb", ".bin", ".png", ".clips": h.assets = true
+            case ".gltf", ".glb", ".bin", ".png", ".jpg", ".jpeg", ".clips": h.assets = true
             case ".slang":                        h.shaders = true
             case ".wav", ".ogg", ".mp3", ".flac": h.sounds = true
             case ".lua":   if !slice.contains(h.scripts[:], path) do append(&h.scripts, strings.clone(path, app.allocators.perm))
