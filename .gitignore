@@ -12,3 +12,6 @@ out/
 
 # Python bytecode (tools/texlab)
 __pycache__/
+
+# Blender autosave backups
+*.blend1
