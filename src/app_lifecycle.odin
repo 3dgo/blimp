@@ -1,5 +1,7 @@
 package blimp
 
+import "core:log"
+import "core:slice"
 import "core:strings"
 import "common"
 
@@ -34,28 +36,35 @@ app_open_kit :: proc(kit: ^Kit) -> ^World {
     return w
 }
 
-// Another viewport onto `w`, framing the whole world. Several viewports on one world share its draw data;
-// a view only adds a camera, a target and its frame constants.
+// Another viewport onto `w`, framing the whole world, in its own window: viewport + an entity list and inspector
+// locked to it. Several viewports on one world share its draw data; a view only adds a camera, a target and its
+// frame constants.
 app_view_open :: proc(w: ^World) -> ^Render_View {
     v := new(Render_View, app.allocators.perm)
     render_view_create(v, w, camera_frame_world(w), 640, 480)
     view_register(v)
+    ui_host_open(v)
     return v
 }
 
 @(private="file")
 app_world_opened :: proc(w: ^World) {
     world_render_create(w)
-    ui_host_open(app_view_open(w))   // its own window: viewport + an entity list and inspector locked to it
+    app_view_open(w)
 }
 
 // ============================ Play ============================
 
 // Starts playing `w`'s level; returns the play world (already playing: the existing one). Its views
-// switch to the copy, and its script loads on the first frame of play (lua_worlds_update).
+// switch to the copy, and its script loads on the first frame of play (lua_worlds_update). One level plays
+// at a time, so there's one game view and one game reading the input: nil (logged) while another plays.
 app_play :: proc(w: ^World) -> ^World {
     level := world_level(w)
     if level.play_world != nil do return level.play_world
+    if p := world_play_current(); p != nil {
+        log.warnf("Play: %s is already playing; stop it first (F7)", p.title)
+        return nil
+    }
     common.luacn_scan_folder("assets")   // a .luacn hot reload missed (or edited while closed) still plays as written
     p := world_play_copy(level)
     editor_world_copy(level, p)
@@ -119,9 +128,15 @@ app_process_closes :: proc() {
     renderer_dx_wait_idle()
 
     // Closing something that's playing stops it first, so its views are back on the level before anything
-    // below looks at them: a closing view of a play world, a closing level, or a play world closed directly.
-    // Stopping queues the play world, which the world loop below then closes.
-    for v in pending_close_views do if v.world.play_source != nil do app_stop(v.world)
+    // below looks at them: the game view or the play world's last view (another view of it is just a camera
+    // on the game), a closing level, or a play world closed directly. Stopping queues the play world, which the
+    // world loop below then closes.
+    for v in pending_close_views {
+        if v.world.play_source == nil do continue
+        stays := false
+        for o in views do if o.world == v.world && !slice.contains(pending_close_views[:], o) do stays = true
+        if v == ui.game || !stays do app_stop(v.world)
+    }
     for i := 0; i < len(pending_close_worlds); i += 1 {
         w := pending_close_worlds[i]
         if w.play_world != nil || w.play_source != nil do app_stop(w)

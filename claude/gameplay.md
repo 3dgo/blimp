@@ -129,8 +129,10 @@ on every Play; the converter skips unchanged output, so those passes don't trigg
   world (level arena, Box3D world, voices, generational handles), and moving one between worlds would be a
   hidden lifetime special case. Each level places its own player (and camera); the behaviour is a shared Lua
   module (`assets/characters/player`), so any level plays standalone in the editor.
-- **Game state** (`world_game.odin`, Lua `Game` / `游戏`): fixed key slots, each a number and a text
-  (`MAX_GAME_VALUES` 64, inline sbufs, copies by value). It lives on the play world and moves to the next one
+- **Game state** (`world_game.odin`, Lua `Game` / `游戏`): fixed key slots, each a number or a string, whichever
+  was set last (`MAX_GAME_VALUES` 64, inline sbufs, copies by value). A dotted key (`玩家.生命值`) is a path, but
+  storage stays flat: only listings group it (`game_sorted` orders paths so a group's keys are adjacent). The Game
+  Globals window (claude/editor.md) and blimpctl `globals` show and edit it during play. It lives on the play world and moves to the next one
   on a switch: one play session's lifetime (Play starts it empty, Stop drops it). It's in Odin, not a Lua
   table in main.lua, because Lua holds no state: hot reload reruns every script, engine hooks outlive Stop,
   and nothing else (blimpctl, a save file) could read it. A save game is this, written to a file, later.
@@ -180,7 +182,8 @@ Built (`world_sound.odin`):
 ### Input
 
 `input.odin`: keyboard, mouse and the first gamepad, read from SDL's state once a frame before the game runs.
-It's live only in game mode (the app passes it in: `input_update(game_mode)`) with the window focused; otherwise everything reads up/zero, so editor typing never
+It's live only while the game view has the focus (the app passes it in: `input_update(ui_game_has_input())`; always in
+a release build) and the OS window has it too; otherwise everything reads up/zero, so editor typing never
 reaches the game. Lua `Input.down / pressed / released(key)` (SDL scancode names: `"W"`, `"Space"`,
 `"Left Shift"`), `mouse_down / mouse_pressed(1–5)`, `mouse_delta()`, `lock_mouse(bool)` (relative mode,
 released whenever the editor has the window), `gamepad_axis(name)` (deadzoned), `gamepad_down / pressed(name)`

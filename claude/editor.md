@@ -126,7 +126,8 @@
   - Its entity list and inspector are the only ones: there are no floating or extra panels, and they always
     show that window's world (the running copy while it plays). The toolbar's panels button hides both
     (`World_Host.show_panels`); the viewport then fills the window.
-  - "New Viewport" adds a plain extra view window onto an open world.
+  - "New Viewport" adds another world window onto an open world (`app_view_open`): every view has its own list
+    and inspector, all alike. Selection is the world's, so they show and edit the same entities.
 - **`active_view`** is the viewport you last focused, or the world you last clicked in a panel
   (`world_activate`). It may be nil. Its world is the target of Ctrl+C/V. Undo entries carry their
   own world.
@@ -158,7 +159,8 @@
     until Stop.
   - Editor state pinned to a world follows the switch (`ui_retarget_world`), and drags in progress end.
     New editor state that pins a `^World` hooks in there, next to `ui_forget_world`.
-  - Closing a play view, a playing level or a play world stops play first (`app_process_closes`).
+  - Closing the game view, the play world's last view, a playing level or a play world stops play first
+    (`app_process_closes`). Another view of the play world is just a camera on the game: closing it doesn't.
     The unsaved prompt asks about the level.
   - Runtime systems (physics, animation, audio) belong to the play world: built with it, freed when it closes.
   - **Level switches replace the play world, never the level** (`World.switch_level`, claude/gameplay.md → Levels).
@@ -167,14 +169,23 @@
     It's flagged `switched` (its probes are its own, `world_lighting`); the editor selection isn't carried.
   - Keys (and toolbar buttons): F5 Play, F6 Pause, F7 Stop, F10 step one frame while paused (game systems check `w.ticks`,
     set once per frame by `world_play_tick`, never `paused`). Esc stays the game's. No Restart: Stop is the reset.
-  - **Game mode** (`ui_game.odin`): Play also makes that view the whole window as the game, rendered through
-    the play world's first enabled camera entity (`world_game_camera` → `Render_View.camera_entity`; the editor
-    camera if there's none, or once it's deleted or disabled). The sound listener uses the same camera.
-    The editor isn't drawn at all, so no editor window, input or letter shortcut runs, and docking is untouched.
-    F8 switches between game mode and the editor while the game keeps running; Stop leaves it. Only function
-    keys work in game mode. A release build is always in it: it plays the start level at startup.
+  - **One level plays at a time**: `app_play` refuses (logs) while another plays, so there's one game view and one
+    game reading the input. Two views of the playing level are fine; only the one Play ran in is the game.
+  - **Game mode** (`ui_game.odin`, `ui.game`): Play also makes that view the game, in its own window; every other
+    window stays. It renders through the play world's first enabled camera entity (`world_game_camera` →
+    `Render_View.camera_entity`; the editor camera if there's none, or once it's deleted or disabled), and the
+    sound listener uses the same camera. The view drops the editor's tools (tool column, icons, gizmo, selection,
+    camera navigation, context menu, ImGui keyboard nav) but keeps its toolbar. The game gets keyboard and mouse
+    only while that view's window has the focus (`ui.game_focus`, read by next frame's `input_update`); then only
+    function keys reach the editor (`ui_game_shortcuts`), so letters, Esc and Delete are the game's. F8 switches
+    the view between the game's camera and the editor's while the game keeps running (and is the way out of a
+    locked mouse, with Alt+Tab); Stop leaves it. A release build has no editor: the game view fills the window
+    (`ui_draw_game`) and plays the start level at startup.
 - **Game Settings** (`game_settings.odin`, `game.ini` at the project root, Show menu): settings that belong to
   the game, not one world. `start_level` opens at startup (and plays in release). Not undoable; written after each edit.
+- **Game Globals** (`ui_game_globals.odin`, Show menu): the game state (claude/gameplay.md) of the active world's
+  play world, as a tree of its dotted keys (groups are `ui_param_group_begin` rows, like a nested struct), each
+  value editable in place. Not undoable: runtime state, gone at Stop. blimpctl `globals` is the same, as text.
 - **Editor function keys** (`ui_handle_shortcuts`): F2 renames the active entity in place in the entity list,
   F3 toggles the stats overlay (FPS, GPU time per pass, on the foreground draw list), F11 maximizes the
   hovered viewport over the main window (its host keeps running underneath, so docking survives; view windows

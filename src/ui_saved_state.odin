@@ -18,7 +18,7 @@ Saved_Window :: struct {
 }
 
 @(private="file")
-SAVED_WINDOW_COUNT :: 6
+SAVED_WINDOW_COUNT :: 7
 
 @(private="file")
 saved_windows :: proc() -> [SAVED_WINDOW_COUNT]Saved_Window {
@@ -26,6 +26,7 @@ saved_windows :: proc() -> [SAVED_WINDOW_COUNT]Saved_Window {
         {"worlds",        &ui.show_worlds},
         {"schema_editor", &ui.show_schema_editor},
         {"game_settings", &ui.show_game_settings},
+        {"game_globals",  &ui.show_game_globals},
         {"resources",     &ui.show_resources},
         {"shadow_maps",   &ui.show_shadow_maps},
         {"stats",         &ui.show_stats},

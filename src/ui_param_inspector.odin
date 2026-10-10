@@ -343,12 +343,7 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
     // A nested struct is a row like its siblings, not a section bar: its fold arrow in the gutter and its
     // name in the label column, opening into an indented panel that shows where it ends. The top-level call
     // is headerless.
-    if !options.headerless {
-        param_row_begin()
-        if !im.TreeNodeEx(fmt.ctprintf("%s###struct", name), {.NoTreePushOnOpen, .FramePadding}) do return
-        im.Indent()
-        ui_card_begin()
-    }
+    if !options.headerless && !ui_param_group_begin(name) do return
 
     attr_count := reflect.struct_field_count(type)
     struct_tags := reflect.struct_field_tags(type)
@@ -411,10 +406,31 @@ ui_param_struct :: proc(name: string, type: typeid, value: any, options := DEFAU
         param_struct_fields(type, value, options, owner_type, section, whole, col, dots)
     }
 
-    if !options.headerless {
-        ui_card_end()
-        im.Unindent()
+    if !options.headerless do ui_param_group_end()
+}
+
+// A group row (a nested struct, a folder of game globals): its fold arrow in the gutter and its name in the
+// label column, opening into an indented card that shows where it ends. While open (true) its rows go inside,
+// then ui_param_group_end. `id` tells apart same-named groups in one window (default: the name); it also
+// keeps sibling groups' cards, each a child window, apart. `open`: unfolded the first time it shows.
+ui_param_group_begin :: proc(name: string, id := "", open := false) -> bool {
+    param_row_begin()
+    im.PushID(fmt.ctprintf("%s", id == "" ? name : id))
+    flags: im.TreeNodeFlags = {.NoTreePushOnOpen, .FramePadding}
+    if open do flags += {.DefaultOpen}
+    if !im.TreeNodeEx(fmt.ctprintf("%s###group", name), flags) {
+        im.PopID()
+        return false
     }
+    im.Indent()
+    ui_card_begin()
+    return true
+}
+
+ui_param_group_end :: proc() {
+    ui_card_end()
+    im.Unindent()
+    im.PopID()
 }
 
 // One section's fields (`section` "" = those without one). `whole`: the search matched the section itself.

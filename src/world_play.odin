@@ -34,6 +34,12 @@ world_playing :: proc(w: ^World) -> bool {
     return world_level(w).play_world != nil
 }
 
+// The play world, if any level is playing: one at a time (app_play).
+world_play_current :: proc() -> ^World {
+    for w in worlds do if w.play_source != nil do return w
+    return nil
+}
+
 // The play copy of `level`, registered, with every view of the level switched to it.
 world_play_copy :: proc(level: ^World) -> ^World {
     p := new(World, app.allocators.perm)

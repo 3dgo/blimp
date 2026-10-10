@@ -232,6 +232,11 @@ Loc_ID :: enum {
     Win_Game_Settings,
     Menu_Game_Settings,
     Game_Start_Level,
+    Win_Game_Globals,
+    Menu_Game_Globals,
+    Game_Globals_Not_Playing,
+    Game_Globals_Empty,
+    Game_Globals_Count,
     // Entity panels
     Panel_Entity_List,
     Panel_Entity_Inspector,
@@ -517,6 +522,11 @@ loc_text := [Loc_ID][Lang]cstring {
     .Win_Game_Settings  = { .EN = "Game Settings###game_settings", .ZH = "游戏设置###game_settings" },
     .Menu_Game_Settings = { .EN = "Game Settings",  .ZH = "游戏设置" },
     .Game_Start_Level   = { .EN = "Start Level",    .ZH = "起始关卡" },
+    .Win_Game_Globals   = { .EN = "Game Globals###game_globals", .ZH = "游戏全局变量###game_globals" },
+    .Menu_Game_Globals  = { .EN = "Game Globals",   .ZH = "游戏全局变量" },
+    .Game_Globals_Not_Playing = { .EN = "Not playing. Play the level (F5) to see what its scripts store in Game.", .ZH = "没在运行。运行关卡（F5）后，这里显示脚本存进 游戏 表的值。" },
+    .Game_Globals_Empty = { .EN = "Nothing stored yet (Game.set_number / Game.set_string).", .ZH = "还没存任何值（游戏.设数 / 游戏.设文本）。" },
+    .Game_Globals_Count = { .EN = "%d of %d keys", .ZH = "%d / %d 个键" },
 
 
     .Panel_Entity_List         = { .EN = "Entity List",          .ZH = "实体列表" },

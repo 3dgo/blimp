@@ -5,6 +5,10 @@ import im "lib:odin-imgui"
 ui_handle_shortcuts :: proc() {
     if ui.io.WantTextInput do return        // don't hijack keys while typing in a field
     if ui_unsaved_active() do return        // the unsaved-changes prompt is up: it has the keyboard
+    if ui.game_focus && ui.game != nil {    // the game view has the keyboard: only function keys, on it (ui_game.odin)
+        ui_game_shortcuts()
+        return
+    }
     ctrl  := ui.io.KeyCtrl
     shift := ui.io.KeyShift
 
@@ -36,7 +40,7 @@ ui_handle_shortcuts :: proc() {
     dragging := target_ev.gizmo.drag != .None
 
     // Function keys, so Esc and the letter keys stay free for games. F5–F7 play mode, F10 frame step,
-    // F8 game mode while playing (ui_game.odin),
+    // F8 game mode while playing (ui_game.odin; while the game view has the focus, ui_game_shortcuts),
     // F9 relaunch (app.odin), F12 RenderDoc's capture key.
     if im.IsKeyPressed(.F2, false)  do ui_entity_rename_begin(w)        // inline in the entity list
     if im.IsKeyPressed(.F5, false)  do ui_play(target)                  // and shows it as the game

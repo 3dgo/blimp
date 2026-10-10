@@ -7,7 +7,7 @@ import hm "core:container/handle_map"
 import im "lib:odin-imgui"
 import "dx"
 
-// An opened scene/kit gets one window holding its own little dockspace: the viewport on the left,
+// Every view gets one window (opened with its world, or New Viewport) holding its own little dockspace: the viewport on the left,
 // an entity list and inspector locked to that world stacked on the right. AutoHideTabBar hides the
 // label of every node that holds a single window, so it reads as one panel. The host window carries
 // the title and the close button; closing it closes the view (and the world, if it was the last one).
@@ -52,10 +52,11 @@ ui_forget_view :: proc(v: ^Render_View) {
     for i := len(ui.hosts) - 1; i >= 0; i -= 1 do if ui.hosts[i].view == v do ordered_remove(&ui.hosts, i)
 }
 
-// One window per view. A view opened with its world is a world window (viewport + its own list and
-// inspector); a "New Viewport" view is a plain window. Every one is labelled "<world title> 视口",
-// with ● on the active one (what Ctrl+C/V act on); closing it closes the view.
+// One world window per view (viewport + its own list and inspector), whether it opened with its world or came
+// from New Viewport, so every view of a world works alike. Every one is labelled "<world title> 视口", with ● on
+// the active one (what Ctrl+C/V act on); closing it closes the view.
 ui_draw_views :: proc() {
+    ui.game_focus = false   // the game view sets it again as it's drawn; shortcuts and input read last frame's
     for v in views {
         mark  := v == active_view ? "● " : ""
         play  := v.world.play_source == nil ? "" : v.world.paused ? ICON_PAUSE + " " : ICON_PLAY + " "   // showing the game
@@ -64,9 +65,9 @@ ui_draw_views :: proc() {
 
         h := ui_host_find(v)
         if v == ui.maximized {
-            // F11: the view fills the main window instead. A world window's host still runs underneath,
-            // hidden behind it, so its docked panels and layout survive; a plain view's window just waits.
-            if h != nil do ui_draw_host(h, title)
+            // F11: the view fills the main window instead. Its host still runs underneath, hidden behind it,
+            // so its docked panels and layout survive.
+            ui_draw_host(h, title)
             mv := im.GetMainViewport()
             im.SetNextWindowPos(mv.WorkPos)
             im.SetNextWindowSize(mv.WorkSize)
@@ -74,12 +75,9 @@ ui_draw_views :: proc() {
             if ui.maximize_focus do im.SetNextWindowFocus()   // on top when it opens; other windows can still come forward
             ui.maximize_focus = false
             ui_draw_view(v, "###maximized_view", nil, im.WindowFlags_NoDecoration + {.NoDocking, .NoMove, .NoSavedSettings})
-        } else if h != nil {
-            // World window: the host carries title + close; the viewport docks inside it, untitled.
-            if ui_draw_host(h, title) do ui_draw_view(v, fmt.ctprintf("###view%d", v.id), nil)
         } else {
-            ui_next_view_window_placement(v)
-            ui_draw_view(v, fmt.ctprintf("%s###view%d", title, v.id), &editor_view(v).window_open, {.NoCollapse})
+            // The host carries title + close; the viewport docks inside it, untitled.
+            if ui_draw_host(h, title) do ui_draw_view(v, fmt.ctprintf("###view%d", v.id), nil)
         }
         if !editor_view(v).window_open do ui_request_close_view(v)   // asks first if it's the last view of an unsaved world
     }
@@ -157,13 +155,18 @@ ui_draw_host :: proc(h: ^World_Host, title: cstring) -> bool {
 }
 
 ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_flags: im.WindowFlags = {}) {
+    game := view == ui.game   // game mode (ui_game.odin): the game's camera and input, none of the editor's tools
+    flags := im.WindowFlags{.NoScrollbar, .NoScrollWithMouse} + extra_flags   // the wheel zooms the camera
+    if game do flags += {.NoNavInputs}   // arrow keys and Space are the game's, not a way to press toolbar buttons
     im.PushStyleVarImVec2(im.StyleVar.WindowPadding, {0, 0})
-    visible := im.Begin(label, p_open, {.NoScrollbar, .NoScrollWithMouse} + extra_flags)   // the wheel zooms the camera
+    visible := im.Begin(label, p_open, flags)
     if visible {
 
         ui_view_toolbar(view)
-        ui_view_tools()   // a column down the left, the image beside it
-        im.SameLine()
+        if !game {
+            ui_view_tools()   // a column down the left, the image beside it
+            im.SameLine()
+        }
         ui_view_image(view)
 
         // Refresh the editor's copy of this view's screen rect each frame so keyboard actions
@@ -173,14 +176,18 @@ ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_fl
         ev.screen_min  = {img_min.x, img_min.y}
         ev.screen_size = {f32(view.target.width), f32(view.target.height)}
         ev.hovered     = im.IsItemHovered()
-        if !ev.game_view do editor_draw_icons(ev)   // camera / light icons, under the gizmo (editor_shapes.odin)
-        if !ev.game_view do ui_bake_probe_highlight(ev)   // the probe hovered in the Bake window's atlas (ui_bake.odin)
-
-        if im.IsWindowFocused() do view_activate(view)   // focusing a viewport makes its world active
-        editor_navigate(ev)
-        gizmo_owns_mouse := !ev.game_view && gizmo_update(ev, ui.tool, ui.space, ui.pivot, ui.snap)   // G hides (and disables) it
-
-        ui_view_selection(ev, gizmo_owns_mouse)
+        // Focusing a viewport makes its world active. The game's own windows in it (World.ui) count as the view.
+        focused := im.IsWindowFocused(im.FocusedFlags_RootAndChildWindows)
+        if focused do view_activate(view)
+        if game {
+            ui.game_focus = focused
+        } else {
+            if !ev.game_view do editor_draw_icons(ev)   // camera / light icons, under the gizmo (editor_shapes.odin)
+            if !ev.game_view do ui_bake_probe_highlight(ev)   // the probe hovered in the Bake window's atlas (ui_bake.odin)
+            editor_navigate(ev)
+            gizmo_owns_mouse := !ev.game_view && gizmo_update(ev, ui.tool, ui.space, ui.pivot, ui.snap)   // G hides (and disables) it
+            ui_view_selection(ev, gizmo_owns_mouse)
+        }
 
         // Showing the game: a border in the play colour (amber while paused), so play edits read as such.
         if view.world.play_source != nil {
@@ -192,7 +199,7 @@ ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_fl
         // Right-click (RMB released without flying): select what's under the cursor unless it's already
         // selected (so the menu acts on it), then open the menu, pasting at the click's raycast.
         // `remote_context` is the same click at a view pixel, from blimpctl's `menu`.
-        if ev.context_click || ev.remote_context != nil {
+        if !game && (ev.context_click || ev.remote_context != nil) {
             w := view.world
             mp := im.GetMousePos()
             p := vec2{mp.x, mp.y} - ev.screen_min

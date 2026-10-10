@@ -208,6 +208,8 @@ REMOTE_HELP :: `Worlds and entities  (<world> = index, title, or scene path; <na
   open <path>                             open a level (.level) or kit (.gltf/.glb)
   new <path>                              create an empty level (.level) and open it
   close <world>                           close a world and its views
+  viewport <world>                        open another view window onto the world (New Viewport); replies with its id
+  closeview <view>                        close one view window (closing the game view stops play)
   save <world>                            write a scene world back to its .level
   entities <world>                        one line per entity: name, model, position
   get <world> [name]                      [entity] text of one entity, or of all
@@ -217,7 +219,9 @@ REMOTE_HELP :: `Worlds and entities  (<world> = index, title, or scene path; <na
   select <world> <name...|none>           replace the selection; the last name is active
   duplicate <world>                       copy the selection in place and select the copies (Ctrl+D)
   settings <world> [field value...]       show or set the world's [world] settings (undoable)
-  play <world> [stop|pause|step]          play the world's level in a copy as the game (game mode in its view, like F5);
+  globals <world> [key [value...]]        a playing level's game state (Lua Game.set_*): every key, the key or the
+                                          group (globals 0 player lists player.health ...), or set a key
+  play <world> [stop|pause|step]        play the world's level in a copy as the game (game mode in its view, like F5);
                                           stop, toggle pause, or step a frame
   bake <world>                            bake the level's probes (blocks), save its .probes; replies with the stats
   probe <world> <x> <y> <z>               baked indirect irradiance/pi at a point, facing +-X +-Y +-Z (linear)
@@ -231,7 +235,7 @@ Views  (<view> = view id, see 'views')
   marquee <view> <x0> <y0> <x1> <y1> [add|remove|toggle]  marquee-select a view rectangle
   menu <view> <x> <y>                     right-click at view pixel x,y (selects, opens the context menu)
   maximize <view>                         the view fills the main window, or goes back (F11)
-  game <view>                             game mode on a playing view (the window is the game, through its camera entity), or back (F8)
+  game <view>                             game mode on a playing view (its camera entity; input while focused), or back (F8)
   stats [on|off]                          the FPS / GPU-per-pass overlay (F3)
   gameview <view>                         hide / show icons, outlines and the gizmo in the view (G)
   retro <view> [on|off]                   get or set the view's render mode: the retro look, or clean (off);
@@ -327,6 +331,18 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         world_request_close(w)
         fmt.sbprintf(out, "closing %s\n", w.title)
 
+    case "viewport":
+        // The worlds list's New Viewport: while playing, onto the game.
+        w := remote_world(args) or_return
+        if w.play_world != nil do w = w.play_world
+        fmt.sbprintf(out, "view=%d\n", app_view_open(w).id)
+
+    case "closeview":
+        // The view window's close button (the last view of an unsaved world asks first).
+        v := remote_view(args) or_return
+        ui_request_close_view(v)
+        fmt.sbprintf(out, "closing view %d\n", v.id)
+
     case "save":
         w := remote_world(args) or_return
         if w.play_source != nil do return "a play world can't be saved (nothing from play is ever saved)"
@@ -411,6 +427,39 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         }
         serialize_struct(out, w.settings)
 
+    case "globals":
+        // A playing level's game state (world_game.odin, the Game Globals window): every key, one key or group,
+        // or set one. A set keeps a string key a string; otherwise a number if the value reads as one.
+        w := remote_world(args) or_return
+        if w.play_source == nil do w = w.play_world
+        if w == nil do return "not playing (play <world> first)"
+        g := &w.game
+        if len(args) >= 3 {
+            key, text := args[1], strings.join(args[2:], " ", context.temp_allocator)
+            n, is_number := strconv.parse_f64(text)
+            v, found := game_find(g, key)
+            stored: bool
+            switch {
+            case found && v.kind == .String: stored = game_set_string(g, key, text)
+            case is_number:                  stored = game_set_number(g, key, n)
+            case found:                      return fmt.tprintf("'%s' holds a number; '%s' isn't one", key, text)
+            case:                            stored = game_set_string(g, key, text)
+            }
+            if !stored do return "not stored (see log)"
+        }
+        group := len(args) >= 2 ? args[1] : ""
+        listed := 0
+        for v in game_sorted(g, context.temp_allocator) {
+            key := sbuf_str(&v.key)
+            if group != "" && key != group && !(strings.has_prefix(key, group) && len(key) > len(group) && key[len(group)] == '.') do continue
+            switch v.kind {
+            case .Number: fmt.sbprintf(out, "%s = %v\n", key, v.number)
+            case .String: fmt.sbprintf(out, "%s = \"%s\"\n", key, sbuf_str(&v.str))   // quoted, so "42" isn't 42; not escaped, so Chinese reads as itself
+            }
+            listed += 1
+        }
+        if group != "" && listed == 0 do return fmt.tprintf("no key or group '%s' (see 'globals %s')", group, args[0])
+
     case "bake":
         w := world_level(remote_world(args) or_return)
         s, ok := bake_probes(w)
@@ -450,6 +499,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         case:         return "usage: play <world> [stop|pause|step]"
         }
         p := world_level(w).play_world
+        if p == nil && len(args) == 1 do if o := world_play_current(); o != nil do return fmt.tprintf("%s is already playing; one level plays at a time", o.title)
         fmt.sbprintf(out, "%s\n", p == nil ? "stopped" : p.paused ? "paused" : "playing")
 
     case "undo": undo()

@@ -4,9 +4,10 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Game input, for Lua's Input table: keyboard, mouse and the first gamepad, read from SDL's state once a frame
-// (input_update, before the game systems). It's live only while the game has the window: game mode (always in a
-// release build; the app passes it in) with the window focused. Otherwise everything reads up and zero, so typing in an
-// editor panel never moves the player. Pressed / released compare with the previous frame.
+// (input_update, before the game systems). It's live only while the game has the keyboard (the app passes it in:
+// the game view's window focused, always in a release build) and the OS window has the focus. Otherwise everything
+// reads up and zero, so typing in an editor panel never moves the player. Pressed / released compare with the
+// previous frame.
 //
 // Keys are SDL scancode names, any case: "W", "Space", "Left Shift", "Escape", "Up", "1". Mouse buttons are
 // 1 left, 2 middle, 3 right, 4–5 the side ones. Gamepad buttons and axes are SDL's names: "a" "b" "x" "y"
@@ -26,10 +27,10 @@ Input :: struct {
 }
 input: Input
 
-input_update :: proc(game_mode: bool) {
+input_update :: proc(game_has_input: bool) {
     in_ := &input
     in_.keys_prev, in_.mouse_prev, in_.pad_prev = in_.keys, in_.mouse, in_.pad
-    in_.live = game_mode && sdl.GetKeyboardFocus() == app.window
+    in_.live = game_has_input && sdl.GetKeyboardFocus() == app.window
 
     // Always read, so the relative motion doesn't pile up while the editor has the mouse.
     dx, dy: f32

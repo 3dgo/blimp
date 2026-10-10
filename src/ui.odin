@@ -35,8 +35,10 @@ UI :: struct {
     inspector_editing: bool,          // an inspector edit's undo step is open (ui_entity_inspector_body)
     maximized: ^Render_View,          // F11: this view fills the main window (ui_draw_views); nil = none
     maximize_focus: bool,             // bring the maximized view to the front on its first frame
-    game: ^Render_View,               // game mode: this view is the whole window as the game, the editor hidden (ui_game.odin); nil = the editor
+    game: ^Render_View,               // game mode: this view shows the game (ui_game.odin); nil = none
+    game_focus: bool,                 // the game view's window had the focus last frame: the game has the keyboard and mouse
     show_game_settings: bool,
+    show_game_globals: bool,
     font_bold: ^im.Font,              // the UI font in bold (the default font is regular)
 }
 ui: UI
@@ -251,10 +253,12 @@ ui_update :: proc() {
     im_sdl3.NewFrame()
     im.NewFrame()
 
-    if ui.game != nil {
-        ui_draw_game()   // instead of the whole editor
-        im.Render()
-        return
+    when !ODIN_DEBUG {
+        if ui.game != nil {
+            ui_draw_game()   // a release build is only the game
+            im.Render()
+            return
+        }
     }
 
     dockspace_id := im.DockSpaceOverViewport(0, im.GetMainViewport())
@@ -270,6 +274,7 @@ ui_update :: proc() {
             menu_section(tr(.Menu_Section_Project))
             im.MenuItemBoolPtr(tr(.Menu_Schema_Editor), nil, &ui.show_schema_editor)
             im.MenuItemBoolPtr(tr(.Menu_Game_Settings), nil, &ui.show_game_settings)
+            im.MenuItemBoolPtr(tr(.Menu_Game_Globals), nil, &ui.show_game_globals)
             menu_section(tr(.Menu_Section_Profile))
             im.MenuItemBoolPtr(tr(.Menu_Resources), nil, &ui.show_resources)
             im.MenuItemBoolPtr(tr(.Menu_Shadow_Maps), nil, &ui.show_shadow_maps)
@@ -296,6 +301,7 @@ ui_update :: proc() {
     ui_draw_world_settings()
     ui_draw_bake()
     ui_draw_game_settings()
+    ui_draw_game_globals()
     ui_draw_unsaved_prompt()   // the modal, if a close or quit is waiting on Save / Don't Save / Cancel
 
     if ui.show_schema_editor {
