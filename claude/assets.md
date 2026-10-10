@@ -79,7 +79,10 @@ so it is never loaded or shipped. TexLab resizes, adjusts and palettizes them (o
 palettes, RGB555, 1-bit alpha) into indexed PNGs at the matching `assets/` path. Hot reload picks them up.
 `core:image` expands 1/2/4/8-bit indexed PNGs with tRNS to RGBA8 (checked). `assets_src/texlab.json` holds
 TexLab's settings. It is a tool file the engine never reads, not an asset meta file. `.glb`-embedded textures
-are out of its reach.
+are out of its reach. Its **Engine look** preview copies `post.slang`'s signal pass in Python (`engine_image`:
+an unlit texel × 2^exposure (its own control) → ACES → sRGB → quantize + Bayer, with colour bits and dither read
+from a `.level`),
+so a change to that chain must also be made there.
 
 - Scan `assets/` and `assets_engine/`: **every `.png`/`.jpg` loads first**, keyed by its project path, whether or not a
   glTF uses it (a sky panorama, `World_Settings.sky`, is referenced by key from a world, never from a glTF). Then

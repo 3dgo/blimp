@@ -284,6 +284,8 @@ class MainWindow(QMainWindow):
         self.result_image: QImage | None = None
         self.result_palette: list[magick.Color] = []
         self.result_alpha = False
+        self.result_colors: set[bytes] = set()
+        self.info_text = ""
         self.building: dict[str, str] = {}  # rel -> build key, for the batch in flight
         self.build_errors: list[str] = []
         self.loading = False
@@ -401,6 +403,35 @@ class MainWindow(QMainWindow):
         bar.addStretch(1)
         bar.addWidget(self.info_label)
 
+        # Engine look: the result as a retro view shows it on an unlit surface (engine_image).
+        self.engine_check = QCheckBox("Engine look")
+        self.engine_check.setToolTip("Show the result tonemapped and quantized + dithered like an unlit surface "
+                                     "in a retro view, to catch dark textures that turn to mud")
+        self.engine_check.toggled.connect(self.show_result)
+        self.exposure_spin = QDoubleSpinBox(minimum=-8, maximum=4, singleStep=0.5, decimals=1, value=0, suffix=" EV")
+        self.exposure_spin.setToolTip("Stops: the texture is scaled by 2^exposure before the tonemap, each step down halves it")
+        self.exposure_spin.valueChanged.connect(self.show_result)
+        self.level_combo = QComboBox()
+        self.level_combo.setToolTip("The level whose retro colour depth and dither to use")
+        assets = os.path.join(ROOT, "assets")
+        for dirpath, _, files in os.walk(assets):
+            for f in sorted(files):
+                if f.endswith(".level"):
+                    path = os.path.join(dirpath, f)
+                    self.level_combo.addItem(os.path.relpath(path, assets).replace(os.sep, "/"), path)
+        self.level_combo.currentIndexChanged.connect(self.level_picked)
+        self.level_label = QLabel()
+        self.level_look = (31, 1.0)
+
+        engine_bar = QHBoxLayout()
+        engine_bar.addWidget(self.engine_check)
+        engine_bar.addWidget(QLabel("Exposure"))
+        engine_bar.addWidget(self.exposure_spin)
+        engine_bar.addWidget(QLabel("Level"))
+        engine_bar.addWidget(self.level_combo)
+        engine_bar.addWidget(self.level_label)
+        engine_bar.addStretch(1)
+
         self.source_view = PixelView(self.view_state, True, "Source")
         self.result_view = PixelView(self.view_state, False, "Result")
         views = QSplitter()
@@ -427,6 +458,7 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addLayout(bar)
+        lay.addLayout(engine_bar)
         lay.addWidget(views, 1)
         lay.addWidget(self.palette_label)
         lay.addWidget(self.strip)
@@ -434,6 +466,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(QLabel("<small>Double-click a swatch to edit it (edited colours are locked). "
                              "Right-click to lock, unlock or remove. Locked colours are always kept; "
                              "the rest are derived from the textures.</small>"))
+        self.level_picked()
         return w
 
     def make_settings(self) -> QWidget:
@@ -951,6 +984,7 @@ class MainWindow(QMainWindow):
             v.update()
         self.strip.set([], 0, False)
         self.palette_label.setText("")
+        self.info_text = ""
         self.info_label.setText("")
 
     def run_preview(self):
@@ -987,9 +1021,9 @@ class MainWindow(QMainWindow):
             t = self.proj.textures[rel]
             pal = self.proj.palette_of(t)
             n = len(palette) + alpha
-            self.info_label.setText(
-                f"{t.width}x{t.height}  {f'{n} entries' if pal else 'truecolour'}  "
-                f"{self.proj.bpp(t)}-bit  {self.proj.vram(rel) / 1024:.1f} KB")
+            self.result_colors = image_colors(self.result_image)
+            self.info_text = (f"{t.width}x{t.height}  {f'{n} entries' if pal else 'truecolour'}  "
+                              f"{self.proj.bpp(t)}-bit  {self.proj.vram(rel) / 1024:.1f} KB")
             self.strip.set(palette, len(pal.locked) if pal else 0, alpha)
             if pal is None:
                 self.palette_label.setText("<b>Palette</b>: none (truecolour)")
@@ -1006,10 +1040,31 @@ class MainWindow(QMainWindow):
 
     def show_result(self):
         img = self.result_image
+        engine = self.engine_check.isChecked()
         if img is not None and self.index_check.isChecked() and self.result_palette:
             img = index_image(img, self.result_palette)
+        elif img is not None and engine:
+            levels, dither = self.level_look
+            img = engine_image(img, 2 ** self.exposure_spin.value(), levels, dither)
+        info = self.info_text
+        if self.result_image is not None and engine:
+            levels, _ = self.level_look
+            scale = 2 ** self.exposure_spin.value()
+            shades = {engine_color(c, scale, levels, 0.5) for c in self.result_colors}
+            info += f"  engine: {len(shades)} of {len(self.result_colors)} distinct"
+        self.info_label.setText(info)
+        self.result_view.title = "Result (engine look)" if engine else "Result"
         self.result_view.image = img
         self.result_view.update()
+
+    def level_picked(self):
+        path = self.level_combo.currentData()
+        if path:
+            self.level_look = read_level_look(path)
+        levels, dither = self.level_look
+        depth = f"{round(math.log2(levels + 1))}-bit, dither {dither:g}" if levels else "no quantize"
+        self.level_label.setText(depth)
+        self.show_result()
 
     def zoom_picked(self, index: int):
         self.view_state.zoom = 0.0 if index == 0 else float(ZOOMS[index])
@@ -1142,6 +1197,87 @@ def index_image(img: QImage, palette: list[magick.Color]) -> QImage:
         if src[i + 3]:
             out[i:i + 4] = lut.get(src[i:i + 3], b"\xff\x00\xff\xff")
     return QImage(bytes(out), w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
+
+
+# --- engine look: the post chain's signal pass (assets_engine/shaders/post.slang, utils.slang) ---
+
+BAYER_4X4 = [0.5, 8.5, 2.5, 10.5, 12.5, 4.5, 14.5, 6.5, 3.5, 11.5, 1.5, 9.5, 15.5, 7.5, 13.5, 5.5]  # x 1/16
+ACES_INPUT = ((0.59719, 0.35458, 0.04823), (0.07600, 0.90834, 0.01566), (0.02840, 0.13383, 0.83777))
+ACES_OUTPUT = ((1.60475, -0.53108, -0.07367), (-0.10208, 1.10813, -0.00605), (-0.00327, -0.07276, 1.07602))
+
+
+def srgb_to_linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def linear_to_srgb(c: float) -> float:
+    return c * 12.92 if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+
+
+def aces_fitted(c: list[float]) -> list[float]:
+    c = [sum(m * x for m, x in zip(row, c)) for row in ACES_INPUT]
+    c = [(x * (x + 0.0245786) - 0.000090537) / (x * (0.983729 * x + 0.4329510) + 0.238081) for x in c]
+    return [min(max(sum(m * x for m, x in zip(row, c)), 0.0), 1.0) for row in ACES_OUTPUT]
+
+
+def read_level_look(path: str) -> tuple[int, float]:
+    """(colour levels with 0 = no quantize, dither) from a .level's [world] section, as
+    render_view.odin reads them for a retro view. Missing keys take world.odin's defaults."""
+    vals = {}
+    section = None
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("["):
+                if section == "[world]":
+                    break
+                section = line
+            elif section == "[world]" and "=" in line:
+                k, v = line.split("=", 1)
+                vals[k.strip()] = v.strip()
+    bits = min(max(int(vals.get("retro.color_bits", 5)), 2), 8)
+    levels = (1 << bits) - 1 if vals.get("retro.quantize", "true") == "true" else 0
+    dither = min(max(float(vals.get("retro.dither", 1)), 0.0), 1.0)
+    return levels, dither
+
+
+def engine_image(img: QImage, scale: float, levels: int, dither: float) -> QImage:
+    """The texture as a retro view shows it on an unlit surface: decoded from sRGB, times `scale` (2^exposure),
+    ACES, encoded to sRGB, then quantized to `levels` with the 4x4 Bayer dither. The dither pattern sits on texels
+    here, on screen pixels in the engine. Alpha is kept, so cutouts still show."""
+    img = img.convertToFormat(QImage.Format.Format_RGBA8888)
+    w, h = img.width(), img.height()
+    src = bytes(img.constBits())[:w * h * 4]
+    out = bytearray(src)
+    cache = {}
+    for y in range(h):
+        row = (y & 3) * 4
+        for x in range(w):
+            i = (y * w + x) * 4
+            key = (src[i:i + 3], row + (x & 3))
+            q = cache.get(key)
+            if q is None:
+                q = cache[key] = engine_color(key[0], scale, levels, 0.5 + (BAYER_4X4[key[1]] / 16 - 0.5) * dither)
+            out[i:i + 3] = q
+    return QImage(bytes(out), w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
+
+
+def engine_color(rgb: bytes, scale: float, levels: int, t: float) -> bytes:
+    """One sRGB8 colour through the signal pass: x `scale`, ACES, sRGB, then floor(c * levels + t) / levels when
+    `levels` is set. t is the dither threshold; 0.5 is plain rounding."""
+    c = aces_fitted([srgb_to_linear(v / 255) * scale for v in rgb])
+    c = [linear_to_srgb(v) for v in c]
+    if levels:
+        c = [math.floor(v * levels + t) / levels for v in c]
+    return bytes(round(v * 255) for v in c)
+
+
+def image_colors(img: QImage) -> set[bytes]:
+    """The distinct RGB colours of the opaque pixels."""
+    img = img.convertToFormat(QImage.Format.Format_RGBA8888)
+    w, h = img.width(), img.height()
+    src = bytes(img.constBits())[:w * h * 4]
+    return {src[i:i + 3] for i in range(0, len(src), 4) if src[i + 3]}
 
 
 def main():

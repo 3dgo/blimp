@@ -56,6 +56,18 @@ TexLab prepares PS1-style textures for Blimp:
 - **Dither** is error diffusion while remapping. Blimp's retro view already adds ordered dither on screen, so
   None is usually enough.
 
+## Engine look
+
+**Engine look** shows the result the way a retro view in Blimp shows it on an unlit surface, through the engine's
+post chain. This is where too-dark textures turn to mud, and it's much cheaper to catch here than in the engine.
+- **Exposure** is in stops, 0 by default: each step down halves the texture's brightness before the tonemap.
+- **Level** supplies the retro colour depth and dither, read from that level's file.
+- The info bar shows **engine: N of M distinct**. M counts the colours the texture actually uses, and N counts how
+  many stay different after the post chain, rounded without dither. When N drops below M, some colours have
+  merged on screen: that's the mud.
+- The maths is the engine's signal pass: the texture × 2^exposure, then ACES, sRGB, and the quantize with 4×4
+  Bayer dither. Only the dither pattern differs: TexLab lays it on texels, the engine on screen pixels.
+
 ## Notes
 
 - Staged images are cached in `%TEMP%\texlab`. You can delete that folder at any time.
