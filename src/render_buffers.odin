@@ -102,7 +102,8 @@ Mesh_Instance_Data :: struct {
     shading: u32,   // u32(ShadingModel): SHADING_* in shading.slang
     tint: vec4,     // entity_tint, alpha 1: multiplies the albedo
     bone_offset: u32,   // its entity's skin matrices in World_Render.bones; NO_BONES = draw the mesh as stored (rest pose)
-    _pad: [3]u32,
+    glow_scale: f32,    // its entity's light group's scale this frame: × the emissive alone (lamp glass with its lamp)
+    _pad: [2]u32,
 }
 #assert(size_of(Mesh_Instance_Data) == 48)
 
@@ -327,6 +328,7 @@ buffers_build_scene :: proc(world: ^World) {
                 shading = u32(shading),
                 tint = {tint.r, tint.g, tint.b, 1},
                 bone_offset = bone_offset,
+                glow_scale = group_scales[entity_light_group(entity)],
             })
             if !drawn do continue
             cmd := d3d12.DRAW_INDEXED_ARGUMENTS {

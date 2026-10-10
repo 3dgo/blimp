@@ -227,11 +227,12 @@ Baked probes for indirect, realtime direct with hard shadows.
 - **Emissives carry the composition** — lamp glass, windows, candles. Unlit emissive
   materials plus tight bloom, separate from the lighting solve. Built: `Material.emissive` × its texture
   (claude/assets.md) is added after shading in every model, Unlit included, × the entity's tint, so Color ×
-  Intensity dims or brightens a glow (a script can put it out with its lamp). On screen it lights nothing
-  else. The bake sees it: a ray hitting it gets the material's emission (emissive × its texture's average,
-  `material_emission`) × the entity's tint, into layer 0, so it lights the room through the probes. Layer 0
-  means a baked glow doesn't follow light groups: switch the lamp off and its shade's bounce stays. Hidden in
-  the light-only debug views. Bloom isn't built yet.
+  Intensity dims or brightens a glow, and × its entity's **light group** scale (`Mesh_Instance_Data.glow_scale`,
+  the emissive alone, not the albedo), so lamp glass in the lamp's group goes out and flickers with it, no
+  script. On screen it lights nothing else. The bake sees it: a ray hitting it gets the material's emission
+  (emissive × its texture's average, `material_emission`) × the entity's tint, into its group's layer (a group
+  with only glowing surfaces still gets one), so it lights the room through the probes and that bounce follows
+  the group too. Hidden in the light-only debug views. Bloom isn't built yet.
 - **Thin translucency** (`Material.translucency`, from glTF transmission, claude/assets.md): a surface also
   takes that share of the light on its back face, diffusely (`light_surface`; Gouraud adds it per vertex). Its
   shadow is looked up from the back side (offset along −N), or the surface would shadow itself. Because real
@@ -264,7 +265,8 @@ Baked probes for indirect, realtime direct with hard shadows.
   group that has lights into a separate SH layer, bounces included — light adds up, so a layer scales
   exactly). The power goes out = `World.set_light_group("electric", 0)`; candles in another group keep
   flickering. Runtime overrides (`World.light_group_override`, from Lua or the Lighting menu) are never
-  saved. Cost: one grid of memory and one shader lookup per lit group. Emissives don't follow groups yet.
+  saved. Cost: one grid of memory and one shader lookup per lit group. A model's `light_group` is the group
+  its emissive follows (Emissives above): lamp glass beside its lamp.
 
 ### Baker
 

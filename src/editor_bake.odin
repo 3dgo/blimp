@@ -82,6 +82,7 @@ Bake :: struct {
     tint:   []vec3,               // per scene instance: its entity's entity_tint, × the material albedo
     lights: []GPU_Light,
     light_layer: []u8,            // each light's probe layer (its group's; layer 0 for group 0)
+    glow_layer: []u8,             // per scene instance: the layer its emission goes in (its entity's light_group's)
     light_shadow: []bool,         // each light's `shadow`: its shadow ray is cast
     light_cull_near: []f32,       // each light's `shadow_cull_near`: its shadow ray stops this short of it
     layers: int,
@@ -207,6 +208,12 @@ bake_prepare :: proc(w: ^World) -> bool {
         append(&cull_near, e.shadow_cull_near)
         has_group[entity_light_group(e)] = true
     }
+    // A glowing surface's group (its entity's light_group) gets a layer too, lamp glass with no light in it.
+    glow_group := make([]int, len(b.scene.instances), context.temp_allocator)
+    for inst, i in b.scene.instances {
+        if e, found := entity_get(w, inst.entity); found do glow_group[i] = entity_light_group(e)
+        if asset_system.material_emission[asset_system.meshes[inst.mesh].material] != {} do has_group[glow_group[i]] = true
+    }
     layer_group: [MAX_PROBE_LAYERS]u8
     group_layer: [MAX_LIGHT_GROUPS + 1]u8
     b.layers = 1
@@ -220,6 +227,8 @@ bake_prepare :: proc(w: ^World) -> bool {
     b.light_cull_near = cull_near[:]
     b.light_layer = make([]u8, len(lights), alloc)
     for g, i in groups do b.light_layer[i] = group_layer[g]
+    b.glow_layer = make([]u8, len(glow_group), alloc)
+    for g, i in glow_group do b.glow_layer[i] = group_layer[g]
     stats.lights, stats.layers = len(lights), b.layers
     if set.sky {
         // The sky the views show lights the probes: the sky texture, or else the background colour.
@@ -446,9 +455,9 @@ bake_radiance :: proc(b: ^Bake, r: Ray, back: ^u32, t: ^f32) -> (L: Bake_Layers)
         one[l] = 1
         L[l] = albedo * (L[l] + probe_grid_sample(&b.prev, p, n, one))
     }
-    // Its glow, as the scene shader adds it (× the entity's tint), into layer 0: emissives don't follow light
-    // groups, so a lamp's shade baked glowing keeps lighting the room when the lamp is switched off.
-    L[0] += asset_system.material_emission[mesh.material] * b.tint[hit.instance]
+    // Its glow, as the scene shader adds it (× the entity's tint), into its entity's group's layer, so lamp glass
+    // stops lighting the room when its group is switched off.
+    L[b.glow_layer[hit.instance]] += asset_system.material_emission[mesh.material] * b.tint[hit.instance]
     return
 }
 

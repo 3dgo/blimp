@@ -72,7 +72,8 @@ Entity :: struct {
     shadow_cull_near: f32 `section:Camera_Light`,
     // Which light group the light belongs to (World Settings → Light Groups): 0 = static, always
     // on; 1–4 can be dimmed or switched off at runtime (Lua World.set_light_group), realtime and
-    // baked light together.
+    // baked light together. On a model, the group its emissive follows the same way (lamp glass with
+    // its lamp).
     light_group: i32 `section:Camera_Light`,
     // Light: scales its baked bounce (the probes) without touching its direct light. Whether it bakes
     // at all is Static + Cast Indirect in its static flags, as for geometry.
@@ -537,6 +538,12 @@ _uses_light_group := [?]Entity_Field_Use{
         fields = {"light_type"},
         cond   = "light_type",
         text   = {.EN = "Light group (World Settings > Light Groups): 0 = static, always on; 1-4 can be dimmed or switched off at runtime (Lua World.set_light_group).", .ZH = "所属光源组（世界设置 > 光源组）：0 = 静态，始终开启；1-4 可在运行时调暗或关闭（Lua World.set_light_group）。"},
+    },
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.model != "" },
+        fields = {"model"},
+        cond   = "model",
+        text   = {.EN = "The group the model's glow (emissive) follows: dimmed, switched off and flickering with the group's lights, on screen and in the bake. 0 = always on.", .ZH = "模型自发光所跟随的光源组：随该组灯光一起调暗、关闭和闪烁，屏幕上与烘焙中都一样。0 = 始终开启。"},
     },
 }
 

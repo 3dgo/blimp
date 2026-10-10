@@ -41,7 +41,7 @@ which clip is playing. The chosen rule samples its clip and outputs it; switchin
   - Shared fields mean what they mean for each kind (`entity_schema.ini` comments). `fov` is the camera
     fov or the spot cone. `color` × `intensity` is a light's colour, and on a model its colour multiplier
     (`entity_tint`: the per-instance `tint` in the scene shader, which scales the material's emissive too, and the albedo
-    the probe bake bounces). `size` is the box the entity's projection or volume covers: ortho view height
+    the probe bake bounces). `light_group` is a light's group, or the group a model's emissive follows. `size` is the box the entity's projection or volume covers: ortho view height
     in y, the directional shadow area and depth, a volume's whole box. `range` is clip planes, or a light's falloff (y is also its shadow's far plane); `shadow_cull_near` is
     its shadow's near plane, so a lamp's shade doesn't shadow its own bulb (claude/rendering.md → Shadows).
   - There's no `aspect`: a camera takes it from the target it renders into. `size` never holds model

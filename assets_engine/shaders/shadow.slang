@@ -30,7 +30,8 @@ struct MeshInstance {
     uint shading;
     float4 tint;
     uint   boneOffset;
-    uint3  _pad;
+    float  glowScale;
+    uint2  _pad;
 }
 
 struct Mesh {

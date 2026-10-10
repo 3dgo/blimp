@@ -12,7 +12,8 @@ public struct MeshInstance {
     public uint shading;   // SHADING_* (shading.slang)
     public float4 tint;    // the entity's color × intensity (entity_tint), alpha 1: multiplies the albedo
     public uint boneOffset;   // its entity's skin matrices in the bone buffer; 0xFFFFFFFF = draw the mesh as stored (rest pose)
-    public uint3 _pad;
+    public float glowScale;   // its entity's light group's scale this frame: × the emissive alone
+    public uint2 _pad;
 }
 
 public struct Mesh {
@@ -64,7 +65,7 @@ public struct VSOut {
     public float3 vertexShadowed2 : TEXCOORD8;
     public float3 vertexShadowed3 : TEXCOORD9;
     public nointerpolation uint4 vertexShadowLight : TEXCOORD10;
-    public nointerpolation float3 tint : TEXCOORD11;   // the entity's Color × Intensity alone (color has the vertex colour too): scales emissive
+    public nointerpolation float3 tint : TEXCOORD11;   // the entity's Color × Intensity × its light group's scale (color has the vertex colour too): scales emissive
 }
 
 [shader("vertex")]
@@ -114,7 +115,7 @@ public VSOut vert_main(VSIn input) {
     output.position = clip;
     output.worldPos = worldPos.xyz;
     output.color = attributeBuffer[vertexIndex].color * meshInstance.tint;   // constant per draw, so per vertex is per pixel
-    output.tint = meshInstance.tint.rgb;
+    output.tint = meshInstance.tint.rgb * meshInstance.glowScale;
     output.normal = mul(localNormal, cofactor) * flip;
     output.uv0 = attributeBuffer[vertexIndex].uv0;
     output.uvAffine = output.uv0;
@@ -202,8 +203,8 @@ float4 shade_pixel(VSOut input, bool cutout, bool blended) {
     vertexLight.shadowLight = input.vertexShadowLight;
     float3 lit = shade(input.shading, albedo.rgb, pos, N, vertexLight, material.translucency);
     // Emissive: light the surface gives off, on top of whatever lights it, scaled by the entity's Color × Intensity
-    // (its tint) so a script can dim a glow with its lamp. Not in the debug views that show light alone, and never
-    // baked: it lights nothing else (claude/rendering.md).
+    // and its light group (input.tint), so a glow dims and flickers with its lamp. Not in the debug views that show
+    // light alone; on screen it lights nothing else, only through the bake (claude/rendering.md).
     if (any(material.emissive > 0) && lightingView != LIGHTING_PROBES_ONLY && lightingView != LIGHTING_LIGHTING_ONLY) {
         lit += material.emissive * getTexture2dRGBA(material.emissiveTex).Sample(samp, uv).rgb * input.tint;
     }
