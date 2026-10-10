@@ -186,6 +186,11 @@ default: it patches every PSO on first use (over 2 s on the first frame of the c
 slows every frame after. Launch with `--gpu-validation` (or `blimpctl restart --gpu-validation`)
 when chasing a bad descriptor index or resource state; claude/editor.md has the launch options.
 
+No CPU-side fence/hazard assertion layer (dropped from the build order 2026-10-10): every buffer the CPU
+writes per frame has a copy per frame in flight (`FRAMES_IN_FLIGHT`), one fence wait starts the frame, and
+closes wait idle, so the CPU-overwrites-in-flight race can't happen without breaking that pattern; GPU-side
+barriers are what GPU validation checks. Build a check only around a buffer that actually flickers.
+
 Slang caches each entry point's DXIL per session (`Slang_Compiler.entry_code`), so pipelines
 that share an entry point (every scene blend uses `vert_main`) compile it once. Shader hot
 reload starts a new session, which clears it.
