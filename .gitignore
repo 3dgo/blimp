@@ -15,3 +15,6 @@ __pycache__/
 
 # Blender autosave backups
 *.blend1
+
+# 3ds Max / Arnold texture caches (generated next to the source PNGs)
+*.tx

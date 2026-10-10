@@ -180,6 +180,16 @@ _lua_anim_time_lua :: proc "c" (L: ^lua.State) -> c.int {
     return 2
 }
 
+// Binding odin proc: entity_contains to lua function: contains.
+_lua_entity_contains :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    handle := transmute(Entity_Handle)u32(lua.L_checkinteger(L, 1))
+    point := _lua_read_ffi_vec3(L, 2)
+    r0 := entity_contains(handle, point)
+    lua.pushboolean(L, b32(r0))
+    return 1
+}
+
 // Binding odin proc: entity_get_bool to lua function: get_bool.
 _lua_entity_get_bool :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -415,6 +425,42 @@ _lua_entity_valid :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// Binding odin proc: game_get_number_lua to lua function: get_number.
+_lua_game_get_number_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    key := string(lua.L_checkstring(L, 1))
+    r0 := game_get_number_lua(key)
+    lua.pushnumber(L, lua.Number(r0))
+    return 1
+}
+
+// Binding odin proc: game_get_string_lua to lua function: get_string.
+_lua_game_get_string_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    key := string(lua.L_checkstring(L, 1))
+    r0 := game_get_string_lua(key)
+    lua.pushstring(L, strings.clone_to_cstring(r0, context.temp_allocator))
+    return 1
+}
+
+// Binding odin proc: game_set_number_lua to lua function: set_number.
+_lua_game_set_number_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    key := string(lua.L_checkstring(L, 1))
+    value := f64(lua.L_checknumber(L, 2))
+    game_set_number_lua(key, value)
+    return 0
+}
+
+// Binding odin proc: game_set_string_lua to lua function: set_string.
+_lua_game_set_string_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    key := string(lua.L_checkstring(L, 1))
+    value := string(lua.L_checkstring(L, 2))
+    game_set_string_lua(key, value)
+    return 0
+}
+
 // Binding odin proc: input_down_lua to lua function: down.
 _lua_input_down_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -503,6 +549,107 @@ _lua_input_released_lua :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// Binding odin proc: ui_lua_begin_window to lua function: begin_window.
+_lua_ui_lua_begin_window :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    title := string(lua.L_checkstring(L, 1))
+    x := f32(lua.L_checknumber(L, 2))
+    y := f32(lua.L_checknumber(L, 3))
+    w := f32(lua.L_optnumber(L, 4, 0))
+    h := f32(lua.L_optnumber(L, 5, 0))
+    ui_lua_begin_window(title, x, y, w, h)
+    return 0
+}
+
+// Binding odin proc: ui_lua_button to lua function: button.
+_lua_ui_lua_button :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    label := string(lua.L_checkstring(L, 1))
+    r0 := ui_lua_button(label)
+    lua.pushboolean(L, b32(r0))
+    return 1
+}
+
+// Binding odin proc: ui_lua_checkbox to lua function: checkbox.
+_lua_ui_lua_checkbox :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    label := string(lua.L_checkstring(L, 1))
+    value := bool(lua.toboolean(L, 2))
+    r0 := ui_lua_checkbox(label, value)
+    lua.pushboolean(L, b32(r0))
+    return 1
+}
+
+// Binding odin proc: ui_lua_end_window to lua function: end_window.
+_lua_ui_lua_end_window :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    ui_lua_end_window()
+    return 0
+}
+
+// Binding odin proc: ui_lua_position to lua function: position.
+_lua_ui_lua_position :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    x := f32(lua.L_checknumber(L, 1))
+    y := f32(lua.L_checknumber(L, 2))
+    ui_lua_position(x, y)
+    return 0
+}
+
+// Binding odin proc: ui_lua_progress_bar to lua function: progress_bar.
+_lua_ui_lua_progress_bar :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    fraction := f32(lua.L_checknumber(L, 1))
+    w := f32(lua.L_optnumber(L, 2, 0))
+    h := f32(lua.L_optnumber(L, 3, 0))
+    ui_lua_progress_bar(fraction, w, h)
+    return 0
+}
+
+// Binding odin proc: ui_lua_same_line to lua function: same_line.
+_lua_ui_lua_same_line :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    ui_lua_same_line()
+    return 0
+}
+
+// Binding odin proc: ui_lua_separator to lua function: separator.
+_lua_ui_lua_separator :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    ui_lua_separator()
+    return 0
+}
+
+// Binding odin proc: ui_lua_slider to lua function: slider.
+_lua_ui_lua_slider :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    label := string(lua.L_checkstring(L, 1))
+    value := f32(lua.L_checknumber(L, 2))
+    min_value := f32(lua.L_checknumber(L, 3))
+    max_value := f32(lua.L_checknumber(L, 4))
+    r0 := ui_lua_slider(label, value, min_value, max_value)
+    lua.pushnumber(L, lua.Number(r0))
+    return 1
+}
+
+// Binding odin proc: ui_lua_spacing to lua function: spacing.
+_lua_ui_lua_spacing :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    ui_lua_spacing()
+    return 0
+}
+
+// Binding odin proc: ui_lua_text to lua function: text.
+_lua_ui_lua_text :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    text := string(lua.L_checkstring(L, 1))
+    color: vec4 = {1, 1, 1, 1}
+    if !lua.isnoneornil(L, 2) do color = _lua_read_ffi_vec4(L, 2)
+    size := f32(lua.L_optnumber(L, 3, 1))
+    ui_lua_text(text, color, size)
+    return 0
+}
+
 // Binding odin proc: world_add_lua to lua function: add.
 _lua_world_add_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -551,6 +698,14 @@ _lua_world_light_group_lua :: proc "c" (L: ^lua.State) -> c.int {
     name := string(lua.L_checkstring(L, 1))
     r0 := world_light_group_lua(name)
     lua.pushnumber(L, lua.Number(r0))
+    return 1
+}
+
+// Binding odin proc: world_paused_lua to lua function: paused.
+_lua_world_paused_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    r0 := world_paused_lua()
+    lua.pushboolean(L, b32(r0))
     return 1
 }
 
@@ -607,6 +762,22 @@ _lua_world_set_light_group_lua :: proc "c" (L: ^lua.State) -> c.int {
     return 1
 }
 
+// Binding odin proc: world_set_paused_lua to lua function: set_paused.
+_lua_world_set_paused_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    paused := bool(lua.toboolean(L, 1))
+    world_set_paused_lua(paused)
+    return 0
+}
+
+// Binding odin proc: world_switch_level_lua to lua function: switch_level.
+_lua_world_switch_level_lua :: proc "c" (L: ^lua.State) -> c.int {
+    context = app.g_context
+    path := string(lua.L_checkstring(L, 1))
+    world_switch_level_lua(path)
+    return 0
+}
+
 // Binding odin proc: world_time_lua to lua function: time.
 _lua_world_time_lua :: proc "c" (L: ^lua.State) -> c.int {
     context = app.g_context
@@ -661,6 +832,10 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
 
     lua.getglobal(L, "Entity")
     if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
+    lua.pushcfunction(L, _lua_entity_contains)
+    lua.setfield(L, -2, "contains")
+    lua.pushcfunction(L, _lua_entity_contains)
+    lua.setfield(L, -2, "包含")
     lua.pushcfunction(L, _lua_entity_get_bool)
     lua.setfield(L, -2, "get_bool")
     lua.pushcfunction(L, _lua_entity_get_bool)
@@ -763,6 +938,26 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "有效")
     lua.setglobal(L, "Entity")
 
+    lua.getglobal(L, "Game")
+    if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
+    lua.pushcfunction(L, _lua_game_get_number_lua)
+    lua.setfield(L, -2, "get_number")
+    lua.pushcfunction(L, _lua_game_get_number_lua)
+    lua.setfield(L, -2, "取数")
+    lua.pushcfunction(L, _lua_game_get_string_lua)
+    lua.setfield(L, -2, "get_string")
+    lua.pushcfunction(L, _lua_game_get_string_lua)
+    lua.setfield(L, -2, "取文本")
+    lua.pushcfunction(L, _lua_game_set_number_lua)
+    lua.setfield(L, -2, "set_number")
+    lua.pushcfunction(L, _lua_game_set_number_lua)
+    lua.setfield(L, -2, "设数")
+    lua.pushcfunction(L, _lua_game_set_string_lua)
+    lua.setfield(L, -2, "set_string")
+    lua.pushcfunction(L, _lua_game_set_string_lua)
+    lua.setfield(L, -2, "设文本")
+    lua.setglobal(L, "Game")
+
     lua.getglobal(L, "Input")
     if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
     lua.pushcfunction(L, _lua_input_down_lua)
@@ -807,6 +1002,54 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "松开")
     lua.setglobal(L, "Input")
 
+    lua.getglobal(L, "UI")
+    if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
+    lua.pushcfunction(L, _lua_ui_lua_begin_window)
+    lua.setfield(L, -2, "begin_window")
+    lua.pushcfunction(L, _lua_ui_lua_begin_window)
+    lua.setfield(L, -2, "窗口开始")
+    lua.pushcfunction(L, _lua_ui_lua_button)
+    lua.setfield(L, -2, "button")
+    lua.pushcfunction(L, _lua_ui_lua_button)
+    lua.setfield(L, -2, "按钮")
+    lua.pushcfunction(L, _lua_ui_lua_checkbox)
+    lua.setfield(L, -2, "checkbox")
+    lua.pushcfunction(L, _lua_ui_lua_checkbox)
+    lua.setfield(L, -2, "勾选框")
+    lua.pushcfunction(L, _lua_ui_lua_end_window)
+    lua.setfield(L, -2, "end_window")
+    lua.pushcfunction(L, _lua_ui_lua_end_window)
+    lua.setfield(L, -2, "窗口结束")
+    lua.pushcfunction(L, _lua_ui_lua_position)
+    lua.setfield(L, -2, "position")
+    lua.pushcfunction(L, _lua_ui_lua_position)
+    lua.setfield(L, -2, "位置")
+    lua.pushcfunction(L, _lua_ui_lua_progress_bar)
+    lua.setfield(L, -2, "progress_bar")
+    lua.pushcfunction(L, _lua_ui_lua_progress_bar)
+    lua.setfield(L, -2, "进度条")
+    lua.pushcfunction(L, _lua_ui_lua_same_line)
+    lua.setfield(L, -2, "same_line")
+    lua.pushcfunction(L, _lua_ui_lua_same_line)
+    lua.setfield(L, -2, "同一行")
+    lua.pushcfunction(L, _lua_ui_lua_separator)
+    lua.setfield(L, -2, "separator")
+    lua.pushcfunction(L, _lua_ui_lua_separator)
+    lua.setfield(L, -2, "分隔线")
+    lua.pushcfunction(L, _lua_ui_lua_slider)
+    lua.setfield(L, -2, "slider")
+    lua.pushcfunction(L, _lua_ui_lua_slider)
+    lua.setfield(L, -2, "滑块")
+    lua.pushcfunction(L, _lua_ui_lua_spacing)
+    lua.setfield(L, -2, "spacing")
+    lua.pushcfunction(L, _lua_ui_lua_spacing)
+    lua.setfield(L, -2, "间距")
+    lua.pushcfunction(L, _lua_ui_lua_text)
+    lua.setfield(L, -2, "text")
+    lua.pushcfunction(L, _lua_ui_lua_text)
+    lua.setfield(L, -2, "文字")
+    lua.setglobal(L, "UI")
+
     lua.getglobal(L, "World")
     if lua.type(L, -1) == .NIL { lua.pop(L, 1); lua.createtable(L, 0, 0) }
     lua.pushcfunction(L, _lua_world_add_lua)
@@ -829,6 +1072,10 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "light_group")
     lua.pushcfunction(L, _lua_world_light_group_lua)
     lua.setfield(L, -2, "光源组")
+    lua.pushcfunction(L, _lua_world_paused_lua)
+    lua.setfield(L, -2, "paused")
+    lua.pushcfunction(L, _lua_world_paused_lua)
+    lua.setfield(L, -2, "已暂停")
     lua.pushcfunction(L, _lua_world_play_sound_at_lua)
     lua.setfield(L, -2, "play_sound_at")
     lua.pushcfunction(L, _lua_world_play_sound_at_lua)
@@ -849,6 +1096,14 @@ _lua_register_all_bindings :: proc(L: ^lua.State) {
     lua.setfield(L, -2, "set_light_group")
     lua.pushcfunction(L, _lua_world_set_light_group_lua)
     lua.setfield(L, -2, "设光源组")
+    lua.pushcfunction(L, _lua_world_set_paused_lua)
+    lua.setfield(L, -2, "set_paused")
+    lua.pushcfunction(L, _lua_world_set_paused_lua)
+    lua.setfield(L, -2, "设暂停")
+    lua.pushcfunction(L, _lua_world_switch_level_lua)
+    lua.setfield(L, -2, "switch_level")
+    lua.pushcfunction(L, _lua_world_switch_level_lua)
+    lua.setfield(L, -2, "切换关卡")
     lua.pushcfunction(L, _lua_world_time_lua)
     lua.setfield(L, -2, "time")
     lua.pushcfunction(L, _lua_world_time_lua)

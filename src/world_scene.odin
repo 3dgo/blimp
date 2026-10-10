@@ -33,6 +33,27 @@ scene_find_files :: proc(out: ^[dynamic]string, allocator: runtime.Allocator) {
     slice.sort(out[:])
 }
 
+// Writes a new level at `path`: default world settings, no entities. Refuses to overwrite a file
+// that's already there. Creates missing folders.
+scene_create :: proc(path: string) -> bool {
+    if os.exists(path) {
+        log.errorf("Can't create scene '%v': the file already exists", path)
+        return false
+    }
+    os.make_directory_all(filepath.dir(path))
+
+    b: strings.Builder
+    strings.builder_init(&b, context.temp_allocator)
+    strings.write_string(&b, "[world]\n")
+    serialize_struct(&b, WORLD_SETTINGS_DEFAULT)
+    if err := os.write_entire_file(path, b.buf[:]); err != nil {
+        log.errorf("Failed to write scene '%v': %v", path, err)
+        return false
+    }
+    log.infof("Created scene '%v'", path)
+    return true
+}
+
 scene_save :: proc(world: ^World, path: string) -> bool {
     b: strings.Builder
     strings.builder_init(&b, context.temp_allocator)

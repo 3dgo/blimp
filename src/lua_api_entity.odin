@@ -16,6 +16,17 @@ entity_valid :: proc(handle: Entity_Handle) -> bool {
     return ok
 }
 
+// Whether `point` is inside the entity's volume (its Volume field, e.g. Trigger): the box Size covers, centred on
+// the entity and turned with it. False if the handle is invalid or the entity isn't a volume. Ask each update:
+// if Entity.contains(door, Entity.get_position(player)) then ... end
+// zh: `点` 是否在实体的体积（它的“体积”字段，如触发区）里：Size 覆盖的盒子，以实体为中心、随实体旋转。
+//     句柄无效或实体不是体积时返回假。每次更新问一次：如果 实体.包含(门, 实体.取位置(玩家)) 那么 … 结束
+@(lua=contains, table=Entity, lua_zh="包含")
+entity_contains :: proc(handle: Entity_Handle, point: vec3) -> bool {
+    e, ok := entity_lua(handle)
+    return ok && entity_volume_contains(e, point)
+}
+
 //================================ Lua accessors ================================
 // Lua accessors for the (schema-generated) entity fields. These are ordinary @(lua) procs —
 // the binding codegen marshals their typed params/returns — so nothing here is hand-written

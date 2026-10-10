@@ -70,6 +70,8 @@ ui_view_toolbar :: proc(view: ^Render_View) {
     im.SameLine()
     ui_view_lighting_menu(view)
     im.SameLine()
+    ui_view_debug_menu(view)
+    im.SameLine()
     // The probe bake of the level (ui_bake.odin), its own window like World Settings.
     if toggle_button(fmt.ctprintf("%s##bake", ICON_BAKE), ui_bake_open_for(level)) do ui_bake_toggle(level)
     im.SetItemTooltip("%s", tr(.Win_Bake))
@@ -186,10 +188,10 @@ LIGHT_GROUP_LABEL := [MAX_LIGHT_GROUPS]Loc_ID{.Light_Group_1, .Light_Group_2, .L
 @(rodata, private="file")
 LIGHTING_VIEW_LABEL := [Lighting_View]Loc_ID{
     .Lit           = .Lighting_Lit,
-    .Probes_Only   = .Lighting_Probes_Only,
-    .Indirect_Only = .Lighting_Indirect_Only,
     .Direct_Only   = .Lighting_Direct_Only,
+    .Indirect_Only = .Lighting_Indirect_Only,
     .Lighting_Only = .Lighting_Lighting_Only,
+    .Probes_Only   = .Lighting_Probes_Only,
 }
 
 // Lighting debug for this view: which terms show (Lighting_View), baked probes or the flat ambient, a
@@ -234,4 +236,21 @@ ui_view_lighting_menu :: proc(view: ^Render_View) {
         if im.SliderFloat(label, &v, 0, 2, "%.2f") do w.light_group_override[g] = v
     }
     if overridden && im.SmallButton(tr(.Lighting_Groups_Reset)) do w.light_group_override = {}
+}
+
+// Debug views for this view: the wireframe over the scene (Render_View.wireframe), the collision shapes on top
+// (Editor_View.show_collision), and hiding the shaded meshes so only those show (Render_View.hide_meshes). Per
+// view, not saved, not undoable, like the lighting menu; the button is lit while any is on.
+@(private="file")
+ui_view_debug_menu :: proc(view: ^Render_View) {
+    ev := editor_view(view)
+    if toggle_button(fmt.ctprintf("%s##debugview", ICON_DEBUG_VIEW), view.wireframe || ev.show_collision || view.hide_meshes) do im.OpenPopup("debugview")
+    im.SetItemTooltip("%s", tr(.Tool_Debug_View))
+    if !im.BeginPopup("debugview") do return
+    defer im.EndPopup()
+    im.Checkbox(tr(.Debug_Wireframe), &view.wireframe)
+    im.Checkbox(tr(.Debug_Collision), &ev.show_collision)
+    im.SetItemTooltip("%s", tr(.Debug_Collision_Tip))
+    im.Separator()
+    im.Checkbox(tr(.Debug_Hide_Meshes), &view.hide_meshes)
 }

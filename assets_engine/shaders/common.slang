@@ -85,10 +85,10 @@ public static const uint SHADOW_MAP_SIZE = 512;
 
 // FrameConstants.lightingView
 public static const uint LIGHTING_LIT = 0;
-public static const uint LIGHTING_PROBES_ONLY = 1;
+public static const uint LIGHTING_DIRECT_ONLY = 1;
 public static const uint LIGHTING_INDIRECT_ONLY = 2;
-public static const uint LIGHTING_DIRECT_ONLY = 3;
-public static const uint LIGHTING_LIGHTING_ONLY = 4;
+public static const uint LIGHTING_LIGHTING_ONLY = 3;
+public static const uint LIGHTING_PROBES_ONLY = 4;
 
 public static const uint LIGHT_DIRECTIONAL = 1;
 public static const uint LIGHT_POINT = 2;

@@ -68,6 +68,8 @@ lua_table_zh :: proc(table: string) -> string {
     case "World":  return "世界"
     case "Input":  return "输入"
     case "Anim":   return "动画"
+    case "Game":   return "游戏"
+    case "UI":     return "界面"
     }
     return ""
 }
@@ -78,6 +80,8 @@ lua_table_doc :: proc(table: string, zh: bool) -> string {
     case "Entity": return zh ? "实体：按句柄读写运行中脚本所在世界的实体。句柄无效时读返回零值，写什么也不做。" : "Read and write entities of the world whose script is running, by handle. An invalid handle reads zero and writes nothing."
     case "World":  return zh ? "世界：查找、添加、移除实体，声音、灯光组、射线检测、调试线。" : "Find, add and remove entities; sounds, light groups, raycasts, debug lines."
     case "Input":  return zh ? "输入：键盘、鼠标、手柄。只在游戏模式下有效（运行后，或按 F8）；其他时候按键都读作松开，轴都读作 0。" : "Keyboard, mouse and gamepad. Live only in game mode (Play, or F8); otherwise keys read up and axes 0."
+    case "Game":   return zh ? "游戏：切换关卡时带过去的数字和文本（血量、钥匙、从哪个入口出现）。每次运行从空开始，停止时清空。" : "Numbers and texts the game carries across level switches (health, keys, which entry to arrive at). Each Play starts empty; Stop clears it."
+    case "UI":     return zh ? "界面：游戏的屏幕界面（文字、进度条、窗口、按钮），只在 世界.界面 回调里有效。位置和大小按视口宽高的比例算。" : "The game's screen UI (text, bars, windows, buttons), live only inside the World.ui hook. Positions and sizes are fractions of the view."
     case "Anim":   return zh ? "动画：每次更新采样、混合片段，再输出一个姿态。姿态只在得到它的那次更新里有效。" : "Each update, sample and blend clips, then output one pose. A pose is valid only in the update that made it."
     }
     return ""
@@ -123,6 +127,7 @@ lua_name :: proc(name: string, zh: bool) -> string {
     case "to":          return "终点"
     case "color":       return "颜色"
     case "key":         return "键"
+    case "path":        return "路径"
     case "button":      return "按键"
     case "axis":        return "轴"
     case "locked":      return "锁定"
@@ -139,6 +144,16 @@ lua_name :: proc(name: string, zh: bool) -> string {
     case "weight":      return "权重"
     case "time":        return "秒数"
     case "length":      return "长度"
+    case "text":        return "文字"
+    case "size":        return "大小"
+    case "title":       return "标题"
+    case "label":       return "标签"
+    case "fraction":    return "比例"
+    case "w":           return "宽"
+    case "h":           return "高"
+    case "min_value":   return "最小值"
+    case "max_value":   return "最大值"
+    case "paused":      return "暂停"
     }
     return name
 }

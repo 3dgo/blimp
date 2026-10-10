@@ -83,6 +83,7 @@ Bake :: struct {
     lights: []GPU_Light,
     light_layer: []u8,            // each light's probe layer (its group's; layer 0 for group 0)
     light_shadow: []bool,         // each light's `shadow`: its shadow ray is cast
+    light_cull_near: []f32,       // each light's `shadow_cull_near`: its shadow ray stops this short of it
     layers: int,
     sky:    vec3,                 // linear radiance of a miss (layer 0): the background colour × sky_intensity
     sky_table: []vec3,            // or, with a sky texture, the miss radiance by direction (bake_sky_table); nil = sky
@@ -193,6 +194,7 @@ bake_prepare :: proc(w: ^World) -> bool {
     lights := make([dynamic]GPU_Light, 0, MAX_LIGHTS, alloc)
     groups := make([dynamic]int, 0, MAX_LIGHTS, context.temp_allocator)
     shadows := make([dynamic]bool, 0, MAX_LIGHTS, alloc)
+    cull_near := make([dynamic]f32, 0, MAX_LIGHTS, alloc)
     has_group: [MAX_LIGHT_GROUPS + 1]bool
     it := hm.iterator_make(&w.entities)
     for e, _ in hm.iterate(&it) {
@@ -202,6 +204,7 @@ bake_prepare :: proc(w: ^World) -> bool {
         append(&lights, light)
         append(&groups, entity_light_group(e))
         append(&shadows, e.shadow)
+        append(&cull_near, e.shadow_cull_near)
         has_group[entity_light_group(e)] = true
     }
     layer_group: [MAX_PROBE_LAYERS]u8
@@ -214,6 +217,7 @@ bake_prepare :: proc(w: ^World) -> bool {
     }
     b.lights = lights[:]
     b.light_shadow = shadows[:]
+    b.light_cull_near = cull_near[:]
     b.light_layer = make([]u8, len(lights), alloc)
     for g, i in groups do b.light_layer[i] = group_layer[g]
     stats.lights, stats.layers = len(lights), b.layers
@@ -436,12 +440,15 @@ bake_radiance :: proc(b: ^Bake, r: Ray, back: ^u32, t: ^f32) -> (L: Bake_Layers)
     p := r.origin + hit.t * r.dir + n * BAKE_EPSILON
     mesh := asset_system.meshes[b.scene.instances[hit.instance].mesh]
     albedo := asset_system.material_albedo[mesh.material] * b.tint[hit.instance]
-    L = bake_direct(b, p, n)
+    L = bake_direct(b, p, n, asset_system.materials[mesh.material].translucency)
     for l in 0..<b.layers {
         one: Probe_Layer_Scales
         one[l] = 1
         L[l] = albedo * (L[l] + probe_grid_sample(&b.prev, p, n, one))
     }
+    // Its glow, as the scene shader adds it (× the entity's tint), into layer 0: emissives don't follow light
+    // groups, so a lamp's shade baked glowing keeps lighting the room when the lamp is switched off.
+    L[0] += asset_system.material_emission[mesh.material] * b.tint[hit.instance]
     return
 }
 
@@ -480,9 +487,11 @@ bake_sky :: proc(b: ^Bake, d: vec3) -> vec3 {
 }
 
 // Direct light at p facing n, into each light's layer, as scene.slang's frag_main lights it (diffuse only, no 1/π), with one
-// shadow ray per light that reaches p, for the lights that cast shadows (`shadow`), as on screen.
+// shadow ray per light that reaches p, for the lights that cast shadows (`shadow`), as on screen. `translucency` (the
+// material's) also takes that share of the light on the back face, as light_surface does, its shadow ray leaving from
+// the back side (p is BAKE_EPSILON in front of the surface).
 @(private="file")
-bake_direct :: proc(b: ^Bake, p, n: vec3) -> (e: Bake_Layers) {
+bake_direct :: proc(b: ^Bake, p, n: vec3, translucency: f32) -> (e: Bake_Layers) {
     for &light, li in b.lights {
         L: vec3
         atten := f32(1)
@@ -511,9 +520,13 @@ bake_direct :: proc(b: ^Bake, p, n: vec3) -> (e: Bake_Layers) {
             }
         }
         ndl := linalg.dot(n, L)
-        if ndl <= 0 || atten <= 0 do continue
-        if b.light_shadow[li] && scene_bvh_any_hit(&b.scene, Ray{origin = p, dir = L}, dist) do continue
-        e[b.light_layer[li]] += light.color * (light.intensity * atten * ndl)
+        w := ndl > 0 ? ndl : -ndl * translucency   // the front's light, or the back's through a translucent surface
+        if w <= 0 || atten <= 0 do continue
+        origin := ndl > 0 ? p : p - n * (2 * BAKE_EPSILON)
+        // Stopping short of the light by shadow_cull_near: its fixture doesn't shadow it, as in render_shadows.odin
+        // (a sphere here, the realtime cameras' near planes a cube). A directional light's ray never ends.
+        if b.light_shadow[li] && scene_bvh_any_hit(&b.scene, Ray{origin = origin, dir = L}, dist - b.light_cull_near[li]) do continue
+        e[b.light_layer[li]] += light.color * (light.intensity * atten * w)
     }
     return
 }

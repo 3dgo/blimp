@@ -20,6 +20,7 @@ Editor_View :: struct {
     window_open: bool,      // its window's open flag: the user closing the window closes the view
     placed:  bool,          // its window got its first-frame floating placement (ui_next_view_window_placement)
     game_view: bool,                   // G: hide everything editor-only here (icons, outlines, selection boxes, gizmo), like Unreal
+    show_collision: bool,              // draw what each entity collides as (editor_collision_lines)
     show_probes: bool,                 // draw the world's baked probes as debug spokes (probe_grid_debug_lines)
 }
 

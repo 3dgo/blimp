@@ -31,6 +31,9 @@ World :: struct {
     time:        f64,    // play worlds: game seconds since Play, advanced only on frames that tick (pause and F10 step respected)
     dt:          f32,    // this frame's game seconds: the frame's dt when it ticks, else 0
     anim:        ^Anim_World,   // play worlds: animation state (world_anim.odin) — runtime, nil when not playing
+    game:        Game_State,    // play worlds: what the game carries between levels (world_game.odin) — runtime, never saved
+    next_level:  sbuf256,       // play worlds: the level a script asked to switch to (World.switch_level), done at the next frame's start; "" = none
+    switched:    bool,          // play worlds: loaded from another level's file by a switch, not copied from play_source, so its probes are its own
 }
 
 // A line game code asked to see (World.debug_line): drawn in every view of its world, the game view too,

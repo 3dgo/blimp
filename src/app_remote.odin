@@ -206,6 +206,7 @@ remote_execute :: proc(request: string) -> string {
 REMOTE_HELP :: `Worlds and entities  (<world> = index, title, or scene path; <name> = entity name)
   worlds                                  list open worlds
   open <path>                             open a level (.level) or kit (.gltf/.glb)
+  new <path>                              create an empty level (.level) and open it
   close <world>                           close a world and its views
   save <world>                            write a scene world back to its .level
   entities <world>                        one line per entity: name, model, position
@@ -216,7 +217,8 @@ REMOTE_HELP :: `Worlds and entities  (<world> = index, title, or scene path; <na
   select <world> <name...|none>           replace the selection; the last name is active
   duplicate <world>                       copy the selection in place and select the copies (Ctrl+D)
   settings <world> [field value...]       show or set the world's [world] settings (undoable)
-  play <world> [stop|pause|step]          play the world's level in a copy; stop, toggle pause, or step a frame
+  play <world> [stop|pause|step]          play the world's level in a copy as the game (game mode in its view, like F5);
+                                          stop, toggle pause, or step a frame
   bake <world>                            bake the level's probes (blocks), save its .probes; replies with the stats
   probe <world> <x> <y> <z>               baked indirect irradiance/pi at a point, facing +-X +-Y +-Z (linear)
   rename <world>                          start renaming the active entity in its entity list (F2)
@@ -234,6 +236,9 @@ Views  (<view> = view id, see 'views')
   gameview <view>                         hide / show icons, outlines and the gizmo in the view (G)
   retro <view> [on|off]                   get or set the view's render mode: the retro look, or clean (off);
                                           the effects are the level's settings: settings <world> retro.dither 0.5
+  wireframe <view> [on|off]               get or set the view's wireframe debug view
+  collision <view> [on|off]               get or set the view's collision shapes (what each entity collides as)
+  meshes <view> [on|off]                  get or set whether the view draws its shaded meshes (off: only wireframe and lines)
   screenshot <view> [path.png]            save the view's last frame (the 3D scene only); replies with the file path
   screenshot ui [path.png]                save the whole main window as shown: views, icons, gizmo, every docked or
                                           floating panel (not panels dragged out into their own OS window)
@@ -306,6 +311,16 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
             w = app_open_scene(path)
         }
         for v in views do if v.world == w do fmt.sbprintf(out, "opened %s  view=%d\n", w.title, v.id)
+
+    case "new":
+        if len(args) < 1 do return "usage: new <path>"
+        path := args[0]
+        if !strings.has_suffix(path, LEVEL_EXT) do return fmt.tprintf("a level path ends in %s", LEVEL_EXT)
+        if os.exists(path) do return fmt.tprintf("'%s' already exists", path)
+        w := app_new_scene(path)
+        if w == nil do return "create failed (see log)"
+        ui_scenes_rescan()
+        for v in views do if v.world == w do fmt.sbprintf(out, "created %s  view=%d\n", w.title, v.id)
 
     case "close":
         w := remote_world(args) or_return
@@ -420,7 +435,15 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         // Play mode (world_play.odin) on a world's level: play, stop, or toggle pause.
         w := remote_world(args) or_return
         switch len(args) > 1 ? args[1] : "" {
-        case "":      app_play(w)
+        case "":   // like F5: in game mode, through the game camera, so whoever watches sees what the game shows
+            level := world_level(w)
+            v := active_view
+            if v == nil || world_level(v.world) != level {
+                v = nil
+                for x in views do if world_level(x.world) == level { v = x; break }
+            }
+            if v != nil do ui_play(v)
+            else do app_play(w)   // no view of it: nothing to show the game in
         case "stop":  app_stop(w)
         case "pause": world_pause_toggle(w)
         case "step":  world_step(w)
@@ -494,6 +517,25 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         v := remote_view(args) or_return
         if len(args) > 1 do v.mode = args[1] == "on" ? .Retro : .Clean
         fmt.sbprintf(out, "%s\n", v.mode == .Retro ? "on" : "off")
+
+    case "wireframe":
+        // The debug view menu's Wireframe.
+        v := remote_view(args) or_return
+        if len(args) > 1 do v.wireframe = args[1] == "on"
+        fmt.sbprintf(out, "%s\n", v.wireframe ? "on" : "off")
+
+    case "meshes":
+        // The debug view menu's Hide render mesh, inverted.
+        v := remote_view(args) or_return
+        if len(args) > 1 do v.hide_meshes = args[1] == "off"
+        fmt.sbprintf(out, "%s\n", v.hide_meshes ? "off" : "on")
+
+    case "collision":
+        // The debug view menu's Collision.
+        v := remote_view(args) or_return
+        ev := editor_view(v)
+        if len(args) > 1 do ev.show_collision = args[1] == "on"
+        fmt.sbprintf(out, "%s\n", ev.show_collision ? "on" : "off")
 
     case "stats":
         // F3: the stats overlay.

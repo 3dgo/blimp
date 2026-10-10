@@ -39,3 +39,7 @@ float4 frag_main(VSOut input) : SV_Target {
     if (input.position.z < scene) discard;
     return input.color;
 }
+
+// Lines that show through everything: the collision view, whose shapes are usually inside the model.
+[shader("fragment")]
+float4 frag_top(VSOut input) : SV_Target { return input.color; }

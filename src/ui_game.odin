@@ -58,6 +58,7 @@ ui_draw_game :: proc() {
     im.PushStyleVar(im.StyleVar.WindowBorderSize, 0)
     if im.Begin("###game", nil, im.WindowFlags_NoDecoration + {.NoDocking, .NoMove, .NoSavedSettings, .NoScrollWithMouse}) {
         ui_view_image(v)
+        ui_view_game_ui(v, im.GetItemRectMin(), im.GetItemRectMax())   // the script's screen UI (World.ui)
     }
     im.End()
     im.PopStyleVar(2)

@@ -24,8 +24,8 @@ the top of each frame, waits 0.3 s after the last change (Max writes `.bin` then
 **Collision models.** A mesh named `<model>_col` in a kit is `<model>`'s static collision (claude/gameplay.md →
 Physics): imported like any model, cooked at load into Box3D mesh data (`asset_system.collision`, keyed by the
 *render* model), offset by where its node sits relative to the model's node, and left out of the kit's
-layout. It's never drawn. Authored in Max next to the visible mesh. It's what an entity with `collision = Collision_Mesh` (the
-default) collides as; an entity can use its render mesh or bounds instead (claude/gameplay.md → Physics).
+layout. It's never drawn. Authored in Max next to the visible mesh. It's what an entity with `collision = Collision_Mesh` collides
+as; the default is the render mesh, and bounds are the cheap option (claude/gameplay.md → Physics).
 
 **Sound clips** (`world_sound.odin`): every `.wav .ogg .mp3 .flac` under `assets/` and `assets_engine/`,
 decoded at startup by miniaudio, keyed by project path like a texture (`assets/sounds/door.wav`).
@@ -47,6 +47,16 @@ entity `mat_override`). Because glTF assigns material per mesh-primitive (not pe
 variants appear as separate primitives sharing the same accessors — so enabling this
 cleanly means the importer **dedups geometry by glTF accessor** (it currently copies
 per-primitive). Future work, not built yet.
+
+**Materials read from glTF** (`Material`, asset_system.odin), nothing else: the base colour factor and
+texture, and `KHR_materials_transmission`'s factor as **thin translucency** (`Material.translucency`): that share
+of the light on a surface's back face comes through diffusely, so a lamp shade glows from its bulb
+(claude/rendering.md → Lighting); and **emissive**: core glTF's `emissiveFactor` × `emissiveTexture` (sRGB, like
+the base colour) × `KHR_materials_emissive_strength`, so it can pass 1 in the HDR scene (Max's glTF material:
+Emission). Blimp never refracts or sees through it, so this is the extension's meaning
+minus refraction, not a second meaning. In Max: the glTF material's Transmission, Volume off; give the part
+its own material (a Multi/Sub-Object ID) so the rest of the model stays opaque. Alpha mode,
+double-sided and the PBR fields are ignored for now.
 
 The importer reads the default scene's node hierarchy (`gltf_world_matrices`) and records one
 `Kit_Node {name, model, position}` per mesh node in `asset_system.kits`. Each node's composed

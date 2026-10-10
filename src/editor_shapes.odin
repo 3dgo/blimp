@@ -1,9 +1,10 @@
 package blimp
 
 import "core:math"
+import b3 "vendor:box3d"
 
-// What an entity is besides its model, made visible in the editor: a camera's frustum and a light's
-// reach as scene lines (render_debug_draw.odin, drawn into each view's editor lines by ui_view_debug_lines);
+// What an entity is besides its model, made visible in the editor: a camera's frustum, a light's
+// reach and a volume's box as scene lines (render_debug_draw.odin, drawn into each view's editor lines by ui_view_debug_lines);
 // its icon is editor_icons.odin. Cameras and lights have no mesh, so
 // without these they'd be invisible. Selected ones draw in the selection colours.
 
@@ -13,14 +14,20 @@ EDITOR_SHAPE_ASPECT      :: 16.0 / 9.0   // a camera's real aspect comes from it
 
 EDITOR_SHAPE_CAMERA_COLOR :: vec4{0.8, 0.8, 0.85, 1}
 EDITOR_SHAPE_LIGHT_COLOR  :: vec4{1, 0.8, 0.35, 1}
+EDITOR_SHAPE_VOLUME_COLOR :: vec4{0.35, 0.9, 0.55, 1}
 
 // `selected_color` is nil for an unselected entity, whose shape draws dimmed so a city's worth of reach
 // spheres stays in the background; the selected ones stand out.
 editor_entity_shapes :: proc(e: ^Entity, selected_color: Maybe(vec4)) {
     if !entity_editor_visible(e) do return
-    if e.camera_type == .None && e.light_type == .None do return
+    if e.camera_type == .None && e.light_type == .None && e.volume_type == .None do return
     right, up, forward := debug_axes_of(e.rotation)
     p := e.position
+
+    if e.volume_type != .None {   // its box (entity_volume_contains): a frustum with equal ends is a box
+        h := e.size * 0.5
+        debug_frustum(p, e.rotation, -h.z, h.z, h.xy, h.xy, selected_color.? or_else editor_dim(EDITOR_SHAPE_VOLUME_COLOR))
+    }
 
     cam_col := selected_color.? or_else editor_dim(EDITOR_SHAPE_CAMERA_COLOR)
     switch e.camera_type {
@@ -107,6 +114,41 @@ probe_grid_debug_lines :: proc(g: ^Probe_Grid, scales: Probe_Layer_Scales, expos
             e := exposure * probe_eval(g, i, d, scales)
             c := vec4{linear_to_srgb(clamp(e.x, 0, 1)), linear_to_srgb(clamp(e.y, 0, 1)), linear_to_srgb(clamp(e.z, 0, 1)), 1}
             debug_line(p, p + d * len_, c)
+        }
+    }
+}
+
+EDITOR_COLLISION_STATIC_COLOR  :: vec4{0.3, 1, 0.45, 1}    // a static body
+EDITOR_COLLISION_MOVING_COLOR  :: vec4{1, 0.55, 0.15, 1}   // a kinematic body: follows its entity in play
+EDITOR_COLLISION_MISSING_COLOR :: vec4{1, 0.2, 0.2, 1}     // wants a Collision_Mesh its model has no _col for: doesn't collide
+
+// The collision view (Editor_View.show_collision): what entity e collides as in play, from the same shape
+// physics_world_start gives its body — a mesh's cooked triangles as Box3D holds them (welded), a Box as the
+// model's bounds. Its bounds in red if it wants a _col mesh its model doesn't have.
+editor_collision_lines :: proc(e: ^Entity) {
+    if !entity_enabled(e) do return
+    color := .Static in e.basic_static_flags ? EDITOR_COLLISION_STATIC_COLOR : EDITOR_COLLISION_MOVING_COLOR
+    shape, ok := physics_entity_shape(e)
+    if !ok {
+        if e.collision != .Collision_Mesh do return
+        if c, has_model := entity_world_corners(e); has_model do debug_box_corners(c, EDITOR_COLLISION_MISSING_COLOR)
+        return
+    }
+    switch m in shape {
+    case b3.BoxHull:
+        if c, has_model := entity_world_corners(e); has_model do debug_box_corners(c, color)
+    case ^b3.MeshData:
+        verts, has_verts := b3.GetMeshVertices(m).?
+        tris, has_tris := b3.GetMeshTriangles(m).?
+        if !has_verts || !has_tris do return
+        xf := entity_transform(e)
+        world := make([]vec3, m.vertexCount, context.temp_allocator)
+        for v, i in ([^]vec3)(verts)[:m.vertexCount] do world[i] = (xf * vec4{v.x, v.y, v.z, 1}).xyz
+        for t in ([^]b3.MeshTriangle)(tris)[:m.triangleCount] {
+            a, b, c := world[t.index1], world[t.index2], world[t.index3]
+            debug_line(a, b, color)
+            debug_line(b, c, color)
+            debug_line(c, a, color)
         }
     }
 }

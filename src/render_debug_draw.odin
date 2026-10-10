@@ -5,7 +5,7 @@ import "core:mem"
 import "core:math"
 import "core:math/linalg"
 
-MAX_DEBUG_LINE_VERTS :: 65536   // the probe view takes 12 per probe
+MAX_DEBUG_LINE_VERTS :: 262144   // 8 MB per frame in flight; the probe view takes 12 per probe, the collision view 6 per triangle (castle: ~82k)
 
 Debug_Line_Vertex :: struct { pos: vec4, color: vec4 }
 #assert(size_of(Debug_Line_Vertex) == 32)
@@ -16,6 +16,7 @@ Debug_Draw :: struct {
     buffer_ptr: [FRAMES_IN_FLIGHT]rawptr,
     buffer_srv: [FRAMES_IN_FLIGHT]dx.Resource_View,
     pipeline: Shader_Pipeline,
+    pipeline_top: Shader_Pipeline,   // no depth test: lines that show through everything (the collision view)
 }
 debug_draw: Debug_Draw
 
@@ -34,10 +35,12 @@ debug_draw_init :: proc() {
     line_opts.depth_write = false
     line_opts.dsv_format  = .UNKNOWN
     debug_draw.pipeline = shader_pipeline_create("debug_line", "vert_main", "frag_main", line_opts)
+    debug_draw.pipeline_top = shader_pipeline_create("debug_line", "vert_main", "frag_top", line_opts)
 }
 
 debug_draw_shutdown :: proc() {
     shader_pipeline_destroy(debug_draw.pipeline)
+    shader_pipeline_destroy(debug_draw.pipeline_top)
     for i in 0..<FRAMES_IN_FLIGHT {
         dx.descriptor_heap_free(&renderer_dx.resource_heap, debug_draw.buffer_srv[i].heap_slot)
         dx.buffer_unmap(debug_draw.buffer[i])
@@ -168,12 +171,13 @@ debug_draw_upload :: proc(frame_slot: u64) {
 
 // Draws lines [first, first+count) of the uploaded list into the currently bound target, with the
 // currently bound view's constants. `first` goes in as StartVertexLocation; the shader adds it via
-// SV_StartVertexLocation (D3D's SV_VertexID is 0-based per draw and doesn't include it).
-debug_draw_lines :: proc(cmd: dx.Command_List, first, count: u32) {
+// SV_StartVertexLocation (D3D's SV_VertexID is 0-based per draw and doesn't include it). `on_top` skips the
+// test against the scene's depth.
+debug_draw_lines :: proc(cmd: dx.Command_List, first, count: u32, on_top := false) {
     if first >= MAX_DEBUG_LINE_VERTS do return
     n := min(count, MAX_DEBUG_LINE_VERTS - first)
     if n == 0 do return
-    cmd.handle->SetPipelineState(debug_draw.pipeline.pso.handle)
+    cmd.handle->SetPipelineState(on_top ? debug_draw.pipeline_top.pso.handle : debug_draw.pipeline.pso.handle)
     cmd.handle->IASetPrimitiveTopology(.LINELIST)
     cmd.handle->DrawInstanced(n, 1, first, 0)
 }

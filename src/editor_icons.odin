@@ -54,9 +54,11 @@ ICON_LIGHT_SPOT   :: "\uF00B"   // flashlight_on
 ICON_LIGHT_BEAM   :: "\uE436"   // wb_iridescent
 ICON_LIGHT_SUN    :: "\uE430"   // wb_sunny
 ICON_CAMERA       :: "\uE04B"   // videocam
+ICON_VOLUME       :: "\uE3C2"   // crop_free: a box marked by its corners
 ICON_GAME_VIEW    :: "\uE338"   // videogame_asset
 ICON_RETRO        :: "\uE3EA"   // grain
 ICON_LIGHTING     :: "\uE0F0"   // lightbulb
+ICON_DEBUG_VIEW   :: "\uE9FE"   // view_in_ar
 ICON_BAKE         :: "\uE80E"   // whatshot
 ICON_SCRIPT       :: "\uE86F"   // code
 ICON_FOLDER_OPEN  :: "\uE2C8"   // folder_open
@@ -100,7 +102,7 @@ editor_entity_icon :: proc(e: ^Entity) -> (icon: string, ok: bool) {
     return entity_icon(e)
 }
 
-// The icon of `e`'s light or camera type, whatever its flags; none for other entities. A light wins
+// The icon of `e`'s light, camera or volume type, whatever its flags; none for other entities. A light wins
 // over a camera on the same entity (two roles are normally two entities).
 entity_type_icon :: proc(e: ^Entity) -> (icon: string, ok: bool) {
     switch e.light_type {
@@ -111,6 +113,7 @@ entity_type_icon :: proc(e: ^Entity) -> (icon: string, ok: bool) {
     case .Directional: return ICON_LIGHT_SUN, true
     }
     if e.camera_type != .None do return ICON_CAMERA, true
+    if e.volume_type != .None do return ICON_VOLUME, true
     return
 }
 

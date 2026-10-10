@@ -75,6 +75,15 @@ entity_transform :: proc(e: ^Entity) -> mat4 {
 
 entity_forward :: proc(e: ^Entity) -> vec3 { return linalg.quaternion128_mul_vector3(e.rotation, vec3{0, 0, 1}) }
 
+// Whether `p` is inside `e`'s volume: the box `size` covers, centred on the entity and turned with it (scale
+// doesn't apply). False for an entity that isn't a volume.
+entity_volume_contains :: proc(e: ^Entity, p: vec3) -> bool {
+    if e.volume_type == .None do return false
+    local := linalg.quaternion128_mul_vector3(linalg.quaternion_inverse(e.rotation), p - e.position)
+    h := e.size * 0.5
+    return abs(local.x) <= h.x && abs(local.y) <= h.y && abs(local.z) <= h.z
+}
+
 // Serialization
 entity_to_text :: proc(e: ^Entity, allocator := context.allocator) -> string {
     b: strings.Builder

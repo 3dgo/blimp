@@ -151,10 +151,10 @@ asset_buffers_create :: proc() {
     // Material table: asset material image indices are resolved to bindless heap slots here.
     asset_buffers.material_buffer_data = make([dynamic]Material, app.allocators.perm)
     for mat in asset_system.materials {
-        append(&asset_buffers.material_buffer_data, Material {
-            color = mat.color,
-            color_tex = asset_buffers.texture_buffers[mat.color_tex].resource_view.heap_slot,
-        })
+        gpu := mat
+        gpu.color_tex    = asset_buffers.texture_buffers[mat.color_tex].resource_view.heap_slot
+        gpu.emissive_tex = asset_buffers.texture_buffers[mat.emissive_tex].resource_view.heap_slot
+        append(&asset_buffers.material_buffer_data, gpu)
     }
     asset_buffers.material_buffer = buffers_resource_create(size_of(Material), u32(len(asset_buffers.material_buffer_data)), &renderer_dx.resource_heap)
 }

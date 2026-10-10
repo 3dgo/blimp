@@ -21,6 +21,9 @@ Render_View :: struct {
     lighting:       Lighting_View,
     probes_off:     bool,   // light as if not baked (the flat ambient), to compare
     indirect_scale: f32,    // × the indirect light (probes or the flat ambient): 1 = as baked
+    // Debug views (the editor's toolbar debug view menu), like the lighting ones.
+    wireframe:      bool,   // every triangle's edges in one flat colour, over the shaded scene (renderer_dx.scene_wire)
+    hide_meshes:    bool,   // skip the shaded scene pass: only the sky, the wireframe and lines
 
     frame_constants:    [FRAMES_IN_FLIGHT]dx.Resource,
     frame_constants_ptr: [FRAMES_IN_FLIGHT]rawptr,
@@ -29,7 +32,8 @@ Render_View :: struct {
 
     // Editor interaction (screen rect, navigation, gizmo, marquee) lives on the matching
     // Editor_View (editor_view.odin), not here.
-    debug_first, debug_count: u32,   // this frame's overlay range in debug_draw.verts
+    debug_first, debug_count: u32,   // this frame's overlay range in debug_draw.verts, tested against the scene's depth
+    debug_top_first, debug_top_count: u32,   // the range after it, drawn on top of everything (the collision view)
 }
 
 // The scene target: linear, float, unclamped. Quantized only at the end of the post chain.
@@ -42,13 +46,13 @@ VIEW_HDR_FORMAT :: dxgi.FORMAT.R16G16B16A16_FLOAT
 //   Clean — scene at the display size; none of them
 Render_Mode :: enum u8 { Retro, Clean }
 
-// Which lighting terms a view shows. Mirrors LIGHTING_* in common.slang.
+// Which lighting terms a view shows, in the lighting menu's order. Mirrors LIGHTING_* in common.slang.
 //   Lit           — everything
-//   Probes_Only   — the probes' light on white: what the bake gives, without textures or direct light
-//   Indirect_Only — albedo × probes
 //   Direct_Only   — albedo × realtime lights
+//   Indirect_Only — albedo × probes
 //   Lighting_Only — direct + indirect on white
-Lighting_View :: enum u32 { Lit, Probes_Only, Indirect_Only, Direct_Only, Lighting_Only }
+//   Probes_Only   — the probes' light on white: what the bake gives, without textures or direct light
+Lighting_View :: enum u32 { Lit, Direct_Only, Indirect_Only, Lighting_Only, Probes_Only }
 
 // The retro effects this view shows: its world's settings, like every other setting; all off in .Clean.
 render_view_retro :: proc(view: ^Render_View) -> Retro_Settings {
@@ -151,10 +155,10 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         signal_texture_slot    = view.target.signal_srv.heap_slot,
         dither                 = clamp(r.dither, 0, 1),
     }
-    // A play world lights with its level's probes (it has none of its own).
+    // A play copy lights with its level's probes (it has none of its own); world_lighting says whose.
     frame_constants.lighting_view  = u32(view.lighting)
     frame_constants.indirect_scale = view.indirect_scale
-    if level := world_level(world); level.render.probes.resource.handle != nil && !view.probes_off {
+    if level := world_lighting(world); level.render.probes.resource.handle != nil && !view.probes_off {
         g := &level.probes
         frame_constants.probe_buffer_slot = level.render.probes.resource_view.heap_slot
         frame_constants.probe_depth_slot  = level.render.probe_depth.resource_view.heap_slot
@@ -171,7 +175,7 @@ render_view_update_constants :: proc(view: ^Render_View, frame_slot: u64) {
         frame_constants.camera_pos = e.position
     }
     frame_constants.inv_proj = linalg.inverse(frame_constants.proj_mat)
-    render_view_fog(&frame_constants, world.settings.fog, world_level(world).probes.light_mean)
+    render_view_fog(&frame_constants, world.settings.fog, world_lighting(world).probes.light_mean)
     render_view_sky(&frame_constants, world.settings.sky)
     mem.copy(view.frame_constants_ptr[frame_slot], &frame_constants, size_of(Frame_Constants))
 }
@@ -241,10 +245,20 @@ render_view_draw :: proc(view: ^Render_View, frame_slot: u64) {
     }
     // One range per blend, in EntityBlend order: everything opaque is in the depth buffer before anything blends.
     r := &world.render
-    for blend in EntityBlend {
-        if r.draw_count[blend] == 0 do continue
-        cmd.handle->SetPipelineState(renderer_dx.scene[blend].pso.handle)
-        cmd.handle->ExecuteIndirect(renderer_dx.indirect_sig.handle, r.draw_count[blend], r.draw_cmd[frame_slot].handle, u64(r.draw_first[blend]) * size_of(d3d12.DRAW_INDEXED_ARGUMENTS), nil, 0)
+    if !view.hide_meshes {
+        for blend in EntityBlend {
+            if r.draw_count[blend] == 0 do continue
+            cmd.handle->SetPipelineState(renderer_dx.scene[blend].pso.handle)
+            cmd.handle->ExecuteIndirect(renderer_dx.indirect_sig.handle, r.draw_count[blend], r.draw_cmd[frame_slot].handle, u64(r.draw_first[blend]) * size_of(d3d12.DRAW_INDEXED_ARGUMENTS), nil, 0)
+        }
+    }
+    // The wireframe over what's drawn: every blend's edges again, biased toward the eye so they win on their own faces.
+    if view.wireframe {
+        cmd.handle->SetPipelineState(renderer_dx.scene_wire.pso.handle)
+        for blend in EntityBlend {
+            if r.draw_count[blend] == 0 do continue
+            cmd.handle->ExecuteIndirect(renderer_dx.indirect_sig.handle, r.draw_count[blend], r.draw_cmd[frame_slot].handle, u64(r.draw_first[blend]) * size_of(d3d12.DRAW_INDEXED_ARGUMENTS), nil, 0)
+        }
     }
 }
 

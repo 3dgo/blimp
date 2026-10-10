@@ -14,11 +14,14 @@
     panels belong to a world and aren't reopened. Worlds lists open worlds, scenes (`.level`
     files under `assets/` and `assets_engine/` only: the extension decides), characters and kits. A glTF with a
     skinned model is a character (`Kit.character`, set at import): content decides, not its folder or name.
+  - **New Scene** (the + on the Scenes header, or `blimpctl new <path>`) writes an empty level (`scene_create`:
+    default world settings, no entities; never overwrites) under `assets/scenes/` and opens it. Names are
+    ASCII like asset keys: letters, digits, `_`, `-`, `/` for a subfolder.
   - **Show in Explorer** (`app_show_in_explorer`, Explorer with the file selected) is how a level or kit
     gets edited outside the engine and resaved: right-click a row in Worlds, the folder button beside Save
     on a viewport toolbar, or right-click a block in GPU Resources.
   - Opening, playing, stopping and closing touch every layer, so each is one proc in `app_lifecycle.odin`
-    (`app_open_scene`, `app_open_kit`, `app_view_open`, `app_play`, `app_stop`, `app_process_closes`,
+    (`app_open_scene`, `app_new_scene`, `app_open_kit`, `app_view_open`, `app_play`, `app_stop`, `app_process_closes`,
     `app_reload_assets`), which the UI and blimpctl call. `world_registry.odin` / `world_play.odin` do only
     the world part.
   - Closing a world or view is a request (`world_request_close`, `view_request_close`) executed at the
@@ -158,6 +161,10 @@
   - Closing a play view, a playing level or a play world stops play first (`app_process_closes`).
     The unsaved prompt asks about the level.
   - Runtime systems (physics, animation, audio) belong to the play world: built with it, freed when it closes.
+  - **Level switches replace the play world, never the level** (`World.switch_level`, claude/gameplay.md → Levels).
+    The new level loads from its file as a fresh play world in the old one's place (`world_play_switch`): same
+    views, same `play_source`, so Stop still returns to the level being edited, however many switches happened.
+    It's flagged `switched` (its probes are its own, `world_lighting`); the editor selection isn't carried.
   - Keys (and toolbar buttons): F5 Play, F6 Pause, F7 Stop, F10 step one frame while paused (game systems check `w.ticks`,
     set once per frame by `world_play_tick`, never `paused`). Esc stays the game's. No Restart: Stop is the reset.
   - **Game mode** (`ui_game.odin`): Play also makes that view the whole window as the game, rendered through
@@ -194,6 +201,15 @@
   retro look and a clean full-res render (`claude/rendering.md` → Retro look). Per view, not saved,
   not undoable. The effects themselves are the Retro Look section of World Settings.
   - Pasted text never touches them: only `scene_load` reads `[world]`.
+- **Debug view menu** (view_in_ar icon beside Lighting; blimpctl `wireframe` / `collision` / `meshes`): per view, not
+  saved, not undoable.
+  - **Wireframe** (`Render_View.wireframe`): after the shaded pass, every blend again with one wireframe PSO
+    (`scene_wire`, `frag_wire`: a flat colour ÷ exposure), depth-biased toward the eye so a face's edges win over it.
+  - **Collision** (`Editor_View.show_collision`, `editor_collision_lines`): each enabled entity's shape from the same
+    `physics_entity_shape` Play uses, so a mesh is the cooked, welded Box3D triangles: green static, orange moving, red
+    bounds for a Collision_Mesh with no `_col`. Lines on top of everything (the view's `debug_top_*` range,
+    `debug_line.slang`'s `frag_top`), since collision is usually inside the model; recorded last, after the selection.
+  - **Hide render mesh** (`Render_View.hide_meshes`): skips the shaded pass, leaving the sky, wireframe and lines.
 - **Lighting menu** (lightbulb on the viewport toolbar): that view's lighting debug view, probes on/off,
   indirect multiplier and the probe overlay, plus the world's light-group scales (runtime overrides like
   Lua's, shared by its views, never saved; "Back to saved" clears them) (claude/rendering.md → Baker). Per view, not saved, not undoable;
@@ -262,7 +278,7 @@
 
 A debug build listens on `127.0.0.1:47800` (`src/app_remote.odin`). `bin/blimpctl.exe` (`tools/blimpctl`,
 built by `build.odin`) sends one text command and prints the reply. `blimpctl help` lists the commands:
-worlds, open/save/close, entities/get/set/paste/delete/select, play/stop/pause, game, undo/redo, views/camera/frame/pick/menu, tool,
+worlds, open/new/save/close, entities/get/set/paste/delete/select, play/stop/pause, game, undo/redo, views/camera/frame/pick/menu, tool,
 timings (GPU time per pass, `render_gpu_timer.odin`), resources (every GPU resource by owner — assets, worlds,
 views, engine — the data behind the GPU Resources treemap window, `ui_resources.odin`), shadows (a world's shadow
 map slices, the Shadow Maps window's data, `ui_shadows.odin`), bake / probe (claude/rendering.md → Baker),

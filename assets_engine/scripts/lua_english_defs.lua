@@ -186,3 +186,7 @@ function World.update(dt) end
 ---@param entity Entity_Handle the entity playing the clip
 ---@param name string the event's name, like "footstep"
 function World.anim_event(entity, name) end
+
+---Called every frame, paused too, once per view showing this world: draw the game's screen UI with UI.* (a score,
+---a pause menu). Only draw and answer buttons here; game logic goes in World.update.
+function World.ui() end

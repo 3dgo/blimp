@@ -1,6 +1,7 @@
 package blimp
 
 import "core:log"
+import "core:path/filepath"
 import "core:strings"
 import hm "core:container/handle_map"
 
@@ -17,6 +18,10 @@ import hm "core:container/handle_map"
 //
 // This file is the world-layer half: the copy and its clock. app_play / app_stop (app_lifecycle.odin)
 // also start and stop physics, sound and the script, and retarget the editor.
+//
+// - A script can switch the play world to another level (World.switch_level → world_play_switch): the new
+//   level loads from its file as a fresh play world in the old one's place, carrying the game state
+//   (world_game.odin). It still points back at the edited level, so Stop returns there.
 //
 // level.play_world → the running copy; play_world.play_source → its level. Both nil when not playing.
 
@@ -54,6 +59,41 @@ world_play_discard :: proc(p: ^World) {
     p.play_source    = nil   // a closing leftover now, not a play world
     world_request_close(p)
     log.infof("Stop: %s", level.title)
+}
+
+// A play world's script asked for another level (World.switch_level): a play world loaded from `path` takes
+// p's place. It keeps p's level (so Stop still goes back to the level being edited), p's views and p's game
+// state (world_game.odin); p is unlinked and queued to close like a stopped copy. nil (logged) if `path`
+// doesn't load, and p plays on. The edited level is never touched: switching is a play-world thing.
+world_play_switch :: proc(p: ^World, path: string) -> ^World {
+    level := p.play_source
+    q := new(World, app.allocators.perm)
+    world_init(q)
+    if !scene_load(q, path) {
+        world_shutdown(q)
+        free(q, app.allocators.perm)
+        return nil
+    }
+    q.title       = strings.clone(filepath.base(path), app.allocators.perm)
+    q.game        = p.game
+    q.switched    = true
+    q.play_source = level
+    level.play_world = q
+    p.play_source    = nil   // a closing leftover now, not a play world
+    append(&worlds, q)
+    for v in views do if v.world == p {   // the camera handle was p's: a view showing the game (ui_game_enter) shows q's camera
+        v.world = q
+        v.camera_entity = v.camera_entity != {} ? world_game_camera(q) : {}
+    }
+    world_request_close(p)
+    log.infof("Switch level: %s -> %s", p.title, q.title)
+    return q
+}
+
+// The world whose baked probes light `w`. A copy has none of its own and lights with its level's; a play world
+// a switch loaded from another level's file lights with that file's, which it loaded itself.
+world_lighting :: proc(w: ^World) -> ^World {
+    return w.switched ? w : world_level(w)
 }
 
 // The camera the game renders and listens through: the first enabled camera entity. Zero if there's none.

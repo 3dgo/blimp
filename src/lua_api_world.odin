@@ -128,3 +128,39 @@ world_light_group_lua :: proc(name: string) -> f32 {
 world_debug_line_lua :: proc(from: vec3, to: vec3, color: vec4 = {1, 1, 1, 1}) {
     if w, ok := lua_world(); ok do world_debug_line(w, from, to, color)
 }
+
+// Whether the game is paused (World.set_paused, or F6 in the editor). A paused world doesn't update, but its ui hook
+// (World.ui) still runs, so that's where a pause menu goes.
+// zh: 游戏是否暂停了（世界.设暂停，或编辑器里按 F6）。暂停的世界不更新，但它的 世界.界面 照常执行，暂停菜单就画在那里。
+@(lua=paused, table=World, lua_zh="已暂停")
+world_paused_lua :: proc() -> bool {
+    w, ok := lua_world()
+    return ok && w.paused
+}
+
+// Pauses or resumes the game: the world stops updating (its clock, physics, animation and sounds hold) until it's
+// resumed. Resume from the ui hook (World.ui), which still runs while paused; update doesn't.
+// zh: 暂停或继续游戏：暂停后世界不再更新（时钟、物理、动画、声音都停住），直到继续。要在 世界.界面 里继续：暂停时它照常执行，
+//     世界.更新 不执行。
+@(lua=set_paused, table=World, lua_zh="设暂停")
+world_set_paused_lua :: proc(paused: bool) {
+    if w, ok := lua_world(); ok && w.paused != paused do world_pause_toggle(w)
+}
+
+// Switches the game to another level, e.g. "assets/scenes/office.level", at the start of the next frame: this level's
+// play world closes and the new level plays in its place, from its own file. Only the Game table (Game.set_number,
+// Game.set_string) comes along, so write what the next level needs there first, such as which entry to arrive at.
+// The level being edited is untouched, and Stop goes back to it. A path that doesn't load logs and the game plays on.
+// zh: 在下一帧开始时切换到另一个关卡，如 "assets/scenes/office.level"：这个关卡的运行世界关闭，新关卡从它自己的
+//     文件载入接着运行。只有 游戏 表（游戏.设数、游戏.设文本）会带过去，所以先把下一关要用的写进去，比如从哪个入口出现。
+//     正在编辑的关卡不受影响，停止后回到它。路径载入失败会记日志，游戏照常运行。
+@(lua=switch_level, table=World, lua_zh="切换关卡")
+world_switch_level_lua :: proc(path: string) {
+    w, ok := lua_world()
+    if !ok do return
+    if w.play_source == nil {
+        log.errorf("World.switch_level: %s isn't playing", w.title)
+        return
+    }
+    sbuf_set(&w.next_level, path)
+}

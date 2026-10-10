@@ -187,6 +187,7 @@ ui_draw_view :: proc(view: ^Render_View, label: cstring, p_open: ^bool, extra_fl
             col: [4]f32 = view.world.paused ? {0.9, 0.62, 0.2, 1} : im.GetStyleColorVec4(.ButtonActive)^
             im.DrawList_AddRect(im.GetWindowDrawList(), img_min, img_max, im.GetColorU32ImVec4(col), 0, 2 * app.display_scale)
         }
+        ui_view_game_ui(view, img_min, img_max)   // the script's screen UI (World.ui); after the reads of the image item above
 
         // Right-click (RMB released without flying): select what's under the cursor unless it's already
         // selected (so the menu acts on it), then open the menu, pasting at the click's raycast.
@@ -273,27 +274,37 @@ ui_view_selection :: proc(ev: ^Editor_View, gizmo_owns_mouse: bool) {
     if !m.dragging && m.double && op == .Replace && selection_count(w) > 0 do editor_frame_selection(ev)
 }
 
-// Appends `v`'s editor lines to this frame's debug lines and records its range on the view, which the
-// renderer then draws into that view only (app_run calls this for every view before rendering): the
-// world's game lines (World.debug_line, even in the game view), then the editor's: baked
-// probes, the manual bake box, camera/light shapes, and the selection boxes — the active entity pale
-// green, the rest of the selection green.
+// Appends `v`'s editor lines to this frame's debug lines and records its ranges on the view, which the
+// renderer then draws into that view only (app_run calls this for every view before rendering). Tested
+// against the scene's depth: the world's game lines (World.debug_line, even in the game view), then the
+// editor's: baked probes, the manual bake box, camera/light shapes, and the selection boxes — the active
+// entity pale green, the rest of the selection green. On top of everything: the collision view's shapes.
 ui_view_debug_lines :: proc(v: ^Render_View) {
+    editor_lines := !editor_view(v).game_view && v != ui.game   // G or game mode: none of the editor's lines in this view
     v.debug_first = u32(len(debug_draw.verts))
-    defer v.debug_count = u32(len(debug_draw.verts)) - v.debug_first
     for l in v.world.debug_lines do debug_line(l.a, l.b, l.color)   // the game's own lines, in every view, game view too
-    if editor_view(v).game_view || v == ui.game do return   // G or game mode: none of the editor's lines in this view
-    if editor_view(v).show_probes {
-        g := &world_level(v.world).probes   // a play world shows its level's, lit by its own group scales
-        probe_grid_debug_lines(g, probe_layer_scales(g, light_group_scales(v.world)), math.pow(2, v.world.settings.exposure))
-    }
-    ui_bake_bounds_lines(world_level(v.world))   // the manual bake box while the Bake window is open (ui_bake.odin)
+    if editor_lines {
+        if editor_view(v).show_probes {
+            g := &world_lighting(v.world).probes   // a play copy shows its level's, lit by its own group scales
+            probe_grid_debug_lines(g, probe_layer_scales(g, light_group_scales(v.world)), math.pow(2, v.world.settings.exposure))
+        }
+        ui_bake_bounds_lines(world_level(v.world))   // the manual bake box while the Bake window is open (ui_bake.odin)
 
-    it := hm.iterator_make(&v.world.entities)
-    for e, h in hm.iterate(&it) {
-        sel_color := selection_color(v.world, h)
-        editor_entity_shapes(e, e.selected ? sel_color : nil)   // camera frustum / light reach (editor_shapes.odin)
-        if !e.selected || !entity_drawn(e) do continue          // hidden / disabled: no box either
-        selection_draw_bounds(e, sel_color)
+        it := hm.iterator_make(&v.world.entities)
+        for e, h in hm.iterate(&it) {
+            sel_color := selection_color(v.world, h)
+            editor_entity_shapes(e, e.selected ? sel_color : nil)   // camera frustum / light reach (editor_shapes.odin)
+            if !e.selected || !entity_drawn(e) do continue          // hidden / disabled: no box either
+            selection_draw_bounds(e, sel_color)
+        }
     }
+    v.debug_count = u32(len(debug_draw.verts)) - v.debug_first
+
+    // Collision last: it's the most lines, so if it fills the buffer the selection still shows.
+    v.debug_top_first = u32(len(debug_draw.verts))
+    if editor_lines && editor_view(v).show_collision {
+        it := hm.iterator_make(&v.world.entities)
+        for e, _ in hm.iterate(&it) do editor_collision_lines(e)
+    }
+    v.debug_top_count = u32(len(debug_draw.verts)) - v.debug_top_first
 }

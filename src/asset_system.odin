@@ -48,6 +48,7 @@ Asset_System :: struct {
     collision: map[string]^b3.MeshData,          // model key → its authored collision (the kit's <model>_col mesh, cooked); Box3D owns the data
     render_collision: map[string]^b3.MeshData,   // model key → its render triangles cooked for collision, on first use (asset_render_collision)
     material_albedo: []vec3,   // per material: linear colour × its texture's average, clamped below 1 (the baker's bounce colour)
+    material_emission: []vec3, // per material: emissive × its texture's average (the light the baker sees it give off)
 
     arena: vmem.Arena,
 }
@@ -67,8 +68,13 @@ Mesh :: struct {
 
 Material :: struct {
     color: rgba_f32,
-    color_tex: u32,
+    emissive: [3]f32,     // linear light the surface gives off whatever lights it: glTF emissiveFactor × emissive_strength
+    color_tex: u32,       // an image index here; render_buffers.odin swaps in its bindless slot for the GPU table
+    emissive_tex: u32,    // multiplies emissive (white when there's none); swapped for its bindless slot like color_tex
+    translucency: f32,    // thin translucency: how much light on the back face comes through (KHR_materials_transmission)
+    _pad: [2]u32,
 }
+#assert(size_of(Material) == 48)   // = Material in scene.slang (uploaded as is)
 
 Image :: struct {
     width, height: u32,
@@ -245,7 +251,8 @@ asset_system_shutdown :: proc() {
 }
 
 // The light baker's surface colour per material (claude/rendering.md → Lighting): its colour times the average
-// of its colour texture, averaged in linear, clamped to MAX_BAKE_ALBEDO so bounces converge.
+// of its colour texture, averaged in linear, clamped to MAX_BAKE_ALBEDO so bounces converge. And its glow: the
+// emissive times its texture's average, unclamped (it's light given off, not reflected).
 MAX_BAKE_ALBEDO :: 0.9
 
 asset_build_albedos :: proc() {
@@ -274,6 +281,8 @@ asset_build_albedos :: proc() {
         a := image_avg[mat.color_tex] * mat.color.rgb
         asset_system.material_albedo[i] = {min(a.x, MAX_BAKE_ALBEDO), min(a.y, MAX_BAKE_ALBEDO), min(a.z, MAX_BAKE_ALBEDO)}
     }
+    asset_system.material_emission = make([]vec3, len(asset_system.materials), arena)
+    for mat, i in asset_system.materials do asset_system.material_emission[i] = image_avg[mat.emissive_tex] * mat.emissive
 }
 
 asset_build_bvhs :: proc() {
@@ -368,14 +377,24 @@ asset_system_import_gltf_models :: proc(path: string) {
         material := Material{color = {1, 1, 1, 1}, color_tex = asset_system.image_ids["white"]}
         if mr, ok := mat.metallic_roughness.(gltf2.Material_Metallic_Roughness); ok {
             material.color = mr.base_color_factor
-            if tex_info, tex_ok := mr.base_color_texture.(gltf2.Texture_Info); tex_ok {
-                if int(tex_info.index) < len(data.textures) {
-                    if src, src_ok := data.textures[tex_info.index].source.(gltf2.Integer); src_ok {
-                        material.color_tex = image_indices[src]
-                    }
-                }
+            material.color_tex = gltf_texture_image(data, image_indices, mr.base_color_texture)
+        }
+        // Emissive: core glTF's factor and texture (sRGB, like the base colour), × KHR_materials_emissive_strength
+        // so it can pass 1 in the HDR scene. Added after lighting (scene.slang), never baked (claude/rendering.md).
+        emissive_strength := f32(1)
+        material.emissive_tex = gltf_texture_image(data, image_indices, mat.emissive_texture)
+        // KHR_materials_transmission (Max's Transmission, Volume off) read as thin translucency: the light on a
+        // surface's back face comes through it, diffusely — a lamp shade lit by the bulb inside. No refraction
+        // and no see-through: Blimp doesn't refract (claude/assets.md). The texture is ignored.
+        if ext, ok := mat.extensions.(json.Object); ok {
+            if t, t_ok := ext["KHR_materials_transmission"].(json.Object); t_ok {
+                material.translucency = clamp(json_number(t["transmissionFactor"]), 0, 1)
+            }
+            if e, e_ok := ext["KHR_materials_emissive_strength"].(json.Object); e_ok {
+                emissive_strength = max(json_number(e["emissiveStrength"], 1), 0)
             }
         }
+        for c, k in mat.emissive_factor do material.emissive[k] = f32(c) * emissive_strength
 
         append(&asset_system.materials, material)
         asset_system.material_ids[mat_key] = u32(len(asset_system.materials)) - 1
@@ -596,7 +615,7 @@ asset_system_import_gltf_models :: proc(path: string) {
 }
 
 // Authored collision (claude/gameplay.md → Physics): a mesh named <model>_col in the same kit is <model>'s collision
-// (an entity's `collision = Collision_Mesh`, the default). Its vertices hold only its node's rotation and scale, like any model's, so
+// (an entity's `collision = Collision_Mesh`; the default is Render_Mesh). Its vertices hold only its node's rotation and scale, like any model's, so
 // `offset` moves them from its own pivot to the model's (where the two nodes sit).
 COLLISION_SUFFIX :: "_col"
 
@@ -838,6 +857,23 @@ gltf_image_path :: proc(gltf_path, uri: string) -> (path: string, ok: bool) {
         }
     }
     return "", false
+}
+
+// A material's texture reference as our image index (image_indices: glTF image → ours), or white when it has none.
+gltf_texture_image :: proc(data: ^gltf2.Data, image_indices: []u32, info: Maybe(gltf2.Texture_Info)) -> u32 {
+    if tex_info, ok := info.?; ok && int(tex_info.index) < len(data.textures) {
+        if src, src_ok := data.textures[tex_info.index].source.(gltf2.Integer); src_ok do return image_indices[src]
+    }
+    return asset_system.image_ids["white"]
+}
+
+// A number in an extension's JSON (a glTF exporter may write 1 or 1.0), or `default` when it's missing.
+json_number :: proc(v: json.Value, default: f32 = 0) -> f32 {
+    #partial switch n in v {
+    case json.Float:   return f32(n)
+    case json.Integer: return f32(n)
+    }
+    return default
 }
 
 // The original `uri` string of a glTF image, or "". When the loader can read an external file it

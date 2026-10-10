@@ -258,9 +258,11 @@ public float light_reach(Light light, float3 pos, out float3 L) {
 
 // Everything that lights `pos` facing N, seen from direction V: baked indirect, then every light in the world
 // with its shadow, or a headlight when there are none. Blinn-Phong highlights of `shininess`; 0 = none.
+// `translucency` (the material's, 0 = opaque) is thin translucency: that share of the light on the back face
+// comes through diffusely, so a lamp shade glows from the bulb inside it (claude/rendering.md).
 // Everything here is linear: light colours are, and the result goes to a float target that the post pass
 // encodes for display.
-public Lighting light_surface(float3 pos, float3 N, float3 V, float shininess) {
+public Lighting light_surface(float3 pos, float3 N, float3 V, float shininess, float translucency) {
     StructuredBuffer<Light> lightBuffer = DescriptorHandle<StructuredBuffer<Light>>(gFrame.lightBufferSlot);
     Lighting result = { indirect_light(pos, N), 0 };
     bool direct = view_direct();
@@ -270,14 +272,21 @@ public Lighting light_surface(float3 pos, float3 N, float3 V, float shininess) {
         Light light = lightBuffer[i];
         float3 L;
         float atten = light_reach(light, pos, L);
-        float ndl = saturate(dot(N, L));
-        if (ndl > 0 && atten > 0) atten *= shadow_visibility(light, pos, N);
+        if (atten <= 0) continue;
         float3 radiance = light.color * light.intensity * atten;
-        result.diffuse += ndl * radiance;
-        if (shininess > 0 && ndl > 0) {   // no highlight on the far side
-            float3 H = normalize(L + V);
-            result.specular += pow(saturate(dot(N, H)), shininess) * SPEC_STRENGTH * radiance;
+        float ndl = saturate(dot(N, L));
+        if (ndl > 0) {
+            float3 lit = radiance * shadow_visibility(light, pos, N);
+            result.diffuse += ndl * lit;
+            if (shininess > 0) {   // no highlight on the far side
+                float3 H = normalize(L + V);
+                result.specular += pow(saturate(dot(N, H)), shininess) * SPEC_STRENGTH * lit;
+            }
         }
+        // The back face's light, through the surface. Its shadow is looked up from the back side (-N): offset
+        // the other way, the surface itself would be in front of the point and shadow it.
+        float back = translucency * saturate(dot(-N, L));
+        if (back > 0) result.diffuse += back * radiance * shadow_visibility(light, pos, -N);
     }
     // A world with no lights (a kit, a new level) gets a headlight: white, intensity 1, shining from the
     // view's eye, so whatever the view looks at is lit. Per view, unshadowed, never baked.
@@ -311,7 +320,7 @@ public struct VertexLight {
     public uint4  shadowLight;                       // their indices in the light buffer, SHADOW_NONE = unused
 }
 
-public VertexLight vertex_lighting(uint shading, float3 pos, float3 N) {
+public VertexLight vertex_lighting(uint shading, float3 pos, float3 N, float translucency) {
     VertexLight v = {};
     v.shadowLight = SHADOW_NONE;
     if (shading != SHADING_GOURAUD) return v;
@@ -325,7 +334,12 @@ public VertexLight vertex_lighting(uint shading, float3 pos, float3 N) {
         Light light = lightBuffer[i];
         float3 L;
         float atten = light_reach(light, pos, L);
-        float3 c = saturate(dot(N, L)) * atten * light.color * light.intensity;
+        float3 radiance = atten * light.color * light.intensity;
+        float3 c = saturate(dot(N, L)) * radiance;
+        // Back-face light through a translucent surface (light_surface), shadowed here per vertex from the back
+        // side: the pixel shader's shadows are for the front.
+        float back = translucency * saturate(dot(-N, L));
+        if (back > 0 && atten > 0) v.diffuse += back * radiance * shadow_visibility(light, pos, -N);
         if (light.shadowSlice != SHADOW_NONE && shadowedCount < GOURAUD_SHADOW_LIGHTS) {
             v.shadowed[shadowedCount] = c;
             v.shadowLight[shadowedCount] = i;
@@ -357,31 +371,32 @@ float3 shade_gouraud(float3 albedo, float3 pos, float3 N, VertexLight v) {
 }
 
 // Lit per pixel with the interpolated normal, diffuse only: smooth, no highlight.
-float3 shade_lambert(float3 albedo, float3 pos, float3 N) {
-    return albedo * light_surface(pos, N, view_dir(pos), 0).diffuse;
+float3 shade_lambert(float3 albedo, float3 pos, float3 N, float translucency) {
+    return albedo * light_surface(pos, N, view_dir(pos), 0, translucency).diffuse;
 }
 
 // Lit per pixel with the face's normal (N, the caller's face_normal), ignoring the mesh's smooth ones:
 // faceted. Diffuse only.
-float3 shade_flat(float3 albedo, float3 pos, float3 N) {
-    return albedo * light_surface(pos, N, view_dir(pos), 0).diffuse;
+float3 shade_flat(float3 albedo, float3 pos, float3 N, float translucency) {
+    return albedo * light_surface(pos, N, view_dir(pos), 0, translucency).diffuse;
 }
 
 // Lit per pixel, with a highlight.
-float3 shade_phong(float3 albedo, float3 pos, float3 N) {
-    Lighting l = light_surface(pos, N, view_dir(pos), PHONG_SHININESS);
+float3 shade_phong(float3 albedo, float3 pos, float3 N, float translucency) {
+    Lighting l = light_surface(pos, N, view_dir(pos), PHONG_SHININESS, translucency);
     return albedo * l.diffuse + l.specular;
 }
 
 // The surface colour at pos, by shading model (SHADING_*). N is the interpolated normal, or for Flat the
 // face's (face_normal, taken by the caller before any texel snap moves pos); v what vertex_lighting gave for
-// this model. `shading` is per draw, so the branch is uniform.
-public float3 shade(uint shading, float3 albedo, float3 pos, float3 N, VertexLight v) {
+// this model; `translucency` the material's (light_surface; Gouraud's is already in v). `shading` is per draw,
+// so the branch is uniform.
+public float3 shade(uint shading, float3 albedo, float3 pos, float3 N, VertexLight v, float translucency) {
     switch (shading) {
     case SHADING_UNLIT:   return shade_unlit(albedo);
     case SHADING_GOURAUD: return shade_gouraud(albedo, pos, N, v);
-    case SHADING_FLAT:    return shade_flat(albedo, pos, N);
-    case SHADING_PHONG:   return shade_phong(albedo, pos, N);
-    default:              return shade_lambert(albedo, pos, N);
+    case SHADING_FLAT:    return shade_flat(albedo, pos, N, translucency);
+    case SHADING_PHONG:   return shade_phong(albedo, pos, N, translucency);
+    default:              return shade_lambert(albedo, pos, N, translucency);
     }
 }

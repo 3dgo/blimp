@@ -50,9 +50,13 @@ Entity :: struct {
     inner_radius: f32 `section:Dimensions`,
     // How a point / spot / cylinder light fades over its range (see range).
     falloff: EntityLightFalloff `section:Camera_Light`,
+    // A box in the level that game code asks about, flat on the entity like camera_type and
+    // light_type: its box is size, centred on the entity and turned with it (scale doesn't apply).
+    // Trigger: Lua asks Entity.contains(volume, point) each update; nothing fires by itself.
+    volume_type: EntityVolumeType `section:Dimensions`,
     // The box the entity's projection or volume covers. Orthographic camera: y = view height (the
     // width comes from the target's aspect). Directional light: x, y = shadow area, z = its depth.
-    // Later: trigger, fog and other volumes.
+    // Volume: the whole box, centred on the entity. Later: fog and other volumes.
     size: vec3 `section:Dimensions`,
     // Near, far. Camera: clip planes. Point / spot / cylinder light: inner, outer distance of its
     // falloff — zero at y. Linear and Smooth are full intensity inside x. Inverse Square is
@@ -60,6 +64,12 @@ Entity :: struct {
     // and windowed to zero at y. A cylinder's distance is along its beam, from its disc.
     range: vec2 `section:Dimensions`,
     shadow: bool `section:Camera_Light`,
+    // The near plane of a point / spot light's shadow cameras (at least SHADOW_NEAR), where a
+    // cylinder's shadow box starts along its beam, and how far short of the light the bake's shadow
+    // rays stop. A point light's six near planes cut out a cube of this half-size; the bake's rays a
+    // sphere. For a light inside its fixture: past the shade, the fixture stops shadowing its own
+    // light without excluding it from any other light's shadows (no light linking).
+    shadow_cull_near: f32 `section:Camera_Light`,
     // Which light group the light belongs to (World Settings → Light Groups): 0 = static, always
     // on; 1–4 can be dimmed or switched off at runtime (Lua World.set_light_group), realtime and
     // baked light together.
@@ -80,9 +90,9 @@ Entity :: struct {
     sound_flags: EntitySoundFlags `section:Sound`,
     // What the entity collides as while playing (world_physics.odin; claude/gameplay.md → Physics),
     // cheapest first. Box: the model's bounds. Collision Mesh: the kit's <model>_col mesh, authored
-    // in the DCC (Play warns when the model has none). Render Mesh: the model's own triangles, every
-    // one of them. Static entities are static bodies; anything else follows its entity every frame
-    // (kinematic), so a gate a script moves still blocks. Needs a model.
+    // in the DCC (Play warns when the model has none). Render Mesh (the default): the model's own
+    // triangles, every one of them. Static entities are static bodies; anything else follows its
+    // entity every frame (kinematic), so a gate a script moves still blocks. Needs a model.
     collision: EntityCollision `section:Physics`,
     // Metres per second, for game code: Lua reads and writes it (a character's fall and jump speed
     // between frames, since Lua keeps no state). Nothing in the engine moves an entity by it.
@@ -117,6 +127,11 @@ EntityLightType :: enum u64 {
     Point,
     Spot,
     Cylinder,
+}
+
+EntityVolumeType :: enum u64 {
+    None,
+    Trigger,
 }
 
 EntityLightFalloff :: enum u64 {
@@ -205,15 +220,17 @@ entity_apply_defaults :: proc(e: ^Entity) {
     e.radius = 1
     e.inner_radius = 0.75
     e.falloff = .Inverse_Square
+    e.volume_type = .None
     e.size = {10, 10, 50}
     e.range = {0.1, 20}
     e.shadow = false
+    e.shadow_cull_near = 0.05
     e.light_group = 0
     e.indirect = 1
     e.halo = 1
     e.volume = 1
     e.sound_flags = {.Positional}
-    e.collision = .Collision_Mesh
+    e.collision = .Render_Mesh
     e.velocity = {0, 0, 0}
 }
 
@@ -240,9 +257,11 @@ entity_field_labels :: proc(name: string) -> (l: [Lang]string) {
     case "radius": l = {.EN = "Radius", .ZH = "半径"}
     case "inner_radius": l = {.EN = "Inner Radius", .ZH = "内半径"}
     case "falloff": l = {.EN = "Falloff", .ZH = "衰减"}
+    case "volume_type": l = {.EN = "Volume", .ZH = "体积"}
     case "size": l = {.EN = "Size", .ZH = "尺寸"}
     case "range": l = {.EN = "Range", .ZH = "范围"}
     case "shadow": l = {.EN = "Cast Shadow", .ZH = "投射阴影"}
+    case "shadow_cull_near": l = {.EN = "Shadow Cull Near", .ZH = "阴影近处剔除"}
     case "light_group": l = {.EN = "Light Group", .ZH = "光源组"}
     case "indirect": l = {.EN = "Indirect Intensity", .ZH = "间接光强度"}
     case "halo": l = {.EN = "Halo Intensity", .ZH = "光晕强度"}
@@ -273,7 +292,9 @@ entity_field_tips :: proc(name: string) -> (l: [Lang]string) {
     case "color": l = {.EN = "Stored linear; the picker shows and edits it as sRGB.", .ZH = "以线性值存储；取色器以 sRGB 显示和编辑。"}
     case "fov": l = {.EN = "Degrees.", .ZH = "单位为度。"}
     case "inner_fov": l = {.EN = "Degrees.", .ZH = "单位为度。"}
+    case "volume_type": l = {.EN = "Makes the entity a box that game code asks about (Entity.contains), like a trigger.", .ZH = "使实体成为一个供游戏代码查询的盒子（实体.包含），如触发区。"}
     case "range": l = {.EN = "Near, far (x, y).", .ZH = "近、远（x、y）。"}
+    case "shadow_cull_near": l = {.EN = "Anything closer to the light than this casts no shadow from it, like the shade around a lamp's bulb. Other lights still see it as a caster.", .ZH = "离灯光比这更近的物体不会挡住这盏灯的光，比如灯泡周围的灯罩。其他灯光仍然会被它遮挡。"}
     case "sound": l = {.EN = "A sound file (.wav .ogg .mp3 .flac under assets/). It plays in play mode, on start with Play On Start or when Lua calls Entity.play_sound, and follows the entity.", .ZH = "声音文件（assets/ 下的 .wav .ogg .mp3 .flac）。在游戏模式中播放：勾选开始时播放则在开始时播放，或由 Lua 调用 Entity.play_sound；播放时跟随实体。"}
     case "velocity": l = {.EN = "Metres per second, for game code: Lua reads and writes it. Nothing in the engine moves an entity by it.", .ZH = "米/秒，供游戏代码使用：由 Lua 读写。引擎本身不会用它移动实体。"}
     }
@@ -353,7 +374,7 @@ _uses_color := [?]Entity_Field_Use{
         holds  = proc(e: ^Entity) -> bool { return e.model != "" },
         fields = {"model"},
         cond   = "model",
-        text   = {.EN = "Tint: multiplies the model's colour, scaled by Intensity.", .ZH = "色调：乘到模型颜色上，并按强度缩放。"},
+        text   = {.EN = "Tint: multiplies the model's colour and its glow (emissive), scaled by Intensity.", .ZH = "色调：乘到模型颜色和它的自发光上，并按强度缩放。"},
     },
     {
         holds  = proc(e: ^Entity) -> bool { return u64(e.light_type) != 0 },
@@ -436,6 +457,16 @@ _uses_falloff := [?]Entity_Field_Use{
 }
 
 @(private = "file")
+_uses_volume_type := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.volume_type) != 0 },
+        fields = {"volume_type"},
+        cond   = "volume_type",
+        text   = {.EN = "A volume: the box Size covers, centred on the entity and turned with it.", .ZH = "体积：Size 覆盖的盒子，以实体为中心，随实体旋转。"},
+    },
+}
+
+@(private = "file")
 _uses_size := [?]Entity_Field_Use{
     {
         holds  = proc(e: ^Entity) -> bool { return (e.camera_type == .Orthographic) },
@@ -448,6 +479,12 @@ _uses_size := [?]Entity_Field_Use{
         fields = {"light_type"},
         cond   = "light_type=Directional",
         text   = {.EN = "x, y = shadow area, z = its depth.", .ZH = "x、y = 阴影区域，z = 阴影深度。"},
+    },
+    {
+        holds  = proc(e: ^Entity) -> bool { return u64(e.volume_type) != 0 },
+        fields = {"volume_type"},
+        cond   = "volume_type",
+        text   = {.EN = "The volume's box, centred on the entity.", .ZH = "体积的盒子，以实体为中心。"},
     },
 }
 
@@ -480,6 +517,16 @@ _uses_shadow := [?]Entity_Field_Use{
         fields = {"light_type"},
         cond   = "light_type",
         text   = {.EN = "Casts shadows, in realtime and in the probe bake.", .ZH = "投射阴影，包括实时阴影与探针烘焙。"},
+    },
+}
+
+@(private = "file")
+_uses_shadow_cull_near := [?]Entity_Field_Use{
+    {
+        holds  = proc(e: ^Entity) -> bool { return e.shadow && (e.light_type == .Point || e.light_type == .Spot || e.light_type == .Cylinder) },
+        fields = {"shadow", "light_type"},
+        cond   = "shadow&light_type=Point|Spot|Cylinder",
+        text   = {.EN = "Metres from the light (a cylinder: along its beam from the disc) within which nothing casts its shadow, in realtime and in the bake.", .ZH = "离灯光多少米以内的物体不投射它的阴影（圆柱光沿光束从圆盘算起），实时阴影与烘焙都一样。"},
     },
 }
 
@@ -569,9 +616,11 @@ entity_field_uses :: proc(name: string) -> []Entity_Field_Use {
     case "radius": return _uses_radius[:]
     case "inner_radius": return _uses_inner_radius[:]
     case "falloff": return _uses_falloff[:]
+    case "volume_type": return _uses_volume_type[:]
     case "size": return _uses_size[:]
     case "range": return _uses_range[:]
     case "shadow": return _uses_shadow[:]
+    case "shadow_cull_near": return _uses_shadow_cull_near[:]
     case "light_group": return _uses_light_group[:]
     case "indirect": return _uses_indirect[:]
     case "halo": return _uses_halo[:]
@@ -615,6 +664,11 @@ entity_flag_item_labels :: proc(enum_type: string, member: string) -> (l: [Lang]
         case "Point": l = {.EN = "Point", .ZH = "点光源"}
         case "Spot": l = {.EN = "Spot", .ZH = "聚光灯"}
         case "Cylinder": l = {.EN = "Cylinder", .ZH = "圆柱光"}
+        }
+    case "EntityVolumeType":
+        switch member {
+        case "None": l = {.EN = "None", .ZH = "无"}
+        case "Trigger": l = {.EN = "Trigger", .ZH = "触发区"}
         }
     case "EntityLightFalloff":
         switch member {
@@ -690,6 +744,11 @@ entity_member_tips :: proc(enum_type: string, member: string) -> (l: [Lang]strin
         case "Point": l = {.EN = "Shines in every direction from the entity, fading over Range.", .ZH = "从实体向所有方向发光，在范围内衰减。"}
         case "Spot": l = {.EN = "A cone along the entity's +Z: FOV wide, full inside Inner FOV, fading over Range.", .ZH = "沿实体 +Z 方向的光锥：宽度为 FOV，Inner FOV 内为全强度，在范围内衰减。"}
         case "Cylinder": l = {.EN = "A beam of parallel rays from a disc along the entity's +Z: Radius wide, full inside Inner Radius, fading over Range.", .ZH = "从圆盘沿实体 +Z 方向发出的平行光束：宽度为半径，内半径内为全强度，在范围内衰减。"}
+        }
+    case "EntityVolumeType":
+        switch member {
+        case "None": l = {.EN = "Not a volume.", .ZH = "不是体积。"}
+        case "Trigger": l = {.EN = "A box game code checks things against: a script asks Entity.contains(volume, point) each update, to switch levels, open a door, start a sound.", .ZH = "供游戏代码检测的盒子：脚本每次更新用 实体.包含(体积, 点) 来问，用来切换关卡、开门、放声音。"}
         }
     case "EntityLightFalloff":
         switch member {

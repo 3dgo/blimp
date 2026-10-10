@@ -24,7 +24,7 @@ Same structure for AI. Effort goes into perception and steering, not decision st
 In a world script the rules are an `if / elseif` chain run every update, and the animation records are the
 state Lua can't keep: "attacking" is `Anim.playing(e, "Attack")`, hysteresis is a threshold that depends on
 which clip is playing. The chosen rule samples its clip and outputs it; switching clips is the transition
-(claude/animation.md). Example: the fox in castle.luacn.
+(claude/animation.md). Example: the fox module, `assets/characters/fox.luacn`.
 
 ### Entities
 
@@ -37,11 +37,13 @@ which clip is playing. The chosen rule samples its clip and outputs it; switchin
   of Handmade Hero and Ryan Fleury's megastruct). A kind is which type is set; systems read only the
   fields they need in one linear pass.
   - The fields are `camera_type` and `light_type` (enums), plus `color`, `intensity`, `fov` (degrees),
-    `size` (vec3) and `range` (near, far), and `shadow`.
+    `size` (vec3) and `range` (near, far), and `shadow` with `shadow_cull_near`.
   - Shared fields mean what they mean for each kind (`entity_schema.ini` comments). `fov` is the camera
     fov or the spot cone. `color` × `intensity` is a light's colour, and on a model its colour multiplier
-    (`entity_tint`: the per-instance `tint` in the scene shader, and the albedo the probe bake bounces). `size` is the box the entity's projection or volume covers: ortho view height
-    in y, the directional shadow area and depth, later volumes. `range` is clip planes, or shadow near and falloff radius.
+    (`entity_tint`: the per-instance `tint` in the scene shader, which scales the material's emissive too, and the albedo
+    the probe bake bounces). `size` is the box the entity's projection or volume covers: ortho view height
+    in y, the directional shadow area and depth, a volume's whole box. `range` is clip planes, or a light's falloff (y is also its shadow's far plane); `shadow_cull_near` is
+    its shadow's near plane, so a lamp's shade doesn't shadow its own bulb (claude/rendering.md → Shadows).
   - There's no `aspect`: a camera takes it from the target it renders into. `size` never holds model
     bounds, which come from the asset.
   - Something that needs two roles (a flashlight on a camera) is two entities.
@@ -56,6 +58,11 @@ which clip is playing. The chosen rule samples its clip and outputs it; switchin
     - The icon is what you click: it wins over a mesh behind it. Marquee tests it, and F frames it.
     - Icons are drawn from the icon font, so they need no textures. A real billboard sprite is only for
       the game's look.
+- **Volumes** are a third flat kind: `volume_type` (None, Trigger), the box is `size`, centred on the entity and
+  turned with it (scale doesn't apply). The editor draws the box and a type icon. A trigger does nothing by
+  itself: Lua asks `Entity.contains(volume, point)` each update (`entity_volume_contains`). No enter/exit
+  events or overlap system: polling a handful of boxes is a query, and keeps "what happened last frame" out of
+  the engine and out of Lua.
 - Sky is a system with its own params and volumes, not an entity. Things belong in the
   entity array when they have a transform and participate in shared passes.
 
@@ -98,8 +105,47 @@ on every Play; the converter skips unchanged output, so those passes don't trigg
   The lines live in `World.debug_lines` until the world's next tick (`world_play_tick` clears them), so a
   script redraws what it wants each update and they hold while paused. Gameplay code in Odin uses
   `world_debug_line` the same way.
+- **Screen UI** is the world script's `World.ui` / `世界.界面` hook drawing through the `UI` / `界面` table
+  (`ui_lua_api.odin`): immediate-mode ImGui wrappers (position, same_line, separator, spacing, text, progress_bar,
+  begin/end_window, button, checkbox, slider).
+  - The UI layer calls the hook (`ui_view_game_ui`) for every view showing a play world, every frame, paused too.
+    It's the one hook outside the world update: `World.ui` can't be in `World.update`, which runs before ImGui's
+    frame starts and not at all while paused, where a pause menu has to work. `UI.*` outside the hook logs and does nothing.
+  - It's the one place the script API reaches up into the UI layer (CLAUDE.md's Lua rule). World code knows
+    nothing of it; nothing is stored on `World`.
+  - Lua stays stateless: ImGui keeps hover and drags by label; edited values come from Game or entity fields and
+    go back there. The engine closes windows a script left open (or errored inside), so ImGui's stack can't unbalance.
+  - Positions and sizes are fractions of the view. A window is an ImGui child of the view's window, so it stays on
+    the view, never goes behind it and isn't docked; its pivot is its (x, y), so 0.5, 0.5 centres it.
+  - Editor theme and font, drawn after the post chain (crisp, not retro). Drawing the UI into the scene target
+    with its own font is a later, separate decision. Images are left out until a UI needs one (texture slots in the ImGui heap).
+  - `World.paused()` / `World.set_paused(b)` (`world_pause_toggle`): resume happens in the ui hook.
 - `Entity.set_*` write through `entity_writable_field` like files and blimpctl do: no `hidden` fields (but
   `noserialize` game state like `velocity` is writable), string fields are interned asset keys, names stay unique. `World.add` goes through `world_add`.
+
+### Levels
+
+- **Nothing survives a level switch but the game state.** No DontDestroyOnLoad: an entity belongs to its
+  world (level arena, Box3D world, voices, generational handles), and moving one between worlds would be a
+  hidden lifetime special case. Each level places its own player (and camera); the behaviour is a shared Lua
+  module (`assets/characters/player`), so any level plays standalone in the editor.
+- **Game state** (`world_game.odin`, Lua `Game` / `游戏`): fixed key slots, each a number and a text
+  (`MAX_GAME_VALUES` 64, inline sbufs, copies by value). It lives on the play world and moves to the next one
+  on a switch: one play session's lifetime (Play starts it empty, Stop drops it). It's in Odin, not a Lua
+  table in main.lua, because Lua holds no state: hot reload reruns every script, engine hooks outlive Stop,
+  and nothing else (blimpctl, a save file) could read it. A save game is this, written to a file, later.
+- **Switching**: `World.switch_level(path)` only records `w.next_level`. `app_process_level_switches`
+  (`app_lifecycle.odin`, at frame start before `app_process_closes`) stops the old play world's runtime,
+  loads the level into a new play world in its place (`world_play_switch`) and starts its runtime like
+  Play. The old one closes through the normal close path. The edited level is never involved (claude/editor.md).
+- **Entries** are plain entities in the destination level. The leaving script writes the entry's name into
+  the game state; the arriving `start` moves the player there and clears the key, so a hot reload's rerun of
+  `start` doesn't pull the player back. Velocity and animation don't carry; a fade would hide the cut.
+- **Pickups** (`assets/scripts/coins`): numbered entities (`金币_1`…), hidden when taken, never removed (a gap would
+  end the numbered lookup). The total and one key per coin (level name in it) live in the game state; `start`
+  re-hides taken ones, since the arriving level is loaded fresh from its file.
+- The player's size is the player entity's `scale.x`: the module's distances and speeds are for scale 1 (the
+  miniature castle) and scale with it (the office player is 4).
 
 ### Sound
 
@@ -160,10 +206,11 @@ Built so far (`world_physics.odin`): **queries only**. Nothing is simulated and 
 - Per entity, `collision` (enum) picks the shape, cheapest first; it needs a model:
   - None.
   - Box: the model's bounds × scale, a box hull. The cheapest real collider.
-  - Collision_Mesh (default): the kit's `<model>_col` mesh, cooked at asset load (claude/assets.md). Authored, so as
+  - Collision_Mesh: the kit's `<model>_col` mesh, cooked at asset load (claude/assets.md). Authored, so as
     simple as the artist made it. Play logs one warning counting entities whose model has no `_col`.
-  - Render_Mesh: every triangle of the model, cooked on first use and cached until the next asset reload
-    (`asset_render_collision`). The most expensive; fine for low-poly levels.
+  - Render_Mesh (default): every triangle of the model, cooked on first use and cached until the next asset reload
+    (`asset_render_collision`). The most expensive; fine for low-poly levels, which is why it's the default: no
+    `_col` to author before things collide.
 - Play builds a Box3D world for the play world: a body per enabled entity with a shape, at its position, rotation
   and scale (shape user data = the entity handle). **Static** entities are static bodies. Anything else is
   **kinematic** and follows its entity every frame (`physics_update`, after the game systems, only when it moved),

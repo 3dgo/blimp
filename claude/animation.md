@@ -12,7 +12,7 @@ Anim.output(e, Anim.layer(loco, upper, "b_Spine01_02", wave_weight))
 - **A character is an ordinary entity** with a skinned `model`, moved by `move_character` and posed by its
   script. No character type, no component, no state machine asset. Its state is the gameplay.md rule list,
   written in Lua; the records below are the state Lua isn't allowed to hold ("attacking" is
-  `Anim.playing(e, "Attack")`). Example: the fox in `assets/scripts/castle.luacn` (docs/lua.md §12.8).
+  `Anim.playing(e, "Attack")`). Example: the fox module `assets/characters/fox.luacn`, driven by castle.luacn (docs/lua.md §12.8).
 - Poses live on the frame arena; ops are eager and return a new pose.
 - **Local space throughout**, converted to model space once in `output`. Additive and masking
   both require local space.

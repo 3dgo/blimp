@@ -31,9 +31,13 @@ public struct Attributes {
     public float2 uv0;
 }
 
-public struct Material {
+public struct Material {   // = Material in asset_system.odin (48 B)
     public float4 color;
+    public float3 emissive;      // linear light given off whatever lights it (glTF emissive × strength), added after shading
     public uint colorTex;
+    public uint emissiveTex;     // multiplies emissive; white when the material has none
+    public float translucency;   // thin translucency: the share of back-face light that comes through (light_surface)
+    public uint2 _pad;
 }
 
 public struct VSIn {
@@ -60,6 +64,7 @@ public struct VSOut {
     public float3 vertexShadowed2 : TEXCOORD8;
     public float3 vertexShadowed3 : TEXCOORD9;
     public nointerpolation uint4 vertexShadowLight : TEXCOORD10;
+    public nointerpolation float3 tint : TEXCOORD11;   // the entity's Color × Intensity alone (color has the vertex colour too): scales emissive
 }
 
 [shader("vertex")]
@@ -109,12 +114,15 @@ public VSOut vert_main(VSIn input) {
     output.position = clip;
     output.worldPos = worldPos.xyz;
     output.color = attributeBuffer[vertexIndex].color * meshInstance.tint;   // constant per draw, so per vertex is per pixel
+    output.tint = meshInstance.tint.rgb;
     output.normal = mul(localNormal, cofactor) * flip;
     output.uv0 = attributeBuffer[vertexIndex].uv0;
     output.uvAffine = output.uv0;
     output.material = meshInstance.material;
     output.shading = meshInstance.shading;
-    VertexLight vertexLight = vertex_lighting(meshInstance.shading, output.worldPos, normalize(output.normal));
+    StructuredBuffer<Material> materialBuffer = DescriptorHandle<StructuredBuffer<Material>>(gFrame.materialBufferSlot);
+    float translucency = materialBuffer[meshInstance.material].translucency;
+    VertexLight vertexLight = vertex_lighting(meshInstance.shading, output.worldPos, normalize(output.normal), translucency);
     static_assert(GOURAUD_SHADOW_LIGHTS == 4, "VSOut carries four vertexShadowed");
     output.vertexDiffuse = vertexLight.diffuse;
     output.vertexShadowed0 = vertexLight.shadowed[0];
@@ -192,7 +200,13 @@ float4 shade_pixel(VSOut input, bool cutout, bool blended) {
     vertexLight.shadowed[2] = input.vertexShadowed2;
     vertexLight.shadowed[3] = input.vertexShadowed3;
     vertexLight.shadowLight = input.vertexShadowLight;
-    float3 lit = shade(input.shading, albedo.rgb, pos, N, vertexLight);
+    float3 lit = shade(input.shading, albedo.rgb, pos, N, vertexLight, material.translucency);
+    // Emissive: light the surface gives off, on top of whatever lights it, scaled by the entity's Color × Intensity
+    // (its tint) so a script can dim a glow with its lamp. Not in the debug views that show light alone, and never
+    // baked: it lights nothing else (claude/rendering.md).
+    if (any(material.emissive > 0) && lightingView != LIGHTING_PROBES_ONLY && lightingView != LIGHTING_LIGHTING_ONLY) {
+        lit += material.emissive * getTexture2dRGBA(material.emissiveTex).Sample(samp, uv).rgb * input.tint;
+    }
     // Alpha 1 = scene coverage: the post pass leaves alpha-0 (background) pixels alone. A blended surface's
     // alpha is its blend weight instead (dx.Blend_Mode), which keeps the coverage of what it's over.
     return float4(lit, blended ? albedo.a : 1);
@@ -208,3 +222,12 @@ float4 frag_cutout(VSOut input) : SV_Target { return shade_pixel(input, true, fa
 
 [shader("fragment")]
 float4 frag_blend(VSOut input) : SV_Target { return shade_pixel(input, false, true); }
+
+// The wireframe debug view (Render_View.wireframe): every blend's triangles as edges, one flat colour, brighter
+// where a face turns toward the camera so shapes still read. Divided by the exposure so it looks the same in
+// any level.
+[shader("fragment")]
+float4 frag_wire(VSOut input) : SV_Target {
+    float facing = abs(dot(normalize(input.normal), normalize(gFrame.cameraPos - input.worldPos)));
+    return float4(float3(0.4, 0.9, 1.0) * lerp(0.6, 1.6, facing) / gFrame.exposure, 1);
+}

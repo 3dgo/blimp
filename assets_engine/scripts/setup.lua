@@ -34,5 +34,9 @@ _G.Input  = {}   -- input.odin: keys, mouse, gamepad (live in game mode)
 _G.输入   = _G.Input   --[[@as 输入]]
 _G.Anim   = {}   -- world_anim.odin: sample, blend and output poses each update (claude/animation.md)
 _G.动画   = _G.Anim   --[[@as 动画]]
+_G.Game   = {}   -- world_game.odin: what the game carries between levels (play world)
+_G.游戏   = _G.Game   --[[@as 游戏]]
+_G.UI     = {}   -- ui_lua_api.odin: the game's screen UI, inside the World.ui hook
+_G.界面   = _G.UI   --[[@as 界面]]
 
 require("stdlib_aliases")

@@ -38,6 +38,13 @@ design notes there.
   (editor logic), `ui_` (ImGui panels), `app_` (drivers: lifecycle, remote control, hot reload,
   RenderDoc), `gen_` (generated). Unprefixed files are the shared foundation (`app`, `basics`, `time`,
   `serialize`, `entity`, `input`, `loc`, `search`, `game_settings`, `log_history`).
+- **Game Odin code** goes in its own package, `game/` at the root, never in `src/`. There is none yet: the
+  game is Lua and data, and a game need becomes a general engine feature exposed to Lua where it can. When
+  the first game file is needed: the engine can't import `game` (it imports the engine), so `main` moves to
+  `game/` and calls the engine's entry (renamed from `main`) with the game's hooks, `build.odin` builds
+  `game/`, and the binding codegen also scans `game/` and writes its bindings there. Build none of this
+  before then. `Entity` stays one struct: game fields are non-`builtin` lines in `entity_schema.ini`,
+  generated into the engine's struct.
 - **Layers call downward only:** foundation → asset → world → render → lua → editor → ui → app. The
   renderer reads worlds and never writes them; world code never calls render, Lua, editor or UI.
   Sequences that touch every layer (open, play, stop, close, asset reload) are one proc each in
@@ -79,7 +86,8 @@ design notes there.
   (ImGui on top of one view), not ad hoc ImGui calls.
 - **Lua issues commands and queries state; it never holds state.** The whole script API is the
   `@(lua)` procs in `lua_api_*.odin`, thin wrappers over world procs; they act on the world whose
-  script is running (`lua_world()`).
+  script is running (`lua_world()`). The one exception is `ui_lua_api.odin`: the `UI` table wraps
+  ImGui for the world script's `World.ui` hook, which the UI layer calls (claude/gameplay.md).
 - **UI text** goes through `tr(.Key)` with EN and ZH on one row in `loc.odin` (default zh). Logs,
   asserts, keys and paths stay ASCII English. Window titles end in a `###id` suffix. Every search box
   matches through `search_matches` (`search.odin`), so Chinese is also found by pinyin. Panels share one

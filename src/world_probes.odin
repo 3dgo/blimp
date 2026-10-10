@@ -11,8 +11,8 @@ import vmem "core:mem/virtual"
 
 // Baked irradiance probes on a uniform grid (claude/rendering.md → Lighting): world data. The baker
 // (editor_bake.odin) fills a world's grid, the level's .probes sidecar stores it, render_probes.odin
-// copies it to the GPU and the scene shader samples it for indirect light. A play world reads its
-// level's grid (world_level), it never has its own.
+// copies it to the GPU and the scene shader samples it for indirect light. A play copy reads its
+// level's grid; only a play world a level switch loaded from a file has its own (world_lighting).
 //
 // The SH, octahedral and visibility maths here mirror shading.slang (the baker and the probe view use the
 // CPU copy); change both together.

@@ -1,5 +1,6 @@
 package blimp
 
+import "core:strings"
 import "common"
 
 // Structural changes — opening, playing, stopping and closing worlds and views, and reloading assets —
@@ -18,6 +19,12 @@ app_open_scene :: proc(path: string) -> ^World {
     w := world_open_scene(path)
     app_world_opened(w)
     return w
+}
+
+// Creates an empty level at `path` (scene_create) and opens it. nil if the file exists or can't be written.
+app_new_scene :: proc(path: string) -> ^World {
+    if !scene_create(path) do return nil
+    return app_open_scene(path)
 }
 
 // Opens a kit (glTF) in its own world window.
@@ -69,6 +76,27 @@ app_stop :: proc(w: ^World) {
     level := p.play_source
     world_play_discard(p)
     ui_retarget_world(p, level)
+}
+
+// Executes the level switches play worlds' scripts asked for last frame (World.switch_level): the old play world's
+// game stops, the new level loads as the play world in its place (world_play_switch: same views, same edited
+// level to Stop back to, the game state carried), and its game starts as Play's does. Its script loads, and runs
+// start, on its first frame. The old world closes in app_process_closes, called right after.
+app_process_level_switches :: proc() {
+    for i in 0..<len(worlds) {   // only the worlds there before: a switch appends the new one
+        p := worlds[i]
+        if p.play_source == nil || sbuf_str(&p.next_level) == "" do continue
+        path := strings.clone(sbuf_str(&p.next_level), context.temp_allocator)
+        sbuf_set(&p.next_level, "")
+        q := world_play_switch(p, path)
+        if q == nil do continue   // logged; p plays on
+        app_world_runtime_stop(p)
+        world_render_create(q)   // no editor_world_copy, unlike Play: the level's selection handles mean nothing in another level
+        ui_retarget_world(p, q)
+        physics_world_start(q)
+        sound_world_start(q)
+        anim_world_start(q)
+    }
 }
 
 // Everything that only runs while a world plays: its script, its voices, its physics, its animation. Idempotent: Stop

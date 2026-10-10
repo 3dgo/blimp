@@ -1,7 +1,9 @@
 package blimp
 
 import "core:fmt"
+import "core:os"
 import "core:path/filepath"
+import "core:strings"
 import im "lib:odin-imgui"
 
 // The Worlds window — the first thing you see. Top: a title, a search box, then what you can open —
@@ -15,7 +17,12 @@ import im "lib:odin-imgui"
 @(private="file")
 worlds_ui: struct {
     filter: [128]u8,   // search box text (NUL-terminated); filters scenes and kits by path
+    new_name: [64]u8,  // the New Scene popup's name box (NUL-terminated)
+    new_pressed: bool, // the Scenes header's + was clicked this frame
 }
+
+// Where New Scene puts a level: the name typed, under this folder, plus LEVEL_EXT.
+NEW_SCENE_DIR :: "assets/scenes/"
 
 WORLDS_TITLE_SCALE    :: 1.5   // the "Blimp" heading, × the UI font size
 WORLDS_OPEN_MAX_SHARE :: 0.4   // the open-worlds panel grows with its rows up to this share of the height, then scrolls
@@ -49,6 +56,8 @@ ui_draw_worlds :: proc() {
 worlds_browse :: proc(filter: string) {
     // Scenes: .level files under assets/ and assets_engine/ (rescanned on refresh).
     scenes_open := worlds_section(ICON_SCENE, tr(.Worlds_Scenes), len(ui.scene_paths), "scenes", true)
+    if worlds_ui.new_pressed do im.OpenPopup("##new_scene")
+    worlds_new_scene_popup()
     if worlds_refresh_clicked() || !ui.scene_paths_scanned {
         for p in ui.scene_paths do delete(p, app.allocators.perm)
         clear(&ui.scene_paths)
@@ -187,24 +196,83 @@ ui_world_focus :: proc(w: ^World) {
     im.SetWindowFocusStr(fmt.ctprintf("###host%d", ev.view.id))   // its world window ("###view<id>" are extra viewports)
 }
 
-// A collapsible section header: icon, title and a dimmed count. Open by default. `refresh` leaves room
-// for the refresh button worlds_refresh_clicked draws over its right end.
+// Rescans the .level files for the Scenes list on its next draw (a level was created outside the UI).
+ui_scenes_rescan :: proc() {
+    ui.scene_paths_scanned = false
+}
+
+// The New Scene popup under the Scenes header's +: a name, the path it makes, Create (or Enter). Creates
+// an empty level (app_new_scene), opens it and rescans the list. Names are ASCII paths like asset keys:
+// letters, digits, _ and -, with / for subfolders.
 @(private="file")
-worlds_section :: proc(icon: string, title: cstring, count: int, id: string, refresh := false) -> bool {
+worlds_new_scene_popup :: proc() {
+    if !im.BeginPopup("##new_scene") do return
+    defer im.EndPopup()
+
+    if im.IsWindowAppearing() do im.SetKeyboardFocusHere()
+    im.SetNextItemWidth(240 * app.display_scale)
+    entered := im.InputTextWithHint("##name", tr(.Worlds_New_Scene_Hint), cstring(&worlds_ui.new_name[0]), len(worlds_ui.new_name), {.EnterReturnsTrue})
+    name := string(cstring(&worlds_ui.new_name[0]))
+    path := fmt.tprintf("%s%s%s", NEW_SCENE_DIR, name, LEVEL_EXT)
+
+    problem: Maybe(Loc_ID)
+    switch {
+    case name == "":                    problem = nil
+    case !worlds_scene_name_valid(name): problem = .Worlds_New_Scene_Bad_Name
+    case os.exists(path):               problem = .Worlds_New_Scene_Exists
+    }
+    if id, bad := problem.?; bad do im.TextColored(UI_COLOR_ERROR, "%s", tr(id))
+    else do im.TextDisabled("%s", fmt.ctprintf("%s", name == "" ? NEW_SCENE_DIR : path))
+
+    ok := name != "" && problem == nil
+    im.BeginDisabled(!ok)
+    clicked := im.Button(tr(.Btn_Create))
+    im.EndDisabled()
+    if ok && (clicked || entered) {
+        if app_new_scene(path) != nil {
+            worlds_ui.new_name = {}
+            ui_scenes_rescan()
+            im.CloseCurrentPopup()
+        }
+    }
+}
+
+@(private="file")
+worlds_scene_name_valid :: proc(name: string) -> bool {
+    if name[0] == '/' || name[len(name) - 1] == '/' || strings.contains(name, "//") do return false
+    for c in name {
+        switch c {
+        case 'a'..='z', 'A'..='Z', '0'..='9', '_', '-', '/':
+        case: return false
+        }
+    }
+    return true
+}
+
+// A collapsible section header: icon, title and a dimmed count. Open by default. `scenes` leaves room
+// for the + (New Scene, worlds_ui.new_pressed) and refresh (worlds_refresh_clicked) buttons drawn over
+// its right end.
+@(private="file")
+worlds_section :: proc(icon: string, title: cstring, count: int, id: string, scenes := false) -> bool {
     im.Spacing()
-    if refresh do im.SetNextItemAllowOverlap()
+    if scenes do im.SetNextItemAllowOverlap()
     // Neutral grey bars (VS Code's section headers), not the selection blue Header* would give.
     im.PushStyleColorImVec4(.Header,        {0.17, 0.17, 0.17, 1})
     im.PushStyleColorImVec4(.HeaderHovered, {0.22, 0.22, 0.22, 1})
     im.PushStyleColorImVec4(.HeaderActive,  {0.25, 0.25, 0.25, 1})
     open := im.CollapsingHeader(fmt.ctprintf("%s  %s  (%d)###section_%s", icon, title, count, id), {.DefaultOpen})
     im.PopStyleColor(3)
-    if refresh {
-        label := fmt.ctprintf("%s##refresh", ICON_REFRESH)
-        w := im.CalcTextSize(label, nil, true).x + im.GetStyle().FramePadding.x * 2
+    if scenes {
+        style := im.GetStyle()
+        new_label := fmt.ctprintf("%s##new_scene", ICON_ADD)
+        refresh_label := fmt.ctprintf("%s##refresh", ICON_REFRESH)
+        w := im.CalcTextSize(new_label, nil, true).x + im.CalcTextSize(refresh_label, nil, true).x + style.FramePadding.x * 4 + style.ItemSpacing.x
         im.SameLine()
         im.SetCursorPosX(im.GetCursorPosX() + im.GetContentRegionAvail().x - w)   // flush right
-        worlds_ui_refresh_pressed = im.SmallButton(label)
+        worlds_ui.new_pressed = im.SmallButton(new_label)
+        im.SetItemTooltip("%s", tr(.Btn_New_Scene))
+        im.SameLine()
+        worlds_ui_refresh_pressed = im.SmallButton(refresh_label)
         im.SetItemTooltip("%s", tr(.Btn_Refresh))
     }
     return open

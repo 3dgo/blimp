@@ -30,6 +30,7 @@ Renderer_DX :: struct {
 
     slang_compiler: dx.Slang_Compiler,
     scene: [EntityBlend]Shader_Pipeline,   // scene.slang's vert_main with each blend's fragment entry point
+    scene_wire: Shader_Pipeline,   // the wireframe debug view (Render_View.wireframe): every blend, as edges
     sky: Shader_Pipeline,
 
     frame_fence_copy: dx.Fence,
@@ -203,6 +204,14 @@ renderer_dx_init :: proc() {
         }
         renderer_dx.scene[blend] = shader_pipeline_create("scene", "vert_main", frag, opts)
     }
+    {
+        opts := dx.PIPELINE_OPTIONS_DEFAULT
+        opts.rtv_format = VIEW_HDR_FORMAT
+        opts.fill_mode  = .WIREFRAME
+        opts.depth_bias = 1000   // toward the eye under reversed-Z: the edges of a shaded face draw over it
+        opts.slope_bias = 1
+        renderer_dx.scene_wire = shader_pipeline_create("scene", "vert_main", "frag_wire", opts)
+    }
     
     // The sky: a fullscreen triangle under everything, so it neither tests nor writes depth (the clear's 0
     // stays, and the post pass's fog sees a ray that hit nothing).
@@ -300,6 +309,7 @@ renderer_dx_draw_frame :: proc() {
         render_view_draw(v, f.slot)
         render_post_draw(v)
         debug_draw_lines(renderer_dx.cmd_gfx, v.debug_first, v.debug_count)   // display target + constants still bound: after the post chain, so line colours stay exact
+        debug_draw_lines(renderer_dx.cmd_gfx, v.debug_top_first, v.debug_top_count, on_top = true)
         gpu_timer_end(renderer_dx.cmd_gfx, t_view)
     }
     debug_draw_clear()
@@ -349,6 +359,7 @@ renderer_dx_shutdown :: proc() {   // the GPU is idle (app_shutdown waited)
     gpu_timer_shutdown()
 
     for p in renderer_dx.scene do shader_pipeline_destroy(p)
+    shader_pipeline_destroy(renderer_dx.scene_wire)
     shader_pipeline_destroy(renderer_dx.sky)
     dx.slang_compiler_destroy(&renderer_dx.slang_compiler)
 
@@ -408,9 +419,9 @@ shader_pipeline_destroy :: proc(p: Shader_Pipeline) {
 renderer_dx_pipelines :: proc() -> []^Shader_Pipeline {
     list := make([dynamic]^Shader_Pipeline, context.temp_allocator)
     for &p in renderer_dx.scene do append(&list, &p)
-    append(&list, &renderer_dx.sky)
+    append(&list, &renderer_dx.scene_wire, &renderer_dx.sky)
     append(&list, &render_post.signal, &render_post.upscale)
-    append(&list, &render_shadows.pipeline, &debug_draw.pipeline)
+    append(&list, &render_shadows.pipeline, &debug_draw.pipeline, &debug_draw.pipeline_top)
     return list[:]
 }
 

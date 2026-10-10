@@ -220,7 +220,19 @@ Baked probes for indirect, realtime direct with hard shadows.
 - **Per-mesh baked AO** (vertex colors or a small UV2 texture) multiplied against probes for
   contact darkening. Per-mesh means no atlas packing.
 - **Emissives carry the composition** — lamp glass, windows, candles. Unlit emissive
-  materials plus tight bloom, separate from the lighting solve.
+  materials plus tight bloom, separate from the lighting solve. Built: `Material.emissive` × its texture
+  (claude/assets.md) is added after shading in every model, Unlit included, × the entity's tint, so Color ×
+  Intensity dims or brightens a glow (a script can put it out with its lamp). On screen it lights nothing
+  else. The bake sees it: a ray hitting it gets the material's emission (emissive × its texture's average,
+  `material_emission`) × the entity's tint, into layer 0, so it lights the room through the probes. Layer 0
+  means a baked glow doesn't follow light groups: switch the lamp off and its shade's bounce stays. Hidden in
+  the light-only debug views. Bloom isn't built yet.
+- **Thin translucency** (`Material.translucency`, from glTF transmission, claude/assets.md): a surface also
+  takes that share of the light on its back face, diffusely (`light_surface`; Gouraud adds it per vertex). Its
+  shadow is looked up from the back side (offset along −N), or the surface would shadow itself. Because real
+  lights do it, a lamp shade's glow follows the lamp: off, flicker, light groups, with no script. The bake
+  does the same (`bake_direct`: the back's light × translucency, its shadow ray leaving from the back side),
+  in the light's own layer, so the shade's bounce follows the lamp's group too. Not an emissive, which glows whatever the lights do; that's for things that are the light.
 - **Realtime light falloff is per light** (`falloff`), over `range` = inner, outer radius;
   every mode reaches exactly zero at `range.y`. Not photoreal by default — pick per light:
   - *Inverse Square* (default): `intensity / d²`, held flat inside `range.x` (the source's
@@ -294,8 +306,8 @@ is worth more than a 100× speedup.
   layout is the GPU's).
 - **Storage**: the level's binary sidecar `foo.level` → `foo.probes` (version 3: header with the layer → light-group map, then each layer's `Probe_SH`, then one `Probe_Depth` per probe; an older version is refused, rebake),
   written by the bake and read by `scene_load`. A bake is **not an edit**: no undo step, nothing
-  unsaved. The grid has its own arena (`Probe_Grid.arena`), freed whole on rebake. A play world
-  lights with its level's grid. The GPU copy is one buffer per world, replaced after
+  unsaved. The grid has its own arena (`Probe_Grid.arena`), freed whole on rebake. A play copy
+  lights with its level's grid; a play world a level switch loaded from a file has its own (`world_lighting`). The GPU copy is one buffer per world, replaced after
   `renderer_dx_wait_idle`, so passes land at frame start (`bake_update`).
 - **Shader**: `Probe { float c[27]; float _pad; }` (112 B, a float array so structured-buffer
   layout can't differ from Odin), manual 8-tap trilinear (`probe_irradiance`) — manual so the
@@ -308,9 +320,10 @@ is worth more than a 100× speedup.
   (centre up), one block per layer seen from above, at the exposure it was baked with; hover names
   the probe, outlines its tile and draws a yellow square on it in the world's views; double-click frames it. Built on the CPU with the grid (`probe_grid_atlas`), shown through an ImGui-heap SRV.
 - Debug views, per view from the toolbar's **Lighting** menu (`Render_View.lighting`, `probes_off`,
-  `indirect_scale`, all frame constants): Lit, Probes Only (probe light on white), Indirect Only,
-  Direct Only, Lighting Only (white albedo); baked probes vs the flat ambient; an indirect multiplier;
+  `indirect_scale`, all frame constants), in menu order: Full Lighting, Direct Only, Indirect Only,
+  Lighting Only (white albedo), Probes Only (probe light on white); baked probes vs the flat ambient; an indirect multiplier;
   Show Probes (six spokes per probe coloured by `sh_eval` along ±X/±Y/±Z). blimpctl `bake` / `probe`.
+  Wireframe and collision are the toolbar's Debug view menu (claude/editor.md).
 - Build order: BVH and tracer → uniform grid with naive interpolation → **observe the
   leaking** → add the visibility test. Don't add the fix before seeing the problem. **Done up to the
   visibility test.** Next: per-mesh AO.
@@ -350,6 +363,13 @@ is worth more than a 100× speedup.
   scene pass. The scene pass `Load`s one texel per light: no sampler, no filtering.
 - Acne: slope-scaled + constant depth bias on the casters, and the receiver moved 1.5 shadow texels
   along its normal (`GPU_Light.shadow_texel`; scaled by distance for spot and point).
+- **A light inside its fixture** (a bulb in a lamp shade): the light's `shadow_cull_near` is its shadow
+  cameras' near plane (point, spot; at least `SHADOW_NEAR`), and where a cylinder's box starts along its beam.
+  Nearer geometry isn't rasterized into its map, so it casts no shadow from that light, and the shader reads
+  a receiver in front of the near plane as lit (`ndc.z > 1`). The bake's shadow rays stop that much short of
+  the light. Per light, not per caster: the shade still shadows every other light, and there's no light
+  linking. Moving the six cube cameras apart instead was rejected: the faces only tile because they share
+  the light's position as apex, and the shader picks a face by direction from it, so offsets open seams.
 - A dynamic object lit by probes over baked environment looks detached unless it casts a
   shadow onto static geometry. Grounding matters more than lighting sophistication on the
   character.
