@@ -219,8 +219,9 @@ REMOTE_HELP :: `Worlds and entities  (<world> = index, title, or scene path; <na
   select <world> <name...|none>           replace the selection; the last name is active
   duplicate <world>                       copy the selection in place and select the copies (Ctrl+D)
   settings <world> [field value...]       show or set the world's [world] settings (undoable)
-  globals <world> [key [value...]]        a playing level's game state (Lua Game.set_*): every key, the key or the
-                                          group (globals 0 player lists player.health ...), or set a key
+  globals <world> [key [value...]]        a playing level's game state (Lua Game.set_*): the clock and every key, the key
+                                          or the group (globals 0 player lists player.health ...), or set a key;
+                                          'time' is the world clock (globals 0 time 220 jumps it to 220 s)
   play <world> [stop|pause|step]        play the world's level in a copy as the game (game mode in its view, like F5);
                                           stop, toggle pause, or step a frame
   bake <world>                            bake the level's probes (blocks), save its .probes; replies with the stats
@@ -428,12 +429,22 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
         serialize_struct(out, w.settings)
 
     case "globals":
-        // A playing level's game state (world_game.odin, the Game Globals window): every key, one key or group,
-        // or set one. A set keeps a string key a string; otherwise a number if the value reads as one.
+        // A playing level's game state (world_game.odin, the Game Globals window): the clock and every key, one key
+        // or group, or set one. A set keeps a string key a string; otherwise a number if the value reads as one.
+        // `time` is the clock (World.time()), which shadows a script key of that name here.
         w := remote_world(args) or_return
         if w.play_source == nil do w = w.play_world
         if w == nil do return "not playing (play <world> first)"
         g := &w.game
+        if len(args) >= 2 && args[1] == "time" {
+            if len(args) >= 3 {
+                t, ok := strconv.parse_f64(args[2])
+                if !ok || t < 0 do return fmt.tprintf("'%s' isn't a time in seconds", args[2])
+                g.time = t
+            }
+            fmt.sbprintf(out, "time = %v\n", g.time)
+            break
+        }
         if len(args) >= 3 {
             key, text := args[1], strings.join(args[2:], " ", context.temp_allocator)
             n, is_number := strconv.parse_f64(text)
@@ -448,6 +459,7 @@ remote_command :: proc(cmd: string, args: []string, body: string, out: ^strings.
             if !stored do return "not stored (see log)"
         }
         group := len(args) >= 2 ? args[1] : ""
+        if group == "" do fmt.sbprintf(out, "time = %v\n", g.time)
         listed := 0
         for v in game_sorted(g, context.temp_allocator) {
             key := sbuf_str(&v.key)

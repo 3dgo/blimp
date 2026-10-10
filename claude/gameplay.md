@@ -129,6 +129,13 @@ on every Play; the converter skips unchanged output, so those passes don't trigg
   world (level arena, Box3D world, voices, generational handles), and moving one between worlds would be a
   hidden lifetime special case. Each level places its own player (and camera); the behaviour is a shared Lua
   module (`assets/characters/player`), so any level plays standalone in the editor.
+- **The world clock** (`Game_State.time`, Lua `World.time()`): game seconds since Play, held by pause and
+  F10 step, and carried across switches with the rest of the game state. One clock for the whole game, not
+  one per level: a level's clockwork state is computed from it (state = f(time)), never simulated, so
+  arriving at 220 s shows what 220 s says regardless of where the player was, and a hot reload's rerun is
+  harmless. Integrating with `dt` is only for what the player drives. Engine-owned session state is a typed
+  field on `Game_State` like this one; the keyed values are the scripts'. The Game Globals window and
+  blimpctl `globals <w> time <s>` set it, to test a level at a given time.
 - **Game state** (`world_game.odin`, Lua `Game` / `游戏`): fixed key slots, each a number or a string, whichever
   was set last (`MAX_GAME_VALUES` 64, inline sbufs, copies by value). A dotted key (`玩家.生命值`) is a path, but
   storage stays flat: only listings group it (`game_sorted` orders paths so a group's keys are adjacent). The Game

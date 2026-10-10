@@ -125,7 +125,7 @@ world_step :: proc(w: ^World) {
 }
 
 // Once per frame, before any game system runs: decides whether each play world advances this frame
-// (`ticks`), consuming a pending step, and advances its game clock (`time`) by `dt` if so. Game systems
+// (`ticks`), consuming a pending step, and advances its game clock (`game.time`) by `dt` if so. Game systems
 // check `w.ticks`, never `paused` directly, so a step moves all of them by the same one frame.
 world_play_tick :: proc(dt: f64) {
     for w in worlds {
@@ -133,7 +133,7 @@ world_play_tick :: proc(dt: f64) {
         w.step  = false
         w.dt = w.ticks ? f32(dt) : 0
         if w.ticks {
-            w.time += dt
+            w.game.time += dt
             clear(&w.debug_lines)   // last tick's game lines; this tick's systems draw them again
         }
     }

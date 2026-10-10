@@ -59,12 +59,14 @@ world_get_lua :: proc(name: string) -> Entity_Handle {
     return {}
 }
 
-// Game seconds since Play; stops while paused. Animate from this, not from a clock kept in Lua.
-// zh: 运行以来的游戏秒数，暂停时停止。动画按它来算，不要在 Lua 里自己计时。
+// Game seconds since Play; stops while paused and runs on across level switches. Animate from this, not from a
+// clock kept in Lua: a level's state is what this time says, wherever the player was before.
+// zh: 运行以来的游戏秒数，暂停时停止，切换关卡时继续走。动画按它来算，不要在 Lua 里自己计时：关卡的状态就是这个时间
+//     对应的状态，不管玩家之前在哪里。
 @(lua=time, table=World, lua_zh="时间")
 world_time_lua :: proc() -> f64 {
     w := lua_world() or_else nil
-    return w != nil ? w.time : 0
+    return w != nil ? w.game.time : 0
 }
 
 // The first collision along the ray from `origin`, up to `distance` (direction needn't be unit length): whether it

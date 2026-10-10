@@ -28,7 +28,6 @@ World :: struct {
     paused:      bool,   // play worlds: the game doesn't advance
     step:        bool,   // paused play worlds: advance one frame on the next tick (world_step)
     ticks:       bool,   // this frame: the game advances (world_play_tick) — what game systems check
-    time:        f64,    // play worlds: game seconds since Play, advanced only on frames that tick (pause and F10 step respected)
     dt:          f32,    // this frame's game seconds: the frame's dt when it ticks, else 0
     anim:        ^Anim_World,   // play worlds: animation state (world_anim.odin) — runtime, nil when not playing
     game:        Game_State,    // play worlds: what the game carries between levels (world_game.odin) — runtime, never saved

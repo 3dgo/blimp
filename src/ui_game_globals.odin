@@ -19,30 +19,35 @@ ui_draw_game_globals :: proc() {
         if w != nil do w = world_level(w).play_world
         if w == nil {
             im.TextWrapped("%s", tr(.Game_Globals_Not_Playing))
-        } else if w.game.count == 0 {
-            im.TextWrapped("%s", tr(.Game_Globals_Empty))
         } else {
             ui_game_globals_tree(&w.game)
-            im.TextDisabled("%s", fmt.ctprintf(string(tr(.Game_Globals_Count)), w.game.count, MAX_GAME_VALUES))
+            if w.game.count == 0 do im.TextWrapped("%s", tr(.Game_Globals_Empty))
+            else do im.TextDisabled("%s", fmt.ctprintf(string(tr(.Game_Globals_Count)), w.game.count, MAX_GAME_VALUES))
         }
     }
     im.End()
 }
 
-// Every key in path order, each group opened (ui_param_group_begin) where its first key comes. A row's label is
-// the last part of its key; hovering it shows the whole key, as Lua and blimpctl name it.
+// The clock, then every key in path order, each group opened (ui_param_group_begin) where its first key comes. A
+// row's label is the last part of its key; hovering it shows the whole key, as Lua and blimpctl name it.
 @(private="file")
 ui_game_globals_tree :: proc(g: ^Game_State) {
     values := game_sorted(g, context.temp_allocator)
 
     // One input column for every card, from the widest row label.
-    widest: f32
+    widest := im.CalcTextSize(tr(.Game_Globals_Time)).x
     for v in values {
         key := sbuf_str(&v.key)
         widest = max(widest, im.CalcTextSize(fmt.ctprintf("%s", key[strings.last_index_byte(key, '.') + 1:])).x)
     }
     opts := DEFAULT_PARAM_UI_OPTIONS
     opts.label_w = ui_label_column_at(widest)
+
+    // Setting it jumps the world: every level computes its state from it on the next tick.
+    ui_param_label(string(tr(.Game_Globals_Time)), opts)
+    ui_item_tooltip("World.time()")
+    im.InputDouble("##game_time", &g.time, 0, 0, "%.2f")
+    if g.time < 0 do g.time = 0
 
     // The groups the current key is inside; each is open only if it and every group around it are.
     Group :: struct { name: string, open: bool }

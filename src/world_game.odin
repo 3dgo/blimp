@@ -4,10 +4,14 @@ import "base:runtime"
 import "core:log"
 import "core:slice"
 
-// What the game carries from one level to the next: health, keys, which door the player came through.
+// What the game carries from one level to the next: the clock, health, keys, which door the player came through.
 // Lua holds no state (CLAUDE.md), and a level's entities go when the level does, so a script that wants
 // something to outlive the level writes it here (Game.set_number / Game.set_string) and the next level's
 // start reads it back. The Game Globals window and blimpctl's `globals` show and edit it while the game runs.
+//
+// The clock (`time`) is the one world clock: it runs on across switches, so a level computes what the clock
+// says (state = f(World.time())) rather than simulating what happened while the player was elsewhere.
+// Engine-owned session state is a typed field here like it; script state is the keyed values.
 //
 // It lives on the play world and moves to the next level's play world on a level switch
 // (world_play_switch), so its lifetime is one play session: Play starts it empty, Stop throws it away.
@@ -30,6 +34,7 @@ Game_Value :: struct {
 }
 
 Game_State :: struct {
+    time:   f64,   // game seconds since Play, across level switches; advanced only on frames that tick (world_play_tick)
     values: [MAX_GAME_VALUES]Game_Value,
     count:  int,
 }

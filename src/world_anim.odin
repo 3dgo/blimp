@@ -306,7 +306,7 @@ anim_output :: proc(w: ^World, h: Entity_Handle, pose: Anim_Pose, blend_time: f3
     // Stepped motion (World_Settings.anim_fps): the shown pose only moves on whole steps. Time, events and the
     // transitions above stay continuous.
     step := i64(-2)
-    if w.settings.anim_fps > 0 do step = i64(math.floor(w.time * f64(w.settings.anim_fps)))
+    if w.settings.anim_fps > 0 do step = i64(math.floor(w.game.time * f64(w.settings.anim_fps)))
     if step != c.step || step == -2 {
         c.step = step
         skel := &asset_system.skeletons[c.skeleton]

@@ -144,7 +144,8 @@
     there is none: they log an error (once a frame) and do nothing.
   - World scripts run only in play worlds (next bullet). `start` runs on the first frame of play, or when
     the script path changes. A script error logs once and stops that world's script.
-  - `World.time()` / `世界.时间()` is the play world's game clock (`World.time`, seconds since Play), advanced by
+  - `World.time()` / `世界.时间()` is the play session's world clock (`Game_State.time`, seconds since Play, carried
+    across level switches; claude/gameplay.md), advanced by
     `world_play_tick` only on frames that tick, so pause and F10 step hold it. Scripts animate from it rather
     than keep a clock of their own.
 - **Play mode runs a copy** (`world_play.odin`). Play builds a play world from the level (same entities
@@ -184,8 +185,8 @@
 - **Game Settings** (`game_settings.odin`, `game.ini` at the project root, Show menu): settings that belong to
   the game, not one world. `start_level` opens at startup (and plays in release). Not undoable; written after each edit.
 - **Game Globals** (`ui_game_globals.odin`, Show menu): the game state (claude/gameplay.md) of the active world's
-  play world, as a tree of its dotted keys (groups are `ui_param_group_begin` rows, like a nested struct), each
-  value editable in place. Not undoable: runtime state, gone at Stop. blimpctl `globals` is the same, as text.
+  play world: the clock row first, then a tree of its dotted keys (groups are `ui_param_group_begin` rows, like a
+  nested struct), each value editable in place. Not undoable: runtime state, gone at Stop. blimpctl `globals` is the same, as text.
 - **Editor function keys** (`ui_handle_shortcuts`): F2 renames the active entity in place in the entity list,
   F3 toggles the stats overlay (FPS, GPU time per pass, on the foreground draw list), F11 maximizes the
   hovered viewport over the main window (its host keeps running underneath, so docking survives; view windows
